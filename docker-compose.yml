@@ -45,6 +45,10 @@ services:
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
+      # The .NET engine, reached by service name on the container port. The
+      # 11410 mapping below is for reaching it from the host, not from here.
+      GRPC_HOST: grpc-host
+      GRPC_PORT: "5251"
       # Binds 0.0.0.0 inside the container; the port mapping below is what
       # actually keeps this off the LAN, same guarantee as running natively.
       PHX_BIND: "all"
@@ -60,6 +64,26 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      grpc-host:
+        condition: service_started
+    networks: [gc]
+
+  # The .NET engine from GIF-38's spike, serving GlobalCombat.Core over gRPC.
+  # Plaintext HTTP/2 (h2c, no TLS) -- fine inside the compose network for a
+  # spike, not a production posture.
+  #
+  #   docker compose up -d grpc-host
+  #   docker compose run --rm web mix game_engine.resolve_turn
+  grpc-host:
+    build:
+      context: .
+      dockerfile: GlobalCombat.GrpcHost/Dockerfile
+    ports:
+      # 11410 is this project's reserved slot for the engine host in the fleet
+      # port registry (see the header). The spike used a bare 5251, which would
+      # collide with any other project doing the same; the container port stays
+      # 5251 because that is what the host listens on.
+      - "127.0.0.1:11410:5251"
     networks: [gc]
 
 volumes:
