@@ -1,0 +1,22 @@
+# Spike for GIF-38: GlobalCombat.Core served over gRPC, called from an Elixir client.
+#
+#   docker compose up -d grpc-host
+#   docker compose run --rm liveview mix game_engine.resolve_turn
+#
+# grpc-host is plaintext HTTP/2 (h2c, no TLS) on :5251 - fine for this spike, not for production.
+services:
+  grpc-host:
+    build:
+      context: .
+      dockerfile: GlobalCombat.GrpcHost/Dockerfile
+    ports:
+      - "5251:5251"
+
+  liveview:
+    build:
+      context: ./liveview
+    environment:
+      GRPC_HOST: grpc-host
+      GRPC_PORT: "5251"
+    depends_on:
+      - grpc-host
