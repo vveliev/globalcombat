@@ -1,0 +1,86 @@
+name: liveview CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "liveview/**"
+      - ".github/workflows/liveview-ci.yml"
+  pull_request:
+    paths:
+      - "liveview/**"
+      - ".github/workflows/liveview-ci.yml"
+
+defaults:
+  run:
+    working-directory: liveview
+
+env:
+  MIX_ENV: test
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: versions
+        run: |
+          echo "otp=$(grep '^erlang ' .tool-versions | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+          echo "elixir=$(grep '^elixir ' .tool-versions | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+
+      - name: Restore deps and _build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            liveview/deps
+            liveview/_build
+          key: ${{ runner.os }}-mix-${{ steps.versions.outputs.otp }}-${{ steps.versions.outputs.elixir }}-${{ hashFiles('liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ steps.versions.outputs.otp }}-${{ steps.versions.outputs.elixir }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h 127.0.0.1 -u root --silent && break
+            sleep 2
+          done
+
+      - name: Create and migrate test database
+        run: |
+          mix ecto.create --quiet
+          mix ecto.migrate --quiet
+
+      - name: Run tests with coverage
+        run: mix coveralls.json
+
+      - name: Build assets
+        run: mix assets.build
