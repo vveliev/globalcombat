@@ -1,0 +1,89 @@
+syntax = "proto3";
+package GlobalCombat.GrpcHost;
+import "protobuf-net/bcl.proto"; // schema for protobuf-net's handling of core .NET types
+
+message Area {
+   int32 Number = 1;
+   Player Owner = 2;
+   int32 Armies = 3;
+   int32 AssignedArmies = 4;
+   Command Command = 5;
+   Area Target = 6;
+   int32 Amount = 7;
+}
+enum Command {
+   None = 0;
+   Transfer = 1;
+   Attack = 2;
+}
+message Game {
+   int32 Id = 1;
+   string GameName = 2;
+   MapName MapName = 3;
+   int32 TurnLength = 4;
+   int32 MaxPlayers = 5;
+   bool IsFogged = 6;
+   bool IsNonRandom = 7;
+   bool ReverseAttackOrder = 8;
+   int32 MinimumArmies = 9;
+   int32 Turn = 10;
+   .bcl.DateTime PreviousTurnTime = 11;
+   .bcl.DateTime LastTurnTime = 12;
+   bool Started = 13;
+   .bcl.DateTime StartTime = 14;
+   bool Ended = 15;
+   .bcl.DateTime EndTime = 16;
+   repeated Area Areas = 17;
+   repeated Player Players = 18;
+   bool IsPrivate = 20;
+   bool IsTraining = 21;
+   repeated Invite Invites = 22;
+   int32 TourneyId = 23;
+}
+message Invite {
+   int32 AccountId = 1;
+   string Name = 2;
+}
+enum MapName {
+   Original = 0;
+   Elements = 1;
+}
+message NewGameRequest {
+   MapName MapName = 1;
+   repeated string PlayerNames = 2;
+}
+message NewGameResponse {
+   Game Game = 1;
+}
+message Order {
+   int32 SourceAreaNumber = 1;
+   int32 TargetAreaNumber = 2;
+   int32 Amount = 3;
+   Command Command = 4;
+}
+message Player {
+   int32 AccountId = 1;
+   int32 Number = 2;
+   string Name = 3;
+   bool Done = 4;
+   int32 Areas = 6;
+   int32 Armies = 7;
+   int32 UnassignedArmies = 8;
+   int32 Place = 9;
+   double Score = 10;
+   double ScoreExpected = 11;
+   int32 Rating = 12;
+   int32 RatingChange = 13;
+}
+message ResolveTurnRequest {
+   Game Game = 1;
+   repeated Order Orders = 2;
+}
+message ResolveTurnResponse {
+   Game Game = 1;
+   string TurnSummary = 2;
+}
+service GameEngine {
+   rpc NewGame (NewGameRequest) returns (NewGameResponse);
+   rpc ResolveTurn (ResolveTurnRequest) returns (ResolveTurnResponse);
+}
