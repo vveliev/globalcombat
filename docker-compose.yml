@@ -1,0 +1,48 @@
+# Local development stack for the Global Combat port.
+#
+# Ports and the network subnet are allocated in the fleet registry
+# (vveliev/skynet, registry/PORTS.md) so nothing here collides with another
+# project running at the same time. This project owns block 11400:
+#
+#   11400  Phoenix / LiveView web        (+00)
+#   11402  Phoenix test endpoint         (+02)
+#   11410  .NET gRPC engine host         (+10)  — reserved, added by GIF-38
+#   11434  MySQL                         (+34)
+#
+# The subnet follows 10.<block/100>.0.0/24, which keeps us out of Docker's
+# default 172.16/12 pool entirely — that pool hands out /16s in allocation
+# order, so an unpinned project can silently take a range we depend on.
+
+services:
+  mysql:
+    image: mysql:8.0
+    # MySQL 8's default caching_sha2_password closes the socket on MyXQL's
+    # empty-password root connection. The failure surfaces as an unexplained
+    # "socket closed", not an auth error, so it is pinned here deliberately.
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      # Bound to loopback: this is a dev database, not a service on the LAN.
+      - "127.0.0.1:11434:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # The two schemas checked into the repo. DDL only — there is no data
+      # dump, so this gives you empty tables of the right shape, nothing more.
+      - ./globalcombat MySql Schema.sql:/docker-entrypoint-initdb.d/10-globalcombat.sql:ro
+      - ./gc_games MySql Schema.sql:/docker-entrypoint-initdb.d/20-gc_games.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [gc]
+
+volumes:
+  mysql-data:
+
+networks:
+  gc:
+    ipam:
+      config:
+        - subnet: 10.114.0.0/24
