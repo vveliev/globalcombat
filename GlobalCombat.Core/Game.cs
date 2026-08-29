@@ -148,7 +148,25 @@ namespace GlobalCombat.Core
             }
         }
 
-        public static Random Random = new Random();
+        /// <summary>
+        /// This game's source of randomness — combat rolls and the opening
+        /// territory deal. Per-game and settable rather than a static field, so
+        /// a turn can be replayed: an unseeded `static Random` cannot be made to
+        /// repeat, which makes comparing two engines on the same input
+        /// impossible. Not serialized; a caller that needs reproducibility sets
+        /// it (see <see cref="SeedRandom"/>).
+        /// </summary>
+        [ProtoIgnore]
+        public Random Rng { get; set; } = new Random();
+
+        /// <summary>
+        /// Replaces <see cref="Rng"/> with a seeded generator, so the same seed
+        /// and the same orders resolve to the same turn.
+        /// </summary>
+        public void SeedRandom(int seed)
+        {
+            Rng = new Random(seed);
+        }
 
         public Game()
         {
@@ -284,7 +302,7 @@ namespace GlobalCombat.Core
                 // divy up remainder
                 while (areaCount > 0)
                 {
-                    Player player = Players[Random.Next(CurrentPlayers)];
+                    Player player = Players[Rng.Next(CurrentPlayers)];
                     if (player.Areas == initalAreaCount)
                     {
                         player.Areas++;
@@ -300,7 +318,7 @@ namespace GlobalCombat.Core
                     Player owner;
                     do
                     {
-                        owner = Players[Random.Next(CurrentPlayers)];
+                        owner = Players[Rng.Next(CurrentPlayers)];
                     } while (tempPlayerAreas[owner.Number - 1] == 0);
                     tempPlayerAreas[owner.Number - 1]--;
                     area.Owner = owner;
@@ -397,7 +415,7 @@ namespace GlobalCombat.Core
 
                             int areasOwned = 0;
                             foreach (Area area in Areas)
-                                if (area.Owner == player && area.AreaInfo.Region == region.Number)
+                                if (area.IsOwnedBy(player) && area.AreaInfo.Region == region.Number)
                                     areasOwned++;
 
                             if (areasOwned == region.NumAreas)
@@ -414,7 +432,7 @@ namespace GlobalCombat.Core
                         int totalArmies = 0;
                         foreach (Area area in Areas)
                         {
-                            if (area.Owner == player)
+                            if (area.IsOwnedBy(player))
                                 totalArmies += area.Armies;
                         }
 
@@ -477,7 +495,7 @@ namespace GlobalCombat.Core
             Area defender = attacker.Target;
 
             // check ownership of dest
-            if (attacker.Owner == defender.Owner)
+            if (attacker.SameOwnerAs(defender))
                 return String.Empty; // already won area
 
             // check amount
@@ -496,7 +514,7 @@ namespace GlobalCombat.Core
             {
                 for (int count = 1; count <= attacker.Amount; count++) // for each attacking army
                 {
-                    if (Random.Next(1, 10 + 1) <= 6) // 60% chance of hit
+                    if (Rng.Next(1, 10 + 1) <= 6) // 60% chance of hit
                         attackDamage++;
                 }
             }
@@ -511,7 +529,7 @@ namespace GlobalCombat.Core
             {
                 for (int count = 1; count <= defender.Armies; count++) // for each army
                 {
-                    if (Random.Next(1, 4 + 1) <= 3) // 75% chance of hit
+                    if (Rng.Next(1, 4 + 1) <= 3) // 75% chance of hit
                         defendDamage++;
                 }
             }
@@ -661,7 +679,7 @@ namespace GlobalCombat.Core
                 for (innerCount = 1; innerCount < region.NumAreas; innerCount++) // for each area in this region
                 {
                     areaCount++;
-                    if (Areas[areaCount].Owner != owner) // if owned by different player
+                    if (!Areas[areaCount].IsOwnedBy(owner)) // if owned by different player
                     {
                         areaCount += region.NumAreas - innerCount;
                         break;
@@ -698,7 +716,7 @@ namespace GlobalCombat.Core
 
         public int SetTransfer(Area source, Area target, int amount)
         {
-            if (source.Owner == target.Owner && source.AreaInfo.LinksTo(target.AreaInfo))
+            if (source.SameOwnerAs(target) && source.AreaInfo.LinksTo(target.AreaInfo))
             {
                 if (amount > source.TotalArmies - 1)
                     amount = source.TotalArmies - 1;
@@ -717,7 +735,7 @@ namespace GlobalCombat.Core
 
         public int SetAttack(Area source, Area target, int amount)
         {
-            if (source.Owner != target.Owner && source.AreaInfo.LinksTo(target.AreaInfo))
+            if (!source.SameOwnerAs(target) && source.AreaInfo.LinksTo(target.AreaInfo))
             {
                 if (amount > source.TotalArmies - 1)
                     amount = source.TotalArmies - 1;
