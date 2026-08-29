@@ -80,7 +80,10 @@ defmodule GlobalCombat.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:grpc, "~> 1.0"},
+      {:protobuf, "~> 0.17"},
+      {:gun, "~> 2.4"}
     ]
   end
 
