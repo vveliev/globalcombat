@@ -174,11 +174,13 @@ defmodule GlobalCombat.GrpcHost.GameEngine.Service do
 
   use GRPC.Service, name: "GlobalCombat.GrpcHost.GameEngine", protoc_gen_elixir_version: "0.17.0"
 
-  rpc :NewGame, GlobalCombat.GrpcHost.NewGameRequest, GlobalCombat.GrpcHost.NewGameResponse
+  rpc(:NewGame, GlobalCombat.GrpcHost.NewGameRequest, GlobalCombat.GrpcHost.NewGameResponse)
 
-  rpc :ResolveTurn,
-      GlobalCombat.GrpcHost.ResolveTurnRequest,
-      GlobalCombat.GrpcHost.ResolveTurnResponse
+  rpc(
+    :ResolveTurn,
+    GlobalCombat.GrpcHost.ResolveTurnRequest,
+    GlobalCombat.GrpcHost.ResolveTurnResponse
+  )
 end
 
 defmodule GlobalCombat.GrpcHost.GameEngine.Stub do

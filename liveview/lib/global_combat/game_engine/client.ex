@@ -91,7 +91,9 @@ defmodule GlobalCombat.GameEngine.Client do
   # server's RunTurn actually produced, to make a silent correctness bug (if
   # AsReference identity did not survive the wire) visible instead of assumed.
   defp print_correctness_check(%Game{} = game) do
-    IO.puts("\nCorrectness check (RunTurn's Armies total vs. independently recomputed by Area.Owner.Number):")
+    IO.puts(
+      "\nCorrectness check (RunTurn's Armies total vs. independently recomputed by Area.Owner.Number):"
+    )
 
     for p <- f(game, :Players) do
       expected =
@@ -105,7 +107,10 @@ defmodule GlobalCombat.GameEngine.Client do
 
       actual = f(p, :Armies)
       verdict = if actual == expected, do: "MATCH", else: "*** MISMATCH ***"
-      IO.puts("  Player ##{f(p, :Number)} #{f(p, :Name)}: RunTurn Armies=#{actual}, recomputed=#{expected} #{verdict}")
+
+      IO.puts(
+        "  Player ##{f(p, :Number)} #{f(p, :Name)}: RunTurn Armies=#{actual}, recomputed=#{expected} #{verdict}"
+      )
     end
   end
 
