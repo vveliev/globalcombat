@@ -1,10 +1,13 @@
 import Config
 
 # Configure your database
+# Ports follow the fleet's block scheme (skynet registry/PORTS.md): this
+# project owns block 11400 — 11400 web, 11410 gRPC engine, 11434 mysql.
 config :global_combat, GlobalCombat.Repo,
-  username: "root",
-  password: "",
-  hostname: "localhost",
+  username: System.get_env("MYSQL_USER", "root"),
+  password: System.get_env("MYSQL_PASSWORD", ""),
+  hostname: System.get_env("MYSQL_HOST", "localhost"),
+  port: String.to_integer(System.get_env("MYSQL_PORT", "11434")),
   database: "global_combat_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
@@ -18,8 +21,13 @@ config :global_combat, GlobalCombat.Repo,
 # to bundle .js and .css sources.
 config :global_combat, GlobalCombatWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
-  # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}],
+  # Inside the dev container this must be 0.0.0.0 for the published port to
+  # reach the process at all; the docker-compose port mapping is itself
+  # bound to 127.0.0.1, so the no-LAN-access guarantee still holds.
+  http: [
+    ip: if(System.get_env("PHX_BIND") == "all", do: {0, 0, 0, 0}, else: {127, 0, 0, 1}),
+    port: 11400
+  ],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

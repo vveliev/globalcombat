@@ -35,6 +35,29 @@ namespace GlobalCombat.Core
             get { return Armies + AssignedArmies; }
         }
 
+		/// <summary>
+        /// True when this area belongs to <paramref name="player"/>, compared by
+        /// player number rather than by object reference. See <see cref="Player.SameAs"/>.
+        /// </summary>
+        public bool IsOwnedBy(Player player)
+        {
+            if (Owner == null || player == null)
+                return Owner == null && player == null;
+            return Owner.SameAs(player);
+        }
+
+        /// <summary>
+        /// True when this area and <paramref name="other"/> share an owner. Two
+        /// unowned areas count as sharing one, matching the reference comparison
+        /// this replaced.
+        /// </summary>
+        public bool SameOwnerAs(Area other)
+        {
+            if (other == null)
+                return false;
+            return IsOwnedBy(other.Owner);
+        }
+
 		public Area()
 		{
             Armies = 5;

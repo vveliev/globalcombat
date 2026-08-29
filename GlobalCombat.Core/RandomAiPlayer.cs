@@ -66,7 +66,9 @@ namespace GlobalCombat.Core
 			RandomTransfer();
 		}
 
-		Random random = new Random();
+		// The game's own RNG, so an AI opponent replays under a seeded game
+		// instead of introducing a second, unseedable source of randomness.
+		Random random { get { return game.Rng; } }
 
 		void RandomAssignment()
 		{
