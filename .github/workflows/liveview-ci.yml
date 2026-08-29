@@ -28,7 +28,8 @@ jobs:
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
         ports:
-          - 3306:3306
+          # host 11434 matches config/test.exs's MYSQL_PORT default (fleet's 11400 port block)
+          - 11434:3306
         options: >-
           --health-cmd="mysqladmin ping -h localhost"
           --health-interval=10s
@@ -70,7 +71,7 @@ jobs:
       - name: Wait for MySQL
         run: |
           for i in $(seq 1 30); do
-            mysqladmin ping -h 127.0.0.1 -u root --silent && break
+            mysqladmin ping -h 127.0.0.1 -P 11434 -u root --silent && break
             sleep 2
           done
 
