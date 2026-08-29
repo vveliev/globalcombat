@@ -40,6 +40,20 @@ namespace GlobalCombat.Core
         [ProtoMember(13)]
         public int RatingChange { get; set; }
 
+        /// <summary>
+        /// Identity comparison by <see cref="Number"/> rather than by reference.
+        /// Two objects describing the same player are the same player, however
+        /// they arrived — deserialized, cloned, or handed across a process
+        /// boundary. Reference equality only held while the whole object graph
+        /// lived in one heap.
+        /// </summary>
+        public bool SameAs(Player other)
+        {
+            if (ReferenceEquals(this, other))
+                return true;
+            return other != null && other.Number == Number;
+        }
+
         public bool IsEliminated
         {
             get { return Place > 0; }
