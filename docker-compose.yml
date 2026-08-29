@@ -1,0 +1,41 @@
+# Local docker stack for the .NET Web app (see README.md / GlobalCombat.sln),
+# so it can be built and browsed without a local dotnet/MySQL install.
+#
+# The connection strings below are dev-only credentials for the empty-password
+# MySQL container defined here, not real secrets -- Web/Secrets.json (which
+# Program.cs also loads, optionally) stays gitignored for anyone who wants to
+# point this at a real database instead.
+#
+#   docker compose up -d --build
+#   open http://127.0.0.1:15000/
+services:
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./globalcombat MySql Schema.sql:/docker-entrypoint-initdb.d/10-globalcombat.sql:ro
+      - ./gc_games MySql Schema.sql:/docker-entrypoint-initdb.d/20-gc_games.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      "DatabaseConnection Global Combat": "server=mysql;port=3306;database=globalcombat;uid=root;password=;sslmode=none;AllowPublicKeyRetrieval=True;"
+      "DatabaseConnection Global Combat Games": "server=mysql;port=3306;database=gc_games;uid=root;password=;sslmode=none;AllowPublicKeyRetrieval=True;"
+    ports:
+      - "127.0.0.1:15000:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
