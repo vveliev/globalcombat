@@ -11,6 +11,10 @@ on:
       - "liveview/**"
       - ".github/workflows/liveview-ci.yml"
 
+# No secrets are used and nothing is published; checkout is all this needs.
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: liveview
