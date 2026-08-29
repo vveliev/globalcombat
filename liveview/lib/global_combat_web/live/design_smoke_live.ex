@@ -43,7 +43,8 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
           <p class="text-text-muted">
             Colours, spacing and type come from the vendored token layer. Switching
             <code>data-theme</code>
-            on <code>&lt;html&gt;</code> recolours this page with no markup change.
+            on <code>&lt;html&gt;</code>
+            recolours this page with no markup change.
           </p>
           <:footer>
             <Button.button intent="primary">End turn</Button.button>
