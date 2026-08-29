@@ -20,9 +20,6 @@ if System.get_env("PHX_SERVER") do
   config :global_combat, GlobalCombatWeb.Endpoint, server: true
 end
 
-config :global_combat, GlobalCombatWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
-
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :global_combat, GlobalCombatWeb.Endpoint,
@@ -30,12 +27,12 @@ if config_env() == :dev do
       web_console_logger: true,
       patterns: [
         # Static assets, except user uploads
-        ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$"E,
+        ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$",
         # Gettext translations
-        ~r"priv/gettext/.*\.po$"E,
+        ~r"priv/gettext/.*\.po$",
         # Router, Controllers, LiveViews and LiveComponents
-        ~r"lib/global_combat_web/router\.ex$"E,
-        ~r"lib/global_combat_web/(controllers|live|components)/.*\.(ex|heex)$"E
+        ~r"lib/global_combat_web/router\.ex$",
+        ~r"lib/global_combat_web/(controllers|live|components)/.*\.(ex|heex)$"
       ]
     ]
 end
@@ -81,7 +78,8 @@ if config_env() == :prod do
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
       # See the documentation on https://bandit.hexdocs.pm/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      ip: {0, 0, 0, 0, 0, 0, 0, 0},
+      port: String.to_integer(System.get_env("PORT") || "4000")
     ],
     secret_key_base: secret_key_base
 

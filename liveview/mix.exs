@@ -11,7 +11,8 @@ defmodule GlobalCombat.MixProject do
       aliases: aliases(),
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      listeners: [Phoenix.CodeReloader],
+      test_coverage: [tool: ExCoveralls]
     ]
   end
 
@@ -27,7 +28,13 @@ defmodule GlobalCombat.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [
+        precommit: :test,
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.html": :test,
+        "coveralls.json": :test
+      ]
     ]
   end
 
@@ -72,7 +79,11 @@ defmodule GlobalCombat.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:excoveralls, "~> 0.18", only: :test},
+      {:grpc, "~> 1.0"},
+      {:protobuf, "~> 0.17"},
+      {:gun, "~> 2.4"}
     ]
   end
 
