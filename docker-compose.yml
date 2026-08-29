@@ -38,6 +38,30 @@ services:
       retries: 20
     networks: [gc]
 
+  web:
+    build:
+      context: ./liveview
+      dockerfile: Dockerfile.dev
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      # Binds 0.0.0.0 inside the container; the port mapping below is what
+      # actually keeps this off the LAN, same guarantee as running natively.
+      PHX_BIND: "all"
+    ports:
+      - "127.0.0.1:11400:11400"
+    volumes:
+      - ./liveview:/app
+      # Anonymous volumes: deps/_build are compiled for Linux inside the
+      # container and must not be shadowed by macOS-host artifacts from the
+      # bind mount above.
+      - /app/deps
+      - /app/_build
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [gc]
+
 volumes:
   mysql-data:
 
