@@ -80,9 +80,11 @@ defmodule GlobalCombat.Games.PlayerView do
     visible? = not is_fogged or owns_it? or owns_adjacent?(engine, area, viewer_number)
 
     {tech_name, x, y, width, height} = MapInfo.render_info(engine.map_name, area.number)
+    {_number, name, _region, links} = MapInfo.area(engine.map_name, area.number)
 
     %{
       number: area.number,
+      name: name,
       tech_name: tech_name,
       x: x,
       y: y,
@@ -90,7 +92,12 @@ defmodule GlobalCombat.Games.PlayerView do
       height: height,
       visible: visible?,
       owner_number: if(visible?, do: area.owner_number, else: nil),
-      armies: area_armies(area, visible?, owns_it?)
+      armies: area_armies(area, visible?, owns_it?),
+      # Map topology (which territories border which) is never secret — it's the
+      # same static layout every viewer already sees rendered on the board
+      # regardless of fog, unlike `owner_number`/`armies` above. Safe to expose in
+      # full for GIF-81's accessible board table.
+      adjacent: links
     }
   end
 

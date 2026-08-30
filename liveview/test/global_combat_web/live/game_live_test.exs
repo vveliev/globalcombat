@@ -129,6 +129,22 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
   end
 
+  test "each territory's img carries alt text naming the area and its owner (WCAG 1.1.1, GIF-79)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+
+    %{alice_view: alice_view, alice: alice, game_id: game_id} =
+      start_two_player_game(conn1, conn2)
+
+    {:playing, alice_state} = Games.player_view(game_id, alice.id)
+    owned_by_alice = Enum.find(alice_state.areas, &(&1.owner_number == 1))
+    assert owned_by_alice
+
+    html = render(alice_view)
+
+    assert html =~ "alt=\"#{owned_by_alice.tech_name}, owned by Alice\""
+  end
+
   test "the status strip and chat log are wired as polite live regions (WCAG 4.1.3, GIF-80)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
@@ -166,6 +182,31 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # would never match the real render output.
     assert html =~ ~r/id="game-board"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.FocusManager"/
     assert html =~ ~r/aria-label="Game status"[^>]*tabindex="-1"[^>]*data-focus-landmark/
+  end
+
+  test "the board has a visually-hidden table equivalent listing territory, owner, armies, and adjacency (WCAG 1.3.1, GIF-81)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+
+    %{alice_view: alice_view, alice: alice, game_id: game_id} =
+      start_two_player_game(conn1, conn2)
+
+    {:playing, alice_state} = Games.player_view(game_id, alice.id)
+    owned_by_alice = Enum.find(alice_state.areas, &(&1.owner_number == 1))
+    assert owned_by_alice
+
+    html = render(alice_view)
+
+    # LiveView tags a function component's root element with `phx-r=""` (visible
+    # throughout this render, e.g. the outer `<div phx-r="" id="game-board" ...>`)
+    # ahead of its own attributes — `board_table/1`'s `<table>` is one such root,
+    # so the attribute order isn't `<table class="sr-only">` verbatim.
+    assert html =~ ~r/<table[^>]*class="sr-only"[^>]*>/
+    assert html =~ ~r/<th scope="row">#{owned_by_alice.name}<\/th>\s*<td>Alice<\/td>/
+
+    [first_neighbor | _] = owned_by_alice.adjacent
+    neighbor_name = Enum.find(alice_state.areas, &(&1.number == first_neighbor)).name
+    assert html =~ neighbor_name
   end
 
   test "army-count overlays carry a dark outline independent of the owner_color tile (WCAG 1.4.3, GIF-83)",
@@ -241,6 +282,22 @@ defmodule GlobalCombatWeb.GameLiveTest do
       true_sprite = "#{hidden_area.tech_name}#{rem(true_owner, 9)}.gif"
       refute html =~ true_sprite
       refute render(alice_view) =~ true_sprite
+
+      # Same leak, via the alt text (GIF-79): a hidden area's owner name must never
+      # reach a non-owner's markup either, even though the plain-text owner name is a
+      # much easier thing to accidentally source from unfiltered state than the sprite
+      # filename is.
+      true_owner_name = Enum.find(alice_state.players, &(&1.number == true_owner)).name
+      refute html =~ "alt=\"#{hidden_area.tech_name}, owned by #{true_owner_name}\""
+      assert html =~ "alt=\"#{hidden_area.tech_name}, owned by unclaimed\""
+
+      # Same leak, via the sr-only board table (GIF-81): the hidden area's row must
+      # report "unclaimed" too, never the true owner's name or army count — the
+      # table is built from the same fog-filtered PlayerView data as the sprite/alt
+      # text, so it must fail the exact same way if someone ever wires it to raw
+      # engine state instead.
+      refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>#{true_owner_name}<\/td>/
+      assert html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>unclaimed<\/td>/
     end
   end
 end

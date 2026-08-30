@@ -260,8 +260,14 @@ defmodule GlobalCombatWeb.GameLive do
   defp board(assigns) do
     ~H"""
     <div class="relative" style="width: 800px; height: 480px;">
-      <.area :for={area <- @view.areas} area={area} map_name={@view.map_name} />
+      <.area
+        :for={area <- @view.areas}
+        area={area}
+        map_name={@view.map_name}
+        players={@view.players}
+      />
     </div>
+    <.board_table areas={@view.areas} players={@view.players} />
     <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
@@ -274,6 +280,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   attr :area, :map, required: true
   attr :map_name, :atom, required: true
+  attr :players, :list, required: true
 
   defp area(assigns) do
     ~H"""
@@ -282,6 +289,7 @@ defmodule GlobalCombatWeb.GameLive do
         src={"/maps/#{@map_name}/#{@area.tech_name}#{owner_color(@area.owner_number)}.gif"}
         width={@area.width}
         height={@area.height}
+        alt={"#{@area.tech_name}, owned by #{owner_name(@players, @area.owner_number) || "unclaimed"}"}
       />
       <span
         :if={@area.armies}
@@ -301,6 +309,65 @@ defmodule GlobalCombatWeb.GameLive do
   # additions (GIF-83).
   defp owner_color(nil), do: 0
   defp owner_color(number), do: rem(number, 9)
+
+  defp owner_name(_players, nil), do: nil
+
+  defp owner_name(players, owner_number) do
+    case Enum.find(players, &(&1.number == owner_number)) do
+      %{name: name} -> name
+      nil -> nil
+    end
+  end
+
+  # Non-visual equivalent of the pixel-positioned board (GIF-81, WCAG 1.3.1): the
+  # `<div>` above conveys territory/owner/army-count/adjacency purely through
+  # image position and color, which is meaningless to a screen reader in DOM
+  # order. This `sr-only` table (same pattern as BarChart/LineChart's fallback
+  # table) carries the identical, already fog-of-war-filtered `@view.areas` data
+  # as an ordered, navigable structure instead — visually hidden, never
+  # `aria-hidden`, so assistive tech can still read it.
+  #
+  # Owner/army text reuses `owner_name/2`'s "unclaimed" fallback verbatim rather
+  # than distinguishing "hidden by fog" from "actually unclaimed": area/1's alt
+  # text makes that same choice (GIF-79), and diverging here would hand a screen
+  # reader user more information than a sighted player looking at the same
+  # neutral-colored sprite ever gets — a fairness leak, not just an inconsistency.
+  # Adjacency, unlike owner/armies, is static map topology every viewer already
+  # sees rendered on the board regardless of fog, so it's listed in full.
+  attr :areas, :list, required: true
+  attr :players, :list, required: true
+
+  defp board_table(assigns) do
+    assigns = assign(assigns, :area_names, Map.new(assigns.areas, &{&1.number, &1.name}))
+
+    ~H"""
+    <table class="sr-only">
+      <caption>Board state: territory, owner, armies, and adjacency</caption>
+      <thead>
+        <tr>
+          <th scope="col">Territory</th>
+          <th scope="col">Owner</th>
+          <th scope="col">Armies</th>
+          <th scope="col">Adjacent to</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={area <- @areas}>
+          <th scope="row">{area.name}</th>
+          <td>{owner_name(@players, area.owner_number) || "unclaimed"}</td>
+          <td>{area.armies || "—"}</td>
+          <td>{adjacent_names(area, @area_names)}</td>
+        </tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  defp adjacent_names(area, area_names) do
+    area.adjacent
+    |> Enum.map(&Map.fetch!(area_names, &1))
+    |> Enum.join(", ")
+  end
 
   attr :players, :list, required: true
   attr :viewer_number, :any, required: true
