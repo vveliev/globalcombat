@@ -1,0 +1,99 @@
+<.site_chrome current_account={@current_account}>
+  <div class="flex flex-col gap-[var(--space-6)]">
+    <Card.card>
+      <:header>
+        <span class="inline-flex items-center gap-[var(--space-2)]">
+          {@account.name}
+          <StatusPill.status_pill tone={if @online?, do: "active", else: "blocked"}>
+            {if @online?, do: "Online", else: "Offline"}
+          </StatusPill.status_pill>
+        </span>
+      </:header>
+
+      <p :if={@error_message} class="text-danger mb-[var(--space-3)]">{@error_message}</p>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-[var(--space-4)]">
+        <StatCard.stat_card eyebrow="Signed Up" value={timespan_ago(@account.signed_up)} />
+        <StatCard.stat_card eyebrow="Last Login" value={timespan_ago(@account.last_on)} />
+        <StatCard.stat_card eyebrow="Wins" value={to_string(@account.wins)} />
+        <StatCard.stat_card eyebrow="Total Games" value={to_string(@account.games)} />
+        <StatCard.stat_card eyebrow="Rating" value={to_string(@account.rating)} />
+        <StatCard.stat_card eyebrow="Rank" value={rank(@account)} />
+        <StatCard.stat_card
+          :if={@viewer && @viewer.admin}
+          eyebrow="Email Address"
+          value={@account.email}
+        />
+      </div>
+    </Card.card>
+
+    <Card.card>
+      <:header>{if @all_games?, do: "All Games", else: "Current Games"}</:header>
+      <p :if={@games == []} class="text-text-muted">No games.</p>
+      <.game_row :for={game <- @games} game={game} />
+      <p :if={!@all_games?} class="mt-[var(--space-3)]">
+        <a href={~p"/Player-Info-#{@account.id}?AllGames=1"} class="hover:underline">View All</a>
+      </p>
+    </Card.card>
+
+    <Card.card :if={@current_account}>
+      <:header>
+        <%= if @account.id != @current_account.id do %>
+          Contact {@account.name}
+        <% else %>
+          Your Account
+        <% end %>
+      </:header>
+
+      <%= if @account.id != @current_account.id do %>
+        <form method="post" action={~p"/Send-Message"} class="flex flex-col gap-[var(--space-3)]">
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+          <input type="hidden" name="AccountId" value={@account.id} />
+          <textarea name="Message" rows="6" class="w-full input"></textarea>
+          <Button.button type="submit">Send</Button.button>
+        </form>
+      <% else %>
+        <a href={~p"/account/settings"} class="hover:underline">Modify your Account info.</a>
+      <% end %>
+
+      <p :if={@viewer && @viewer.admin} class="mt-[var(--space-3)]">
+        <a
+          href={~p"/Player-Info-#{@account.id}?KillAccount=1"}
+          onclick="return confirm('Are you sure you wish to disable this Player?')"
+          class="text-danger hover:underline"
+        >
+          Permanently Disable Player
+        </a>
+      </p>
+    </Card.card>
+
+    <Card.card :if={@logins}>
+      <:header>Login History</:header>
+      <Table.table>
+        <Table.thead>
+          <Table.tr>
+            <Table.th>Time</Table.th>
+            <Table.th>IP Address</Table.th>
+            <Table.th>Browser</Table.th>
+          </Table.tr>
+        </Table.thead>
+        <Table.tbody>
+          <Table.tr :for={login <- @logins}>
+            <Table.td>{timespan_ago(login.logged_in_at)}</Table.td>
+            <Table.td>
+              <a href={~p"/IpAddresses?IPAddress=#{login.ipaddress}"} class="hover:underline">
+                {login.ipaddress}
+              </a>
+            </Table.td>
+            <Table.td>{login.browser}</Table.td>
+          </Table.tr>
+        </Table.tbody>
+      </Table.table>
+    </Card.card>
+    <p :if={is_nil(@logins) && @viewer && @viewer.admin}>
+      <a href={~p"/Player-Info-#{@account.id}?ShowLoginHistory=1"} class="hover:underline">
+        Login History
+      </a>
+    </p>
+  </div>
+</.site_chrome>

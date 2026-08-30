@@ -107,4 +107,25 @@ defmodule GlobalCombat.Accounts.Account do
       password -> put_change(changeset, :password, Password.hash_password(password))
     end
   end
+
+  @doc """
+  Ports `Account.Rank` (`Web/Models/Account.cs:36-52`) — the rank ladder is purely a function
+  of `rating`, so this must match the C# thresholds exactly for Stats/PlayerInfo/Index to show
+  the same rank as the legacy site for any given rating (GIF-33's "Elo figures must match"
+  bar). Boundary values are cross-checked against an independently-written reimplementation in
+  `GlobalCombat.AccountTest` (differential-harness style, per GIF-28's precedent), not just
+  eyeballed against this function.
+  """
+  def rank(%__MODULE__{rating: rating}), do: rank(rating)
+
+  def rank(rating) when is_integer(rating) do
+    cond do
+      rating < 8400 -> "Private"
+      rating < 8750 -> "Private First Class"
+      rating < 9100 -> "Corporal"
+      rating < 9500 -> "Sergeant"
+      rating < 10000 -> "Major"
+      true -> "General"
+    end
+  end
 end

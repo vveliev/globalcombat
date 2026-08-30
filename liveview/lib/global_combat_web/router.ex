@@ -11,6 +11,7 @@ defmodule GlobalCombatWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug :fetch_current_account
+    plug :fetch_open_chat_windows
   end
 
   pipeline :api do
@@ -20,7 +21,7 @@ defmodule GlobalCombatWeb.Router do
   scope "/", GlobalCombatWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    get "/", HomeController, :index
 
     # Bootstrap smoke page for the vendored design-boutique layer. Remove when
     # the real board LiveView lands (GIF-30).
@@ -37,21 +38,33 @@ defmodule GlobalCombatWeb.Router do
     get "/Create-Game", GameController, :create
     get "/Create-Tournament", TourneyController, :create
     get "/Game-Manual", HomeController, :game_manual
-    get "/Send-Message", HomeController, :send_message
+    post "/Send-Message", HomeController, :send_message
 
     # The `{action}` shortcut set, constrained in Program.cs to exactly:
     # Messages|Stats|IpAddresses|GameManual|OptOut|PlayerInfo|Chat|
     # LoadChatMessages|CloseChatWindow|SendMessage
+    #
+    # None of these carried an `[HttpPost]` attribute in the .NET app (only the
+    # OptOut *confirmation* did), so ASP.NET's conventional routing accepted
+    # either verb — but `Web/wwwroot/Global.js` only ever issues `$.post(...)`
+    # for Chat/LoadChatMessages/CloseChatWindow/SendMessage (GIF-33 research).
+    # Both verbs are kept here for the shortcut paths (URL-shape fidelity,
+    # GIF-31); the `/Home/...` paths the JS actually calls are POST-only below.
     get "/Messages", HomeController, :messages
     get "/Stats", HomeController, :stats
     get "/IpAddresses", HomeController, :ip_addresses
     get "/GameManual", HomeController, :game_manual
     get "/OptOut", HomeController, :opt_out
+    post "/OptOut", HomeController, :opt_out
     get "/PlayerInfo", HomeController, :player_info
     get "/Chat", HomeController, :chat
+    post "/Chat", HomeController, :chat
     get "/LoadChatMessages", HomeController, :load_chat_messages
+    post "/LoadChatMessages", HomeController, :load_chat_messages
     get "/CloseChatWindow", HomeController, :close_chat_window
+    post "/CloseChatWindow", HomeController, :close_chat_window
     get "/SendMessage", HomeController, :send_message
+    post "/SendMessage", HomeController, :send_message
 
     # The two concrete instantiations of the ASP.NET default route
     # (`{controller=Home}/{action=Index}/{id?}`) that already have a home in
@@ -61,8 +74,16 @@ defmodule GlobalCombatWeb.Router do
     # and not how Phoenix routing works. Other legacy default-route
     # destinations (e.g. /Account/LogOn) get explicit routes like the ones
     # above once their controllers are ported.
-    get "/Home", PageController, :home
-    get "/Home/Index", PageController, :home
+    get "/Home", HomeController, :index
+    get "/Home/Index", HomeController, :index
+
+    # `/Home/{Action}` — the exact paths `Web/wwwroot/Global.js`'s jQuery AJAX
+    # calls POST to (`$.post("/Home/Chat", ...)` etc., GIF-33 research), distinct
+    # from the bare `/{Action}` shortcut set above.
+    post "/Home/Chat", HomeController, :chat
+    post "/Home/LoadChatMessages", HomeController, :load_chat_messages
+    post "/Home/CloseChatWindow", HomeController, :close_chat_window
+    post "/Home/SendMessage", HomeController, :send_message
 
     get "/Game-:id/:action", GameController, :show
     get "/Game-:id", GameController, :show

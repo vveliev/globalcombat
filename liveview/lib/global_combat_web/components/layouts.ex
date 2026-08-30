@@ -122,6 +122,24 @@ defmodule GlobalCombatWeb.Layouts do
   end
 
   @doc """
+  Serializes `assigns[:open_chat_windows]` (`["3|Bob", ...]`, see
+  `GlobalCombatWeb.UserAuth.fetch_open_chat_windows/2`) to the JSON `assets/js/chat.js` reads
+  from `root.html.heex`'s `<meta name="open-chat-windows">` to replay open chat windows on
+  every page load — the fetch/Channel equivalent of legacy `_Layout.cshtml`'s
+  `$.popupChat(...)` replay loop.
+  """
+  def open_chat_windows_json(nil), do: "[]"
+
+  def open_chat_windows_json(windows) do
+    windows
+    |> Enum.map(fn window ->
+      [id, name] = String.split(window, "|", parts: 2)
+      %{id: String.to_integer(id), name: name}
+    end)
+    |> Jason.encode!()
+  end
+
+  @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.
 
   See <head> in root.html.heex which applies the theme before page load.

@@ -1,0 +1,123 @@
+<.site_chrome current_account={@current_account}>
+  <div class="flex flex-col gap-[var(--space-6)]">
+    <%= if @current_account do %>
+      <Card.card>
+        <:header>
+          <a href={~p"/Player-Info-#{@current_account.id}"} class="hover:underline">
+            {@current_account.name}
+          </a>
+        </:header>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-[var(--space-4)]">
+          <StatCard.stat_card
+            eyebrow="Signed Up"
+            value={timespan_ago(@current_account.signed_up)}
+          />
+          <StatCard.stat_card eyebrow="Wins" value={to_string(@current_account.wins)} />
+          <StatCard.stat_card eyebrow="Total Games" value={to_string(@current_account.games)} />
+          <StatCard.stat_card eyebrow="Rating" value={to_string(@current_account.rating)} />
+          <StatCard.stat_card eyebrow="Rank" value={rank(@current_account)} />
+        </div>
+      </Card.card>
+
+      <Card.card>
+        <:header>Your Current Games</:header>
+        <p :if={@player_games == []} class="text-text-muted">None... Afraid?</p>
+        <.game_row :for={game <- @player_games} game={game} />
+        <p class="mt-[var(--space-3)]">
+          <a href={~p"/Player-Info-#{@current_account.id}?AllGames=1"} class="hover:underline">
+            View All Your Games
+          </a>
+        </p>
+      </Card.card>
+
+      <Card.card :if={@invited_games != []}>
+        <:header>Games Invites</:header>
+        <.game_row :for={game <- @invited_games} game={game} />
+      </Card.card>
+
+      <Card.card :if={@recent_tourneys != []}>
+        <:header>Your Recent Tourneys</:header>
+        <div :for={t <- @recent_tourneys} class="py-[var(--space-1)]">
+          <a href={~p"/Tournament-#{t.id}"} class="hover:underline">{t.name}</a> — {t.status}
+        </div>
+      </Card.card>
+    <% else %>
+      <Card.card>
+        <:header>GLOBAL COMBAT</:header>
+        <div class="flex flex-col gap-[var(--space-3)]">
+          <p>
+            ...is a Risk like web based game in which turns are taken simultaneously. Since it
+            is played over the internet, actions are hidden from your enemies until the turn
+            runs.
+          </p>
+          <p>
+            <strong>GLOBAL COMBAT</strong>
+            has a WW1 era motif and contains an Elo based rating system which rewards players
+            depending on their place in the game, not just whether they win or lose.
+          </p>
+          <p>
+            This leads to the political side to <strong>GLOBAL COMBAT</strong>, in which you
+            must sometimes forge alliances in order to survive, fighting not just to win, but
+            for your honor...
+          </p>
+          <p>
+            <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
+            or <a href={~p"/account/register"} class="hover:underline">create an account</a>
+            to get started.
+          </p>
+          <a href={~p"/images/screenshot_full.png"}>
+            <img
+              src={~p"/images/screenshot_thumb.png"}
+              alt="Global Combat gameplay screenshot"
+              width="350"
+              height="266"
+              class="rounded-[var(--radius-md)] border border-border"
+            />
+          </a>
+        </div>
+      </Card.card>
+    <% end %>
+
+    <Card.card>
+      <:header>Ready to Get Played?</:header>
+      <div class="grid lg:grid-cols-2 gap-[var(--space-6)]">
+        <div>
+          <h3 class="font-semibold mb-[var(--space-2)]">Games to Join</h3>
+          <p :if={@new_games == []} class="text-text-muted">
+            No awaiting games... shouldn't you start one?
+          </p>
+          <.game_row :for={game <- @new_games} game={game} />
+          <p class="mt-[var(--space-3)]">
+            <a href={~p"/Create-Game"} class="hover:underline">Create a New Game</a>
+          </p>
+        </div>
+        <div>
+          <h3 class="font-semibold mb-[var(--space-2)]">Tournaments to Join</h3>
+          <p :if={@open_tourneys == []} class="text-text-muted">No open tournaments.</p>
+          <div :for={t <- @open_tourneys} class="py-[var(--space-1)]">
+            <a href={~p"/Tournament-#{t.id}"} class="hover:underline">{t.name}</a> — {t.status}
+          </div>
+          <p :if={@current_account && @current_account.admin} class="mt-[var(--space-3)]">
+            <a href={~p"/Create-Tournament"} class="hover:underline">Create a Tournament</a>
+          </p>
+        </div>
+      </div>
+    </Card.card>
+
+    <Card.card>
+      <:header>Players Currently Online: {length(@online_accounts)}</:header>
+      <div :for={a <- @online_accounts} class="py-[var(--space-1)]">
+        <.account_link
+          id={a.id}
+          name={a.name}
+          online?={true}
+          viewer_id={@current_account && @current_account.id}
+        />
+      </div>
+    </Card.card>
+
+    <p :if={@current_account && @current_account.admin}>
+      <a href={~p"/Stats"} class="hover:underline">Site Stats</a>
+    </p>
+  </div>
+</.site_chrome>

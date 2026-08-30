@@ -6,10 +6,12 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   router, with the same capitalised-hyphenated shape and the same ids
   (`game.AUTO_INCREMENT` is at 684316 — ids are never renumbered).
 
-  This is deliberately a router-shape test, not a feature test: the
-  controllers are thin stubs (GIF-31 only covers the router) that echo back
-  the id/action they resolved, which is enough to prove the route matched
-  the right controller with the right params.
+  Originally a pure router-shape test against thin GIF-31 stubs; GIF-33 replaced
+  `HomeController`'s stubs with real behavior, so the `Home`-routed assertions below now
+  check the real (unauthenticated) response instead of an echoed placeholder string —
+  still proving the same thing this file always proved: the URL shape and id survive.
+  `GameController`/`TourneyController` are still stubs (out of GIF-33's scope), so those
+  assertions are untouched.
   """
 
   use GlobalCombatWeb.ConnCase
@@ -39,9 +41,20 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "Player-Info-{id:int}" do
-    test "GET /Player-Info-:id resolves the id", %{conn: conn} do
+    import GlobalCombat.AccountsFixtures
+
+    test "GET /Player-Info-:id resolves the id and renders that account (GIF-33)", %{
+      conn: conn
+    } do
+      account = account_fixture()
+      conn = get(conn, "/Player-Info-#{account.id}")
+      assert html_response(conn, 200) =~ account.name
+    end
+
+    test "GET /Player-Info-:id 404s when no such account exists, same as the legacy action's null-row guard",
+         %{conn: conn} do
       conn = get(conn, "/Player-Info-684316")
-      assert text_response(conn, 200) == "PlayerInfo 684316"
+      assert conn.status == 404
     end
 
     test "GET /Player-Info-:id 404s on a non-integer id", %{conn: conn} do
@@ -81,66 +94,78 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "Game-Manual / Send-Message (hyphenated literals, not swallowed by Game-:id)" do
-    test "GET /Game-Manual", %{conn: conn} do
+    test "GET /Game-Manual renders the real manual (GIF-33)", %{conn: conn} do
       conn = get(conn, "/Game-Manual")
-      assert text_response(conn, 200) == "GameManual"
+      assert html_response(conn, 200) =~ "Game Manual"
     end
 
-    test "GET /Send-Message", %{conn: conn} do
-      conn = get(conn, "/Send-Message")
-      assert text_response(conn, 200) == "SendMessage"
+    test "POST /Send-Message redirects anonymous visitors home (GIF-33: requires login)", %{
+      conn: conn
+    } do
+      conn = post(conn, "/Send-Message", %{"AccountId" => "1", "Message" => "hi"})
+      assert redirected_to(conn) == "/"
     end
   end
 
-  describe "{action} shortcut set constrained to Messages|Stats|IpAddresses|GameManual|OptOut|PlayerInfo|Chat|LoadChatMessages|CloseChatWindow|SendMessage" do
-    test "GET /Messages", %{conn: conn} do
+  describe "{action} shortcut set: Messages|Stats|IpAddresses|GameManual|OptOut|PlayerInfo|Chat|LoadChatMessages|CloseChatWindow|SendMessage" do
+    test "GET /Messages redirects anonymous visitors home (GIF-33: requires login)", %{
+      conn: conn
+    } do
       conn = get(conn, "/Messages")
-      assert text_response(conn, 200) == "Messages"
+      assert redirected_to(conn) == "/"
     end
 
-    test "GET /Stats", %{conn: conn} do
+    test "GET /Stats redirects non-admins home (GIF-33: admin-only)", %{conn: conn} do
       conn = get(conn, "/Stats")
-      assert text_response(conn, 200) == "Stats"
+      assert redirected_to(conn) == "/"
     end
 
-    test "GET /IpAddresses (moderation tooling, load-bearing)", %{conn: conn} do
+    test "GET /IpAddresses redirects non-admins home (GIF-33 admin-hardening)",
+         %{conn: conn} do
       conn = get(conn, "/IpAddresses")
-      assert text_response(conn, 200) == "IpAddresses"
+      assert redirected_to(conn) == "/"
     end
 
     test "GET /GameManual", %{conn: conn} do
       conn = get(conn, "/GameManual")
-      assert text_response(conn, 200) == "GameManual"
+      assert html_response(conn, 200) =~ "Game Manual"
     end
 
-    test "GET /OptOut (email-preference endpoint, load-bearing)", %{conn: conn} do
+    test "GET /OptOut with no Account/Key shows the missing-key error (GIF-33)", %{conn: conn} do
       conn = get(conn, "/OptOut")
-      assert text_response(conn, 200) == "OptOut"
+      assert html_response(conn, 200) =~ "Missing account or opt out key."
     end
 
-    test "GET /PlayerInfo (no id — optional on the shortcut route)", %{conn: conn} do
+    test "GET /PlayerInfo with no id 404s (GIF-33: same `id <= 0` guard as the legacy action)",
+         %{conn: conn} do
       conn = get(conn, "/PlayerInfo")
-      assert text_response(conn, 200) == "PlayerInfo"
+      assert conn.status == 404
     end
 
-    test "GET /Chat", %{conn: conn} do
+    test "GET /Chat redirects anonymous visitors home (GIF-33: requires login)", %{conn: conn} do
       conn = get(conn, "/Chat")
-      assert text_response(conn, 200) == "Chat"
+      assert redirected_to(conn) == "/"
     end
 
-    test "GET /LoadChatMessages", %{conn: conn} do
+    test "GET /LoadChatMessages redirects anonymous visitors home (GIF-33: requires login)", %{
+      conn: conn
+    } do
       conn = get(conn, "/LoadChatMessages")
-      assert text_response(conn, 200) == "LoadChatMessages"
+      assert redirected_to(conn) == "/"
     end
 
-    test "GET /CloseChatWindow", %{conn: conn} do
+    test "GET /CloseChatWindow redirects anonymous visitors home (GIF-33: requires login)", %{
+      conn: conn
+    } do
       conn = get(conn, "/CloseChatWindow")
-      assert text_response(conn, 200) == "CloseChatWindow"
+      assert redirected_to(conn) == "/"
     end
 
-    test "GET /SendMessage", %{conn: conn} do
+    test "GET /SendMessage redirects anonymous visitors home (GIF-33: requires login)", %{
+      conn: conn
+    } do
       conn = get(conn, "/SendMessage")
-      assert text_response(conn, 200) == "SendMessage"
+      assert redirected_to(conn) == "/"
     end
   end
 
@@ -155,9 +180,11 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert text_response(conn, 200) == "Game 684316 action=Index"
     end
 
-    test "GET /player-info-684316 resolves like /Player-Info-684316", %{conn: conn} do
+    test "GET /player-info-684316 resolves like /Player-Info-684316 (404: no such account)", %{
+      conn: conn
+    } do
       conn = get(conn, "/player-info-684316")
-      assert text_response(conn, 200) == "PlayerInfo 684316"
+      assert conn.status == 404
     end
 
     test "GET /tournament-42 resolves like /Tournament-42", %{conn: conn} do
@@ -167,17 +194,17 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
 
     test "GET /game-manual resolves like /Game-Manual", %{conn: conn} do
       conn = get(conn, "/game-manual")
-      assert text_response(conn, 200) == "GameManual"
+      assert html_response(conn, 200) =~ "Game Manual"
     end
 
-    test "GET /playerinfo resolves like /PlayerInfo", %{conn: conn} do
+    test "GET /playerinfo resolves like /PlayerInfo (404: no id)", %{conn: conn} do
       conn = get(conn, "/playerinfo")
-      assert text_response(conn, 200) == "PlayerInfo"
+      assert conn.status == 404
     end
 
     test "GET /OPTOUT resolves like /OptOut", %{conn: conn} do
       conn = get(conn, "/OPTOUT")
-      assert text_response(conn, 200) == "OptOut"
+      assert html_response(conn, 200) =~ "Missing account or opt out key."
     end
 
     test "a bare segment shorter than a legacy prefix 404s cleanly instead of crashing the casing normalizer",
@@ -189,27 +216,37 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "default {controller=Home}/{action=Index}/{id?} — only its existing concrete instantiations" do
-    test "GET /Home renders the same home page as /", %{conn: conn} do
+    test "GET /Home renders the same home page as / (GIF-33: real content, not the Phoenix placeholder)",
+         %{conn: conn} do
       conn = get(conn, "/Home")
-      assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+      assert html_response(conn, 200) =~ "GLOBAL COMBAT"
     end
 
     test "GET /Home/Index renders the same home page as /", %{conn: conn} do
       conn = get(conn, "/Home/Index")
-      assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+      assert html_response(conn, 200) =~ "GLOBAL COMBAT"
     end
 
     test "GET /home/index (both segments lowercase) still resolves", %{conn: conn} do
       conn = get(conn, "/home/index")
-      assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+      assert html_response(conn, 200) =~ "GLOBAL COMBAT"
     end
   end
 
   describe "id sourced from a query string on the id-less /PlayerInfo shortcut" do
-    test "GET /PlayerInfo?id=684316 resolves the id, same as the model-bound int on the old HomeController.PlayerInfo(int id)",
+    import GlobalCombat.AccountsFixtures
+
+    test "GET /PlayerInfo?id=<id> resolves the id, same as the model-bound int on the old HomeController.PlayerInfo(int id)",
+         %{conn: conn} do
+      account = account_fixture()
+      conn = get(conn, "/PlayerInfo?id=#{account.id}")
+      assert html_response(conn, 200) =~ account.name
+    end
+
+    test "GET /PlayerInfo?id=684316 404s when no such account exists, same as the legacy action's null-row guard",
          %{conn: conn} do
       conn = get(conn, "/PlayerInfo?id=684316")
-      assert text_response(conn, 200) == "PlayerInfo 684316"
+      assert conn.status == 404
     end
 
     test "GET /PlayerInfo?id=abc 404s on a non-integer id, same as /Player-Info-abc", %{

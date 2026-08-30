@@ -46,7 +46,46 @@ defmodule GlobalCombatWeb.UserAuth do
         account_id -> Accounts.get_account(account_id)
       end
 
-    assign(conn, :current_account, account)
+    conn
+    |> assign(:current_account, account)
+    |> assign(:chat_token, account && chat_token(conn, account.id))
+  end
+
+  @doc "Signs the token `GlobalCombatWeb.UserSocket` verifies to authorize a chat channel join."
+  def chat_token(conn_or_endpoint, account_id),
+    do: Phoenix.Token.sign(conn_or_endpoint, "chat socket", account_id)
+
+  @open_chat_windows_key :open_chat_windows
+
+  @doc """
+  Plug: assigns `:open_chat_windows` (a list of `"{account_id}|{account_name}"` strings) from
+  the session, `[]` if unset. Ports `BaseController.OpenChatWindows`
+  (`Web/Controllers/BaseController.cs:90`) — legacy `_Layout.cshtml` replayed this list into
+  every page (`$.popupChat(...)` per entry) so chat windows survive full page reloads; this
+  port's root layout does the same (see `root.html.heex`).
+  """
+  def fetch_open_chat_windows(conn, _opts) do
+    assign(conn, :open_chat_windows, get_session(conn, @open_chat_windows_key) || [])
+  end
+
+  @doc "Ports `BaseController.AddChatWindow` — adds `\"{id}|{name}\"` to the session list, deduped."
+  def add_open_chat_window(conn, target_id, target_name) do
+    window_id = "#{target_id}|#{target_name}"
+    windows = get_session(conn, @open_chat_windows_key) || []
+    windows = if window_id in windows, do: windows, else: windows ++ [window_id]
+    put_session(conn, @open_chat_windows_key, windows)
+  end
+
+  @doc """
+  Ports (and fixes) `HomeController.CloseChatWindow` — the legacy action mutated the list
+  returned by the `OpenChatWindows` getter in place but never called `SetOpenChatWindows`, so
+  closing a chat window never actually persisted across a reload (GIF-33 research flagged this
+  as a bug, not a behavior to preserve). This port persists the removal.
+  """
+  def remove_open_chat_window(conn, target_id, target_name) do
+    window_id = "#{target_id}|#{target_name}"
+    windows = get_session(conn, @open_chat_windows_key) || []
+    put_session(conn, @open_chat_windows_key, List.delete(windows, window_id))
   end
 
   @doc "Plug: redirects logged-in visitors away from LogOn/Register, same intent as the legacy `RedirectToAction` after a successful LogOn."
