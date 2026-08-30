@@ -22,6 +22,49 @@ defmodule GlobalCombatWeb.Router do
     # Bootstrap smoke page for the vendored design-boutique layer. Remove when
     # the real board LiveView lands (GIF-30).
     live "/design", DesignSmokeLive
+
+    # --- Legacy globalcombat.com URL scheme (live since 2001-01-22) — GIF-31 ---
+    # Mirrors the explicit MapControllerRoute calls in Web/Program.cs so 25
+    # years of inbound links, bookmarks and search results keep resolving.
+    # Do not "clean up" these paths into e.g. /games/:id — if new canonical
+    # paths are ever added, these must 301 to them, not disappear.
+    #
+    # Literal/shortcut routes are declared before the "Game-:id" pattern
+    # below so e.g. /Game-Manual doesn't get swallowed as id: "Manual".
+    get "/Create-Game", GameController, :create
+    get "/Create-Tournament", TourneyController, :create
+    get "/Game-Manual", HomeController, :game_manual
+    get "/Send-Message", HomeController, :send_message
+
+    # The `{action}` shortcut set, constrained in Program.cs to exactly:
+    # Messages|Stats|IpAddresses|GameManual|OptOut|PlayerInfo|Chat|
+    # LoadChatMessages|CloseChatWindow|SendMessage
+    get "/Messages", HomeController, :messages
+    get "/Stats", HomeController, :stats
+    get "/IpAddresses", HomeController, :ip_addresses
+    get "/GameManual", HomeController, :game_manual
+    get "/OptOut", HomeController, :opt_out
+    get "/PlayerInfo", HomeController, :player_info
+    get "/Chat", HomeController, :chat
+    get "/LoadChatMessages", HomeController, :load_chat_messages
+    get "/CloseChatWindow", HomeController, :close_chat_window
+    get "/SendMessage", HomeController, :send_message
+
+    # The two concrete instantiations of the ASP.NET default route
+    # (`{controller=Home}/{action=Index}/{id?}`) that already have a home in
+    # this app. We deliberately do NOT reproduce that route generically —
+    # dynamically resolving an arbitrary controller/action pair from user
+    # input is both a security smell (arbitrary module/function dispatch)
+    # and not how Phoenix routing works. Other legacy default-route
+    # destinations (e.g. /Account/LogOn) get explicit routes like the ones
+    # above once their controllers are ported.
+    get "/Home", PageController, :home
+    get "/Home/Index", PageController, :home
+
+    get "/Game-:id/:action", GameController, :show
+    get "/Game-:id", GameController, :show
+    get "/Player-Info-:id", HomeController, :player_info
+    get "/Tournament-:id", TourneyController, :index
   end
 
   # Other scopes may use custom stacks.
