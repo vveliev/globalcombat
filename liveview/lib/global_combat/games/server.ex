@@ -49,6 +49,7 @@ defmodule GlobalCombat.Games.Server do
     :max_players,
     :turn_length_minutes,
     :turn_started_at,
+    :is_private,
     :db_last_turn_time,
     status: :lobby,
     players: [],
@@ -154,7 +155,8 @@ defmodule GlobalCombat.Games.Server do
       reverse_attack_order: Keyword.get(opts, :reverse_attack_order, false),
       minimum_armies: Keyword.get(opts, :minimum_armies, 3),
       max_players: Keyword.get(opts, :max_players, 6),
-      turn_length_minutes: Keyword.get(opts, :turn_length_minutes, 1440)
+      turn_length_minutes: Keyword.get(opts, :turn_length_minutes, 1440),
+      is_private: Keyword.get(opts, :is_private, false)
     }
   end
 
