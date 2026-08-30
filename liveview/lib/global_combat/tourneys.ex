@@ -10,6 +10,10 @@ defmodule GlobalCombat.Tourneys do
   scope (GIF-25/GIF-28/GIF-30); `finish_game/2` is the seam a caller supplies results through,
   mirroring where `Web/Models/GameServer.cs`'s `Game.OnEliminated`/`Game.OnEnd` handlers call
   into `Tourney.PlayerFinishedCheck`/`TourneyFinishedCheck` today.
+
+  `list_open_tourneys/0` and `list_recent_tourneys_for_account/1` (GIF-33) are the two read-only
+  exceptions: they port the inline queries in `Web/Controllers/HomeController.cs:25-29` and
+  `:42-50` for the Home page's "Tournaments to Join"/"Your Recent Tourneys" lists.
   """
 
   import Ecto.Query
@@ -27,6 +31,27 @@ defmodule GlobalCombat.Tourneys do
 
   def get_tourney(id), do: Repo.get(Tourney, id)
   def get_tourney!(id), do: Repo.get!(Tourney, id)
+
+  @doc "Ports `select * from tourney where status='New' order by id` — open tourneys to join."
+  def list_open_tourneys do
+    Repo.all(from t in Tourney, where: t.status == :new, order_by: [asc: t.id])
+  end
+
+  @doc """
+  Ports the "Your Recent Tourneys" query (`select * from tourneyplayer, tourney where
+  account_id = ? and id = tourney_id order by tourney_id desc limit 20`).
+  """
+  def list_recent_tourneys_for_account(account_id) do
+    from(tp in TourneyPlayer,
+      join: t in Tourney,
+      on: t.id == tp.tourney_id,
+      where: tp.account_id == ^account_id,
+      order_by: [desc: t.id],
+      limit: 20,
+      select: t
+    )
+    |> Repo.all()
+  end
 
   @doc "`Tourney.CurrentPlayers` -- computed from `tourneyplayer` rows, same as the live C# model (`Tourney.Load` never reads back the `curplayers` column, see the migration's comment)."
   def current_players(%Tourney{id: id}) do

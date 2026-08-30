@@ -165,4 +165,48 @@ defmodule GlobalCombat.Accounts do
   defp generate_password(length) do
     for _ <- 1..length, into: "", do: <<Enum.random(@legacy_password_generator_chars)>>
   end
+
+  @doc """
+  Ports the plain `Account.Load(db.EvaluateRow("select * from account where id = {0}", id))`
+  used by `HomeController.PlayerInfo` — unlike `get_account/1`, this does *not* exclude
+  disabled accounts, since PlayerInfo shows a disabled account's page rather than 404ing it.
+  """
+  def get_account_including_disabled(id), do: Repo.get(Account, id)
+
+  @doc "Ports the login-history query behind `PlayerInfo?ShowLoginHistory=1` (admin-gated in this port, see `HomeController`)."
+  def list_logins_for_account(account_id) do
+    Repo.all(
+      from l in AccountLogin,
+        where: l.account_id == ^account_id,
+        order_by: [desc: l.logged_in_at],
+        limit: 100
+    )
+  end
+
+  @doc "Ports `HomeController.IpAddresses`' reverse IP-to-logins lookup (admin-gated in this port)."
+  def list_logins_for_ip(ip_address) do
+    Repo.all(
+      from l in AccountLogin,
+        where: l.ipaddress == ^ip_address,
+        order_by: [desc: l.logged_in_at],
+        limit: 100
+    )
+  end
+
+  @doc """
+  Ports `HomeController.OptOut(int account)` — validates the `OptOutKey` capability token
+  (`docs/schema-map.md` §2.6, not a sequential id) before flipping `opt_out`.
+  """
+  def opt_out(account_id, key) do
+    case Repo.get(Account, account_id) do
+      nil -> {:error, :not_found}
+      %Account{opt_out_key: k} when k != key -> {:error, :bad_key}
+      %Account{} = account -> account |> Ecto.Changeset.change(opt_out: true) |> Repo.update()
+    end
+  end
+
+  @doc "Ports `HomeController.PlayerInfo`'s admin `KillAccount` action (`update account set disabled_by = <admin id>`)."
+  def disable_account(%Account{} = account, admin_account_id) do
+    account |> Ecto.Changeset.change(disabled_by: admin_account_id) |> Repo.update()
+  end
 end

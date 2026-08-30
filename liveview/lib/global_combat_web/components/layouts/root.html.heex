@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
+    <%!-- Player-to-player chat (GIF-33) — see GlobalCombatWeb.ChatChannel's moduledoc. --%>
+    <meta :if={assigns[:chat_token]} name="chat-token" content={@chat_token} />
+    <meta
+      :if={assigns[:current_account]}
+      name="chat-topic"
+      content={"chat:#{@current_account.id}"}
+    />
+    <meta
+      name="open-chat-windows"
+      content={GlobalCombatWeb.Layouts.open_chat_windows_json(assigns[:open_chat_windows])}
+    />
     <.live_title default="GlobalCombat" suffix=" · Phoenix Framework" phx-no-format>{assigns[:page_title]}</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>

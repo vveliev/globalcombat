@@ -31,4 +31,20 @@ defmodule GlobalCombat.Accounts.Notifier do
       """
     )
   end
+
+  @doc "Ports `GameServer.SendMessage`'s offline-recipient email fallback (`Web/Models/GameServer.cs:206-207`)."
+  def deliver_new_message(%{email: email}, source_name, text) do
+    deliver(
+      email,
+      "Message from #{source_name}",
+      """
+      #{source_name} wrote:
+      #{text}
+
+      These emails will only be sent when you are not logged in.
+
+      To change what kind of messages you receive, login to Global Combat and go to your account settings.
+      """
+    )
+  end
 end

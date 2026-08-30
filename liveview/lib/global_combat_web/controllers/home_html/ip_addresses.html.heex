@@ -1,0 +1,34 @@
+<.site_chrome current_account={@current_account}>
+  <Card.card>
+    <:header>IP Address Login History</:header>
+    <form
+      method="get"
+      action={~p"/IpAddresses"}
+      class="flex items-end gap-[var(--space-3)] mb-[var(--space-4)]"
+    >
+      <.input type="text" name="IPAddress" label="IP Address" value={@ip_address} />
+      <Button.button type="submit">Search</Button.button>
+    </form>
+
+    <Table.table :if={@logins}>
+      <Table.thead>
+        <Table.tr>
+          <Table.th>Time</Table.th>
+          <Table.th>Account</Table.th>
+          <Table.th>Browser</Table.th>
+        </Table.tr>
+      </Table.thead>
+      <Table.tbody>
+        <Table.tr :for={login <- @logins}>
+          <Table.td>{timespan_ago(login.logged_in_at)}</Table.td>
+          <Table.td>
+            <a href={~p"/Player-Info-#{login.account_id}"} class="hover:underline">
+              {login.account_id}
+            </a>
+          </Table.td>
+          <Table.td>{login.browser}</Table.td>
+        </Table.tr>
+      </Table.tbody>
+    </Table.table>
+  </Card.card>
+</.site_chrome>

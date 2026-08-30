@@ -1,0 +1,16 @@
+<.site_chrome current_account={@current_account}>
+  <Card.card>
+    <:header>Email Opt Out</:header>
+    <%= if @account_id do %>
+      <form method="post" action={~p"/OptOut"} class="flex flex-col gap-[var(--space-3)]">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <input type="hidden" name="Account" value={@account_id} />
+        <input type="hidden" name="Key" value={@key} />
+        <p>Do you no longer wish to receive emails about new features?</p>
+        <Button.button type="submit" class="self-start">Confirm</Button.button>
+      </form>
+    <% else %>
+      <p class="text-danger">{@error_message}</p>
+    <% end %>
+  </Card.card>
+</.site_chrome>
