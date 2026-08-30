@@ -21,8 +21,10 @@ defmodule GlobalCombatWeb.GameLive do
 
   import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1]
 
+  alias GlobalCombat.Engine.MapInfo
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombatWeb.Components.Boutique.Button
+  alias GlobalCombatWeb.Components.Boutique.Card
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
   alias GlobalCombatWeb.Components.Boutique.StatusPill
 
@@ -263,13 +265,16 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp board(assigns) do
     ~H"""
-    <div class="relative" style="width: 800px; height: 480px;">
-      <.area
-        :for={area <- @view.areas}
-        area={area}
-        map_name={@view.map_name}
-        players={@view.players}
-      />
+    <div class="flex flex-wrap items-start gap-[var(--space-4)]">
+      <div class="relative" style="width: 800px; height: 480px;">
+        <.area
+          :for={area <- @view.areas}
+          area={area}
+          map_name={@view.map_name}
+          players={@view.players}
+        />
+      </div>
+      <.region_bonuses map_name={@view.map_name} />
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
     <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
@@ -302,6 +307,31 @@ defmodule GlobalCombatWeb.GameLive do
         {@area.armies}
       </span>
     </span>
+    """
+  end
+
+  # Player-facing rule info (GIF-103): every region's control bonus, sourced
+  # from the same `MapInfo.regions/1` the board's areas/adjacency already
+  # come from rather than hardcoded per-map text, so a future map addition
+  # doesn't need a matching edit here.
+  attr :map_name, :atom, required: true
+
+  defp region_bonuses(assigns) do
+    assigns = assign(assigns, :regions, MapInfo.regions(assigns.map_name))
+
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>Region Bonuses</:header>
+      <ul class="flex flex-col gap-[var(--space-1)] text-sm">
+        <li
+          :for={{_number, name, _num_areas, army_bonus} <- @regions}
+          class="flex items-center justify-between gap-[var(--space-3)]"
+        >
+          <span>{name}</span>
+          <span class="font-semibold">{army_bonus}</span>
+        </li>
+      </ul>
+    </Card.card>
     """
   end
 

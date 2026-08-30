@@ -257,6 +257,24 @@ defmodule GlobalCombatWeb.GameLiveTest do
              ~r/class="absolute top-1\/2 left-1\/2 -translate-x-1\/2 -translate-y-1\/2 text-white font-bold \[text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000\]"/
   end
 
+  test "the board shows a Region Bonuses panel listing every continent's control bonus (GIF-103)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    assert html =~ "Region Bonuses"
+
+    # start_two_player_game/2 doesn't pin :map_name, so this asserts against
+    # whatever map the game actually started on (Server.create_game/1 defaults
+    # to :original) rather than hardcoding its regions — same
+    # sourced-from-MapInfo contract the fix itself relies on.
+    for {_number, name, _num_areas, army_bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
+      assert html =~ ~r/#{Regex.escape(name)}[\s\S]*?#{army_bonus}/
+    end
+  end
+
   describe "fog of war (leak regression)" do
     # deal_areas/2's round-robin can leave every area adjacent to some opponent (e.g. a
     # 2-way alternating deal on a densely-linked map) — that's a property of the demo
