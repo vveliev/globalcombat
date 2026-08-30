@@ -137,7 +137,18 @@ defmodule GlobalCombat.Games.Server do
       is_fogged: state.is_fogged,
       max_players: state.max_players,
       viewer_number: find_player_number(state, account_id),
-      players: Enum.map(state.players, fn {number, p} -> %{number: number, name: p.name} end)
+      players:
+        Enum.map(state.players, fn {number, p} ->
+          %{
+            number: number,
+            name: p.name,
+            done: false,
+            eliminated: false,
+            place: nil,
+            areas: nil,
+            armies: nil
+          }
+        end)
     }
 
     {:reply, {:lobby, view}, state}

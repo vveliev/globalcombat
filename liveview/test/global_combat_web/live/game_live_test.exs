@@ -67,6 +67,20 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2") =~ "Turn 2"
   end
 
+  test "the lobby renders a just-joined player without crashing (GIF-94 regression)", %{
+    conn: conn
+  } do
+    alice = account_fixture(%{"name" => "Alice"})
+
+    game_id = Games.create_game(%{max_players: 6})
+    {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+    {:ok, _view, html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+    assert html =~ "Alice"
+    assert html =~ "Waiting for players"
+  end
+
   test "a chat message from one session appears live on the other (GameHub.Say -> addMessage)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
