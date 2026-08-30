@@ -127,6 +127,43 @@ defmodule GlobalCombatWeb.Router do
     put "/settings/password", AccountSettingsController, :update_password
   end
 
+  # --- Legacy globalcombat.com URL scheme for the Account controller (GIF-31
+  # follow-up, filed as GIF-78) ---
+  # ASP.NET's default route (`{controller=Home}/{action=Index}/{id?}`) put
+  # AccountController's actions at PascalCase, no-slash-after-Account paths
+  # like `/Account/Register` and `/Account/LogOn` (see
+  # `Web/Controllers/AccountController.cs` and the anchors/forms in
+  # `Web/Views/Shared/_DefaultMenu.cshtml` and `Web/Views/Account/*.cshtml`).
+  # GIF-31's audit of legacy paths never covered this controller, so these
+  # never got aliases. `LostPassword` is the legacy name for what's now
+  # reset-password (`AccountController.LostPassword` called `ResetPassword`).
+  # `Account/Contact` is intentionally omitted: that controller/view hasn't
+  # been ported to LiveView yet.
+  # Do not "clean up" these paths — if canonical paths are ever restructured,
+  # redirect from here instead of deleting.
+  scope "/Account", GlobalCombatWeb do
+    pipe_through [:browser, :redirect_if_account_is_authenticated]
+
+    get "/Register", AccountRegistrationController, :new
+    post "/Register", AccountRegistrationController, :create
+    get "/LogOn", AccountSessionController, :new
+    post "/LogOn", AccountSessionController, :create
+    get "/LostPassword", AccountResetPasswordController, :new
+    post "/LostPassword", AccountResetPasswordController, :create
+  end
+
+  scope "/Account", GlobalCombatWeb do
+    pipe_through :browser
+
+    get "/LogOff", AccountSessionController, :delete
+  end
+
+  scope "/Account", GlobalCombatWeb do
+    pipe_through [:browser, :require_authenticated_account]
+
+    get "/Settings", AccountSettingsController, :edit
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", GlobalCombatWeb do
   #   pipe_through :api
