@@ -307,7 +307,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp player_list(assigns) do
     ~H"""
-    <ul class="flex flex-col gap-[var(--space-2)]">
+    <ul aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
         <span class="flex items-center gap-[var(--space-2)]">
@@ -341,7 +341,7 @@ defmodule GlobalCombatWeb.GameLive do
         />
         <Button.button type="submit">Send</Button.button>
       </form>
-      <ul class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
+      <ul aria-live="polite" class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
         <li :for={m <- @messages}>
           <span class="font-semibold">{m.source_name}:</span> {m.text}
         </li>

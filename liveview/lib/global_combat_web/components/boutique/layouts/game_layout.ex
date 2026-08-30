@@ -50,6 +50,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       <section
         :if={@status != []}
         aria-label="Game status"
+        aria-live="polite"
         tabindex="-1"
         data-focus-landmark
         class="[grid-area:status] flex items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] bg-surface border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring"

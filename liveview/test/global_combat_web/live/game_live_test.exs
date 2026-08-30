@@ -129,6 +129,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
   end
 
+  test "the status strip and chat log are wired as polite live regions (WCAG 4.1.3, GIF-80)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    # :status carries turn-advance/game-ended announcements (the :reload broadcast);
+    # the chat <ul> carries :add_message. Both are "polite" (not "assertive") so a
+    # screen reader finishes the player's current sentence before interrupting —
+    # per GIF-80's fix direction, mid-input chat/turn updates shouldn't cut in.
+    assert html =~ ~r/aria-label="Game status"[^>]*aria-live="polite"/
+    assert html =~ ~r/<ul aria-live="polite"/
+  end
+
   test "the game board carries a focus-management hook targeting a focusable status landmark (WCAG 2.4.3, GIF-82)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
