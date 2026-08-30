@@ -1,5 +1,7 @@
 defmodule GlobalCombat.Games.LiveTest do
-  use ExUnit.Case, async: true
+  # GIF-74: create_game/1 now inserts a real `games` row (GamesDb.create_game/1), so this needs
+  # the Ecto Sandbox checkout DataCase provides — a plain ExUnit.Case has none.
+  use GlobalCombat.DataCase, async: true
 
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.PubSub, as: GamePubSub

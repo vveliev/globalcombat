@@ -5,6 +5,11 @@ import Config
 # GlobalCombat.Games.TurnScheduler start their own instance directly instead.
 config :global_combat, :start_turn_scheduler, false
 
+# GIF-74: GlobalCombat.Games.Supervisor.start_link/1 would otherwise query GlobalCombat.Repo at
+# application boot, outside any test's Ecto Sandbox checkout. Tests that exercise rehydration
+# start a GlobalCombat.Games.Server with `rehydrate_from:` directly instead.
+config :global_combat, :rehydrate_active_games, false
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
