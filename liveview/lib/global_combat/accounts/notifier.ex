@@ -5,13 +5,15 @@ defmodule GlobalCombat.Accounts.Notifier do
 
   alias GlobalCombat.Mailer
 
-  defp deliver(to, subject, body) do
+  defp deliver(to, subject, body, opts \\ []) do
     email =
       new()
       |> to(to)
       |> from({"Global Combat", "noreply@globalcombat.com"})
       |> subject(subject)
       |> text_body(body)
+
+    email = if reply_to = opts[:reply_to], do: reply_to(email, reply_to), else: email
 
     with {:ok, _metadata} <- Mailer.deliver(email) do
       {:ok, email}
@@ -45,6 +47,23 @@ defmodule GlobalCombat.Accounts.Notifier do
 
       To change what kind of messages you receive, login to Global Combat and go to your account settings.
       """
+    )
+  end
+
+  @contact_email "contact@globalcombat.com"
+
+  @doc "Ports `AccountController.ContactEmail` (`Web/Controllers/AccountController.cs:311-327`) — the Contact Us form's send-to-support notification."
+  def deliver_contact_email(%{email: email, name: name, id: id}, subject, comments) do
+    deliver(
+      @contact_email,
+      "[Global Combat] #{subject}",
+      """
+      #{comments}
+      #{name}
+      #{email}
+      https://globalcombat.com/Player-Info-#{id}
+      """,
+      reply_to: email
     )
   end
 end
