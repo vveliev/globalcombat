@@ -69,6 +69,7 @@ defmodule GlobalCombat.Engine.Harness do
     minimum_armies = Keyword.get(opts, :minimum_armies, 3)
     reverse_attack_order = Keyword.get(opts, :reverse_attack_order, false)
     is_non_random = Keyword.get(opts, :is_non_random, false)
+    is_fogged = Keyword.get(opts, :is_fogged, false)
     on_turn = Keyword.get(opts, :on_turn, fn _report -> :ok end)
 
     {:ok, new_game_reply} =
@@ -77,6 +78,7 @@ defmodule GlobalCombat.Engine.Harness do
         PlayerNames: player_names,
         Seed: base_seed,
         IsNonRandom: is_non_random,
+        IsFogged: is_fogged,
         ReverseAttackOrder: reverse_attack_order,
         MinimumArmies: minimum_armies
       })
