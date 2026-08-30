@@ -7,8 +7,45 @@ defmodule GlobalCombat.Games.ServerTest do
   alias GlobalCombat.Engine.Wire
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Game
+  alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.Server
   alias GlobalCombat.GrpcHost
+
+  describe "training mode: the Computer opponent takes its turn on its own (GIF-104)" do
+    test "the Computer seat is Done the instant its turn starts, never left Thinking forever" do
+      game_id =
+        Games.create_game(%{map_name: :original, is_training: true, minimum_armies: 3})
+
+      {:ok, 1} = Games.join(game_id, 101, "Alice")
+      {:ok, 2} = Games.join(game_id, 1, "Computer")
+      :ok = Games.start_game(game_id, 101)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      computer = Enum.find(view.players, &(&1.name == "Computer"))
+      refute is_nil(computer)
+      assert computer.done
+    end
+
+    test "a solo human finishes a turn with no Force Turn, because the Computer never blocks all_done?" do
+      game_id =
+        Games.create_game(%{map_name: :original, is_training: true, minimum_armies: 3})
+
+      {:ok, 1} = Games.join(game_id, 101, "Alice")
+      {:ok, 2} = Games.join(game_id, 1, "Computer")
+      :ok = Games.start_game(game_id, 101)
+
+      {:playing, before_turn} = Games.player_view(game_id, 101)
+      assert before_turn.turn == 1
+
+      :ok = Games.set_done(game_id, 101)
+
+      {:playing, after_turn} = Games.player_view(game_id, 101)
+      assert after_turn.turn == 2
+
+      computer = Enum.find(after_turn.players, &(&1.name == "Computer"))
+      assert computer.done
+    end
+  end
 
   describe "rehydrate_from: — boot-time reconstruction (GIF-74)" do
     test "starts straight into :playing with the persisted engine state, not an empty lobby" do

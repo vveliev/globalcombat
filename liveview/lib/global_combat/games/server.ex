@@ -29,6 +29,7 @@ defmodule GlobalCombat.Games.Server do
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.MapInfo
+  alias GlobalCombat.Engine.RandomAi
   alias GlobalCombat.Engine.Wire
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.PlayerView
@@ -260,7 +261,7 @@ defmodule GlobalCombat.Games.Server do
   def handle_call({:start_game, account_id}, _from, %{status: :lobby} = state) do
     with 1 <- find_player_number(state, account_id),
          true <- length(state.players) >= 2 do
-      engine = new_engine(state)
+      engine = state |> new_engine() |> run_ai_turns()
       {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
 
       state = %{
@@ -396,6 +397,33 @@ defmodule GlobalCombat.Games.Server do
     end
   end
 
+  # GIF-104: `RandomAi` (GIF-28) was validated by the differential harness in isolation but
+  # never wired into live play — a seat's `done` flag only ever flipped via a human's
+  # `set_done`/`force_turn` cast, which never arrives for the reserved "Computer" account
+  # (account_id 1, see `Engine.reset_done_flags/1`), so training games stuck on turn 1 forever.
+  # Ports `GameController.Create`'s `model.Join(1, "Computer", 0).Done = true` — the Computer
+  # seat is marked done the instant its turn starts, not waited on — but additionally runs
+  # `RandomAi.think/1` first (the oracle-side-only `RandomAiPlayer.Think` call in
+  # `GameEngineService.cs` was never ported to the live .NET web app either, leaving that
+  # "AI" a purely passive placeholder there; this wires it up for real so Training Mode's
+  # opponent actually plays instead of just rubber-stamping "done").
+  defp run_ai_turns(%Engine{ended: true} = engine), do: engine
+
+  defp run_ai_turns(engine) do
+    Enum.reduce(Engine.players_in_order(engine), engine, fn player, engine ->
+      if computer_seat?(player) and not Engine.eliminated?(player) do
+        engine
+        |> RandomAi.think()
+        |> then(&put_in(&1.players[player.number].done, true))
+      else
+        engine
+      end
+    end)
+  end
+
+  defp computer_seat?(%Engine.Player{account_id: 1}), do: true
+  defp computer_seat?(%Engine.Player{}), do: false
+
   defp mark_done(state, player_number) do
     player = Engine.player!(state.engine, player_number)
 
@@ -426,7 +454,7 @@ defmodule GlobalCombat.Games.Server do
   # double-advance, not idempotent.
   defp run_turn(state, opts \\ []) do
     advance_clock? = Keyword.get(opts, :advance_clock, true)
-    engine = Engine.run_turn(state.engine)
+    engine = state.engine |> Engine.run_turn() |> run_ai_turns()
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     state = %{state | engine: engine, turn_started_at: now}
 
