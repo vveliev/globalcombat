@@ -13,6 +13,12 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   `:players` (roster/scores rail, `--size-rail` wide, same track robo-hub's
   `ConsoleLayout.Queue` uses for a live side panel).
 
+  The `:status` strip is `tabindex="-1"` and marked `data-focus-landmark` —
+  it's the one region that survives every board/players patch, so it's the
+  designated fallback focus target for consumers restoring keyboard focus
+  after a state-changing patch removes whatever was previously focused
+  (GIF-82).
+
   Collapses to a stacked status/board/players column at `lg:` (Tailwind's
   64rem breakpoint matches `--size-collapse`, tokens/scales.json), same
   convention as the ported shells.
@@ -44,7 +50,9 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       <section
         :if={@status != []}
         aria-label="Game status"
-        class="[grid-area:status] flex items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] bg-surface border-b border-border text-[length:var(--text-sm)]"
+        tabindex="-1"
+        data-focus-landmark
+        class="[grid-area:status] flex items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] bg-surface border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring"
       >
         {render_slot(@status)}
       </section>

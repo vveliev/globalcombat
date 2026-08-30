@@ -129,6 +129,24 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
   end
 
+  test "the game board carries a focus-management hook targeting a focusable status landmark (WCAG 2.4.3, GIF-82)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    # Join/Start/End Turn/Force Turn all remove the clicked control from the DOM
+    # (lobby -> board swap, done/1's conditional) — without explicit focus
+    # management, LiveView's morphdom patch drops focus to <body>. The
+    # ".FocusManager" hook (game_live.ex) restores focus to this landmark once
+    # it notices its previously-focused element is gone; ExUnit's LiveViewTest
+    # renders no real DOM/JS, so this asserts the two static contracts the
+    # client-side behavior depends on rather than the focus move itself.
+    assert html =~ ~r/id="game-board"[^>]*phx-hook="\.FocusManager"/
+    assert html =~ ~r/aria-label="Game status"[^>]*tabindex="-1"[^>]*data-focus-landmark/
+  end
+
   describe "fog of war (leak regression)" do
     # deal_areas/2's round-robin can leave every area adjacent to some opponent (e.g. a
     # 2-way alternating deal on a densely-linked map) — that's a property of the demo
