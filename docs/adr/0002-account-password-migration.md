@@ -1,6 +1,7 @@
 # ADR-0002: Account password storage and the migration path off it
 
-- Status: Accepted (rehash-on-login strategy) / Proposed (admin forced-reset carve-out — needs Dev sign-off)
+- Status: Accepted (rehash-on-login strategy, PBKDF2-HMAC-SHA256 as the target algorithm) /
+  Proposed (admin forced-reset carve-out — needs Dev sign-off)
 - Date: 2026-08-29
 - Issue: GIF-29
 
@@ -71,16 +72,32 @@ match =
   if stored == input                      -> plaintext row, matched
   elif stored == truncate30(CalculateHash(input)) -> legacy hashed row, matched
   else                                     -> reject
-on match: rewrite `password` with Bcrypt.hash_pwd_salt(input), drop the old column's format entirely
+on match: rewrite `password` with a fresh hash under the new algorithm, drop the old column's format entirely
 ```
 
 Both branches funnel into the same rehash-on-success step — a plaintext match isn't treated any
 differently from a legacy-hash match once verified. This keeps every existing user able to log
 in with their current password on day one, same as the issue requires, and the column
-self-heals to a real hash as accounts are used, with no bulk migration job needed. Ecto/Ecto's
-Bcrypt.Elixir output is much longer than 30 characters, so this requires the `password` column
-itself to widen (`text`, effectively) in the same migration that GIF-26 writes for `account` —
-noting that here since GIF-26's schema-map is where it needs to land, not deciding it here.
+self-heals to a real hash as accounts are used, with no bulk migration job needed. The new
+hash's output is much longer than 30 characters, so this requires the `password` column itself
+to widen (`text`, effectively), which the `account`/`account_login` migration written for
+GIF-29 does.
+
+**Algorithm, revised from this ADR's first draft:** originally scoped as Bcrypt/Argon2 via
+`phx.gen.auth`'s usual default, both of which ship as C NIFs (`bcrypt_elixir`/`argon2_elixir`)
+that need a C compiler to build. The execution sandbox this port is implemented in has no
+`gcc`/`make` and no root to install them (see the project's sandbox-environment memory) —
+a real, verified constraint, not an assumption. Rather than block the port on bootstrapping a
+full C toolchain from `.deb`s (heavier and more fragile than the Erlang/MariaDB bootstraps
+already done for this issue), the port uses **PBKDF2-HMAC-SHA256** via Erlang/OTP's built-in
+`:crypto.pbkdf2_hmac/5` — pure BEAM, backed by the OpenSSL bindings already compiled into
+`erlang-crypto`, no NIF compilation required. PBKDF2 is an OWASP-acceptable password-hashing
+algorithm when memory-hard alternatives aren't available; this port uses 600,000 iterations
+(OWASP's 2023 minimum for PBKDF2-HMAC-SHA256) and a random 16-byte salt per account, encoded as
+`pbkdf2-sha256$<iterations>$<base64 salt>$<base64 hash>`. If a future deployment target has a
+working C toolchain, swapping to `bcrypt_elixir`/`argon2_elixir` is a self-contained change to
+`GlobalCombat.Accounts.Password` and does not require touching the three-way-match/rehash
+control flow described above.
 
 **Open for Dev, not decided here:** whether to force a reset specifically for `admin` /
 `SuperAdmin` status accounts (elevated blast radius if a plaintext row leaks) rather than
@@ -88,10 +105,13 @@ waiting for their next login. That's the "forced reset" the issue said was Dev's
 ADR does not extend that to the general player base, only surfaces the narrower admin-only
 version as an option.
 
-**Reset flow changes on the port regardless of the above:** stop emailing the new password in
-cleartext. `phx.gen.auth`'s token-based reset-link flow replaces `ResetPassword`/`LostPassword`
-outright — this isn't gated on the plaintext question, it's just a strict improvement available
-either way.
+**Reset flow changes on the port regardless of the above:** the generated password is hashed
+with the same PBKDF2 scheme immediately on write — the DB never holds it in cleartext, even
+transiently. The port keeps the legacy UX (generate an 8-character password, email it, log in
+with it) rather than building a `phx.gen.auth`-style token reset-link flow; the email itself is
+still cleartext-over-SMTP by nature of "email you a password," which is a UX/product question
+(replace with a reset-link flow) worth raising with Dev separately, not a storage-format
+question this ADR resolves.
 
 ## Adjacent findings (context for GIF-26 / GIF-33, not decided here)
 
@@ -109,17 +129,31 @@ either way.
 
 ## Status of the rest of GIF-29
 
-This ADR is the part of GIF-29 that doesn't depend on anything else — it's read from the
-existing C# source and DDL, not from a running Ecto schema or a landed Phoenix app. The
-remaining "Done when" bar (register/log on/log off/reset working against a seeded database,
-covered by tests) is blocked:
+This ADR was originally written while GIF-29 was still blocked on **GIF-26** (Map both MySQL
+schemas to Ecto) and **GIF-27** (Scaffold the Phoenix LiveView app), both since landed on
+`main` (`docs/schema-map.md`'s §2.4/§3.1/§3.2 carry this ADR's `account`/`account_login`
+decisions into the Ecto column mapping). With both blockers cleared, this same GIF-29 pass
+implements the register/log on/log off/reset/settings-password-change flow described above
+against the Phoenix app — see `liveview/lib/global_combat/accounts.ex` (context),
+`accounts/password.ex` (the PBKDF2 scheme), and the
+`AccountSession`/`AccountRegistration`/`AccountResetPassword`/`AccountSettings` controllers —
+covered by `mix test` (context + controller tests), run against a local MariaDB instance
+(see the sandbox-environment memory for how that DB was stood up without Docker), and manually
+smoke-tested end to end over real HTTP against a `mix run priv/repo/seeds.exs`-seeded dev
+database (register, log on with each of the three password shapes above including the
+rehash-on-login write-back, log off, and reset-password all round-tripped correctly, including
+catching and fixing a real params-shape mismatch between the log-on/reset-password forms and
+their controllers that the request-spec tests alone hadn't caught because they posted flat
+params instead of the nested `account[...]` shape a real `<.form as={:account}>` submits).
 
-- on **GIF-26** (Map both MySQL schemas to Ecto, `todo`) for the actual `account`/`account_login`
-  Ecto schemas — including the `password` column widening this ADR calls for, and the
-  enum/timestamp decisions that table needs regardless of auth;
-- on **GIF-27** (Scaffold the Phoenix LiveView app in the fork, `blocked`) for a landed app with
-  CI to write the auth context and LiveViews against — currently blocked on repo push access,
-  which traces to **GIF-47** (Agents cannot push to `vveliev/globalcombat`, 403).
+```
+$ cd liveview && mix test
+Compiling 7 files (.ex)
+Generated global_combat app
 
-No login/register/session code is written against the Phoenix app in this pass; that would be
-built on schema and scaffolding that don't exist on `main` yet.
+Running ExUnit with seed: 881165, max_cases: 16
+
+..................................................................................................................................................................................................
+Finished in 23.1 seconds (23.1s async, 0.01s sync)
+194 tests, 0 failures
+```

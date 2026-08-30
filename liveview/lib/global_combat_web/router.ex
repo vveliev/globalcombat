@@ -1,6 +1,8 @@
 defmodule GlobalCombatWeb.Router do
   use GlobalCombatWeb, :router
 
+  import GlobalCombatWeb.UserAuth
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -8,6 +10,7 @@ defmodule GlobalCombatWeb.Router do
     plug :put_root_layout, html: {GlobalCombatWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug :fetch_current_account
   end
 
   pipeline :api do
@@ -22,6 +25,32 @@ defmodule GlobalCombatWeb.Router do
     # Bootstrap smoke page for the vendored design-boutique layer. Remove when
     # the real board LiveView lands (GIF-30).
     live "/design", DesignSmokeLive
+  end
+
+  # Account surface (GIF-29): register / log on / log off / password reset / settings.
+  # Ports Web/Controllers/AccountController.cs and its views.
+  scope "/account", GlobalCombatWeb do
+    pipe_through [:browser, :redirect_if_account_is_authenticated]
+
+    get "/register", AccountRegistrationController, :new
+    post "/register", AccountRegistrationController, :create
+    get "/log-on", AccountSessionController, :new
+    post "/log-on", AccountSessionController, :create
+    get "/reset-password", AccountResetPasswordController, :new
+    post "/reset-password", AccountResetPasswordController, :create
+  end
+
+  scope "/account", GlobalCombatWeb do
+    pipe_through :browser
+
+    delete "/log-off", AccountSessionController, :delete
+  end
+
+  scope "/account", GlobalCombatWeb do
+    pipe_through [:browser, :require_authenticated_account]
+
+    get "/settings", AccountSettingsController, :edit
+    put "/settings/password", AccountSettingsController, :update_password
   end
 
   # Other scopes may use custom stacks.

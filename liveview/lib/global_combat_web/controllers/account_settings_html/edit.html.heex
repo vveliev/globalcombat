@@ -1,0 +1,37 @@
+<div class="mx-auto max-w-sm px-4 py-16">
+  <h1 class="text-2xl font-semibold mb-6">Account Settings</h1>
+
+  <p :if={@result_message} class="alert alert-info mb-4">{@result_message}</p>
+
+  <.form
+    :let={f}
+    for={%{}}
+    as={:password}
+    action={~p"/account/settings/password"}
+    method="put"
+    class="flex flex-col gap-4"
+  >
+    <.input
+      field={f[:old_password]}
+      type="password"
+      name="old_password"
+      label="Current password"
+      required
+    />
+    <.input
+      field={f[:new_password]}
+      type="password"
+      name="new_password"
+      label="New password"
+      required
+    />
+    <.input
+      field={f[:new_password_confirmation]}
+      type="password"
+      name="new_password_confirmation"
+      label="Confirm new password"
+      required
+    />
+    <.button variant="primary" class="mt-2">Change Password</.button>
+  </.form>
+</div>
