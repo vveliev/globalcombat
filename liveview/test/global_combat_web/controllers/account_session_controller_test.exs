@@ -52,7 +52,11 @@ defmodule GlobalCombatWeb.AccountSessionControllerTest do
           account: %{login: account.name, password: "wrongpassword"}
         )
 
-      assert html_response(conn, 200) =~ "Bad Password"
+      html = html_response(conn, 200)
+      assert html =~ "Bad Password"
+      assert html =~ ~s(id="login-error")
+      assert html =~ ~s(role="alert")
+      assert html =~ ~s(aria-describedby="login-error")
       refute get_session(conn, :account_id)
     end
 

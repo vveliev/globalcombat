@@ -1,7 +1,7 @@
 <div class="mx-auto max-w-sm px-4 py-16">
   <h1 class="text-2xl font-semibold mb-6">Lost Password</h1>
 
-  <p :if={@error_message} class="alert alert-error mb-4">{@error_message}</p>
+  <p :if={@error_message} id="login-error" role="alert" class="alert alert-error mb-4">{@error_message}</p>
 
   <.form
     :let={f}
@@ -11,7 +11,15 @@
     method="post"
     class="flex flex-col gap-4"
   >
-    <.input field={f[:login]} type="text" label="Login name or email address" required autofocus />
+    <.input
+      field={f[:login]}
+      type="text"
+      label="Login name or email address"
+      required
+      autofocus
+      aria-invalid={@error_message && "true"}
+      aria-describedby={@error_message && "login-error"}
+    />
     <.button variant="primary" class="mt-2">Email me a new password</.button>
   </.form>
 
