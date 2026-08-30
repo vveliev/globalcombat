@@ -15,6 +15,9 @@ defmodule GlobalCombatWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Chat push (GIF-33) — see `GlobalCombatWeb.UserSocket`'s moduledoc for the auth design.
+  socket "/socket", GlobalCombatWeb.UserSocket, websocket: true
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
@@ -51,5 +54,6 @@ defmodule GlobalCombatWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+  plug GlobalCombatWeb.Plugs.NormalizeLegacyPathCasing
   plug GlobalCombatWeb.Router
 end

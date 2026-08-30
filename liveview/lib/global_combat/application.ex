@@ -12,6 +12,10 @@ defmodule GlobalCombat.Application do
       GlobalCombat.Repo,
       {DNSCluster, query: Application.get_env(:global_combat, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: GlobalCombat.PubSub},
+      GlobalCombat.Presence,
+      # One process per live game (GIF-30) - see GlobalCombat.Games.Server.
+      {Registry, keys: :unique, name: GlobalCombat.Games.Registry},
+      GlobalCombat.Games.Supervisor,
       # Start a worker by calling: GlobalCombat.Worker.start_link(arg)
       # {GlobalCombat.Worker, arg},
       # Start to serve requests, typically the last entry

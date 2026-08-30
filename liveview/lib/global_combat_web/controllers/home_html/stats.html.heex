@@ -1,0 +1,63 @@
+<.site_chrome current_account={@current_account}>
+  <div class="flex flex-col gap-[var(--space-6)]">
+    <Card.card>
+      <:header>Overview</:header>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-[var(--space-4)]">
+        <StatCard.stat_card eyebrow="Accounts" value={to_string(@overview.accounts)} />
+        <StatCard.stat_card
+          eyebrow="Accounts in last month"
+          value={to_string(@overview.accounts_last_month)}
+        />
+        <StatCard.stat_card
+          eyebrow="Daily Active Users"
+          value={to_string(@overview.daily_active)}
+        />
+        <StatCard.stat_card
+          eyebrow="Monthly Active Users"
+          value={to_string(@overview.monthly_active)}
+        />
+        <StatCard.stat_card eyebrow="Running Games" value={to_string(@overview.running_games)} />
+        <StatCard.stat_card
+          eyebrow="Running Tourneys"
+          value={to_string(@overview.running_tourneys)}
+        />
+      </div>
+    </Card.card>
+
+    <Card.card>
+      <:header>Logins per day (last 30 days)</:header>
+      <LineChart.line_chart
+        :if={@overview.daily_logins != []}
+        label="Daily login counts over the last 30 days"
+        labels={Enum.map(@overview.daily_logins, fn {date, _count} -> Date.to_string(date) end)}
+        series={[
+          %{
+            name: "Logins",
+            points: Enum.map(@overview.daily_logins, fn {_date, count} -> count end)
+          }
+        ]}
+      />
+      <p :if={@overview.daily_logins == []} class="text-text-muted">
+        No logins in the last 30 days.
+      </p>
+    </Card.card>
+
+    <Card.card>
+      <:header>New accounts per day (last 30 days)</:header>
+      <LineChart.line_chart
+        :if={@overview.daily_signups != []}
+        label="New account counts over the last 30 days"
+        labels={Enum.map(@overview.daily_signups, fn {date, _count} -> Date.to_string(date) end)}
+        series={[
+          %{
+            name: "New Accounts",
+            points: Enum.map(@overview.daily_signups, fn {_date, count} -> count end)
+          }
+        ]}
+      />
+      <p :if={@overview.daily_signups == []} class="text-text-muted">
+        No new accounts in the last 30 days.
+      </p>
+    </Card.card>
+  </div>
+</.site_chrome>

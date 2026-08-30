@@ -27,6 +27,7 @@ defmodule GlobalCombatWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
+      import Phoenix.LiveViewTest
       import GlobalCombatWeb.ConnCase
     end
   end
@@ -34,5 +35,12 @@ defmodule GlobalCombatWeb.ConnCase do
   setup tags do
     GlobalCombat.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
+  end
+
+  @doc "Logs `account` into `conn` the same way `AccountSessionController.create/2` does."
+  def log_in_account(conn, account) do
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> Plug.Conn.put_session(:account_id, account.id)
   end
 end

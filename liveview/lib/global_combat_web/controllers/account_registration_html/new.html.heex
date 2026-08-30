@@ -1,0 +1,22 @@
+<div class="mx-auto max-w-sm px-4 py-16">
+  <h1 class="text-2xl font-semibold mb-6">Register</h1>
+
+  <.form
+    :let={f}
+    for={@changeset}
+    as={:account}
+    action={~p"/account/register"}
+    method="post"
+    class="flex flex-col gap-4"
+  >
+    <.input field={f[:name]} type="text" label="Login name" required autofocus />
+    <.input field={f[:email]} type="email" label="Email address" required />
+    <.input field={f[:password]} type="password" label="Password" required />
+    <.input field={f[:password_confirmation]} type="password" label="Confirm password" required />
+    <.button variant="primary" class="mt-2">Register</.button>
+  </.form>
+
+  <div class="mt-6 text-sm">
+    <.link navigate={~p"/account/log-on"}>Already have an account? Log on</.link>
+  </div>
+</div>

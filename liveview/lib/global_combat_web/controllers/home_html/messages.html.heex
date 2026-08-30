@@ -1,0 +1,25 @@
+<.site_chrome current_account={@current_account}>
+  <Card.card>
+    <:header>Your Messages</:header>
+    <p :if={@messages == []} class="text-text-muted">You have no messages.</p>
+    <Table.table :if={@messages != []}>
+      <Table.tbody>
+        <Table.tr :for={m <- @messages}>
+          <Table.td class="whitespace-nowrap align-top">
+            <%= if m.from_id == @viewer_id do %>
+              To <a href={~p"/Player-Info-#{m.to_id}"} class="hover:underline">{m.to_name}</a>
+            <% else %>
+              <a href={~p"/Player-Info-#{m.from_id}"} class="hover:underline">{m.from_name}</a>
+            <% end %>
+          </Table.td>
+          <Table.td>
+            <div>{message_body(m.text)}</div>
+            <div class="text-xs text-text-muted mt-[var(--space-1)]">
+              {timespan_ago(m.sent_at)}
+            </div>
+          </Table.td>
+        </Table.tr>
+      </Table.tbody>
+    </Table.table>
+  </Card.card>
+</.site_chrome>

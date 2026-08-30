@@ -19,6 +19,8 @@
 
 // Include phoenix_html to handle method=PUT/DELETE in forms and buttons.
 import "phoenix_html"
+// Player-to-player chat (GIF-33) — floating chat windows + the "chat:<id>" push channel.
+import "./chat.js"
 // Establish Phoenix Socket and LiveView configuration.
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
