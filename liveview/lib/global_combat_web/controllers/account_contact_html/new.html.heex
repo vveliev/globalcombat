@@ -6,7 +6,14 @@
 
     <p class="mb-6 text-text-muted">Tell us what you really think!</p>
 
-    <.form :let={f} for={%{}} as={:contact} action={~p"/account/contact"} method="post" class="flex flex-col gap-4">
+    <.form
+      :let={f}
+      for={%{}}
+      as={:contact}
+      action={~p"/account/contact"}
+      method="post"
+      class="flex flex-col gap-4"
+    >
       <.input field={f[:subject]} type="text" name="subject" label="Subject" required />
       <.input field={f[:comments]} type="textarea" name="comments" label="Message" required />
       <.button variant="primary" class="mt-2">Send Message</.button>
