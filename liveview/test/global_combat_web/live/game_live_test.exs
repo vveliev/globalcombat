@@ -158,7 +158,13 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # it notices its previously-focused element is gone; ExUnit's LiveViewTest
     # renders no real DOM/JS, so this asserts the two static contracts the
     # client-side behavior depends on rather than the focus move itself.
-    assert html =~ ~r/id="game-board"[^>]*phx-hook="\.FocusManager"/
+    #
+    # ColocatedHook rewrites the ".FocusManager" name at compile time to the
+    # fully-qualified manifest key (`GlobalCombatWeb.GameLive.FocusManager`) in
+    # both the emitted `phx-hook` attribute and the `phoenix-colocated/*`
+    # manifest `app.js` imports — asserting the literal ".FocusManager" here
+    # would never match the real render output.
+    assert html =~ ~r/id="game-board"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.FocusManager"/
     assert html =~ ~r/aria-label="Game status"[^>]*tabindex="-1"[^>]*data-focus-landmark/
   end
 
