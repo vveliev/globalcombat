@@ -7,26 +7,54 @@ defmodule GlobalCombat.Games.Live do
 
   Named `Games.Live` rather than `Games` because `GlobalCombat.Games` is already the
   MySQL-backed persistence/listing facade for the `games`/`game_players` tables (GIF-32/33).
-  The two don't share state: a game started here is a bare in-memory process, not a row in
-  that table — reconciling the two (persisting board state, listing live games alongside
-  DB-backed ones) is the follow-up `GlobalCombat.Games.Server`'s moduledoc already tracks.
+
+  As of GIF-74, `create_game/1` creates its `games` row here (a real `games.id`, not a bare
+  `System.unique_integer/1`) and starts `GlobalCombat.Games.Server` against that same id, so a
+  `GlobalCombat.Games.TurnScheduler` claim and this in-memory process refer to the same game —
+  see `GlobalCombat.Games.LiveResolver`'s moduledoc for the other half (the scheduler handing a
+  claimed turn back to whichever of "the live process" or "persisted state" actually has it).
+  `game_players` rows still aren't written here (the roster lives entirely on the `Server`
+  process, mirrored into `games.serialized` only once play starts) — a lobby only shows up in
+  `GlobalCombat.Games.list_new_games/0` once it exists as a row at all; it won't yet show up in
+  `GlobalCombat.Games.list_player_games/2` for anyone who joined it, since that reads
+  `game_players`. Tracked as a known gap, not silently "fixed" by this ticket.
   """
 
+  alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.PubSub, as: GamePubSub
   alias GlobalCombat.Games.Server
   alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
 
+  @default_turn_length_minutes 1440
+
   @doc """
-  Creates a new game lobby and returns its id. `attrs` may include `:map_name`
-  (`:original` | `:elements`), `:is_fogged`, `:is_training`, `:is_non_random`,
-  `:reverse_attack_order`, `:minimum_armies`, `:max_players`, `:turn_length_minutes` —
-  see `GameController.Create`/`Views/Game/Create.cshtml` for the legacy field set.
+  Creates a new game lobby (a `games` row plus the `GlobalCombat.Games.Server` process backing
+  it) and returns its id. `attrs` may include `:map_name` (`:original` | `:elements`),
+  `:is_fogged`, `:is_training`, `:is_non_random`, `:reverse_attack_order`, `:minimum_armies`,
+  `:max_players`, `:turn_length_minutes` — see `GameController.Create`/`Views/Game/Create.cshtml`
+  for the legacy field set. `:turn_length_minutes` also opts the row into
+  `GlobalCombat.Games.Scheduling.list_due/1` once it goes active (`GlobalCombat.Games.Server`
+  calls `GlobalCombat.Games.mark_active/1` on `start_game/2`).
   """
   def create_game(attrs \\ %{}) do
-    game_id = System.unique_integer([:positive])
-    opts = Keyword.merge([game_id: game_id], Enum.map(attrs, fn {k, v} -> {k, v} end))
+    turn_length = Map.get(attrs, :turn_length_minutes, @default_turn_length_minutes)
+
+    {:ok, db_game} =
+      GamesDb.create_game(%{status: :new, private: false, turn_length: turn_length})
+
+    # Captures the calling process's Ecto Sandbox ownership chain so the freshly-spawned
+    # Games.Server — a *different* process than whoever called create_game/1, started by
+    # GamesSupervisor rather than inheriting it — can still reach GlobalCombat.Repo under an
+    # async test's non-shared sandbox. See Ecto.Adapters.SQL.Sandbox's docs on `$callers`;
+    # Server.init/1 does the matching `Process.put(:"$callers", ...)`.
+    callers = [self() | Process.get(:"$callers", [])]
+
+    opts =
+      [game_id: db_game.id, callers: callers]
+      |> Keyword.merge(Enum.map(attrs, fn {k, v} -> {k, v} end))
+
     {:ok, _pid} = DynamicSupervisor.start_child(GamesSupervisor, {Server, opts})
-    game_id
+    db_game.id
   end
 
   def game_exists?(game_id), do: Server.alive?(game_id)

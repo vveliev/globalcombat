@@ -26,10 +26,14 @@ defmodule GlobalCombat.Games.Server do
 
   use GenServer
 
+  alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.MapInfo
+  alias GlobalCombat.Engine.Wire
+  alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.PlayerView
   alias GlobalCombat.Games.PubSub, as: GamePubSub
+  alias GlobalCombat.GrpcHost
 
   @registry GlobalCombat.Games.Registry
   @max_messages 150
@@ -46,6 +50,7 @@ defmodule GlobalCombat.Games.Server do
     :turn_length_minutes,
     :turn_started_at,
     :is_private,
+    :db_last_turn_time,
     status: :lobby,
     players: [],
     engine: nil,
@@ -110,11 +115,38 @@ defmodule GlobalCombat.Games.Server do
     GenServer.cast(via(game_id), {:force_turn, account_id})
   end
 
+  @doc """
+  Runs the turn `GlobalCombat.Games.TurnScheduler` already claimed for this game (GIF-74) —
+  `claimed_last_turn_time` is the `last_turn_time` `GlobalCombat.Games.Scheduling.claim_turn/2`
+  just wrote, so this process's own clock bookkeeping stays in sync with the DB without
+  re-advancing it a second time (see `GlobalCombat.Games.advance_turn/4`'s moduledoc). Returns
+  `{:error, :not_playing}` if this game isn't mid-play — the scheduler shouldn't have found it
+  due otherwise, but a stale claim racing a since-ended game is a caller bug to report, not
+  something to crash the scheduler sweep over.
+  """
+  def run_scheduled_turn(game_id, claimed_last_turn_time) do
+    GenServer.call(via(game_id), {:run_scheduled_turn, claimed_last_turn_time})
+  end
+
   # --- server callbacks ---------------------------------------------------
 
   @impl true
   def init(opts) do
-    state = %__MODULE__{
+    if callers = Keyword.get(opts, :callers) do
+      Process.put(:"$callers", callers)
+    end
+
+    state =
+      case Keyword.get(opts, :rehydrate_from) do
+        nil -> fresh_state(opts)
+        serialized -> rehydrated_state(opts, serialized)
+      end
+
+    {:ok, state}
+  end
+
+  defp fresh_state(opts) do
+    %__MODULE__{
       game_id: Keyword.fetch!(opts, :game_id),
       map_name: Keyword.get(opts, :map_name, :original),
       is_fogged: Keyword.get(opts, :is_fogged, false),
@@ -126,8 +158,43 @@ defmodule GlobalCombat.Games.Server do
       turn_length_minutes: Keyword.get(opts, :turn_length_minutes, 1440),
       is_private: Keyword.get(opts, :is_private, false)
     }
+  end
 
-    {:ok, state}
+  # Boot-time reconstruction (GIF-74 item 3): rebuilds a live, :playing Games.Server straight
+  # from its last persisted wire snapshot instead of an empty lobby — the roster comes back out
+  # of the engine's own Players (Wire.from_wire_snapshot/2 needs no separate lobby-roster
+  # persistence: a rehydrated game is always already past start_game). The RNG is freshly
+  # reseeded (see Wire.to_wire_game/2's moduledoc) — a discontinuity only a differential-harness
+  # comparison would notice, never a production player.
+  defp rehydrated_state(opts, serialized) do
+    wire = GrpcHost.Game.decode(serialized)
+    rng = DotnetRandom.new(:erlang.unique_integer())
+
+    %{engine: engine, is_fogged: is_fogged, max_players: max_players} =
+      Wire.from_wire_snapshot(wire, rng)
+
+    %__MODULE__{
+      game_id: Keyword.fetch!(opts, :game_id),
+      map_name: engine.map_name,
+      is_fogged: is_fogged,
+      is_training: engine.is_training,
+      is_non_random: engine.is_non_random,
+      reverse_attack_order: engine.reverse_attack_order,
+      minimum_armies: engine.minimum_armies,
+      max_players: max_players,
+      turn_length_minutes: Keyword.fetch!(opts, :turn_length_minutes),
+      turn_started_at: DateTime.utc_now(),
+      db_last_turn_time: Keyword.fetch!(opts, :last_turn_time),
+      status: :playing,
+      engine: engine,
+      players: rehydrated_players(engine)
+    }
+  end
+
+  defp rehydrated_players(engine) do
+    Enum.map(Engine.players_in_order(engine), fn p ->
+      {p.number, %{account_id: p.account_id, name: p.name}}
+    end)
   end
 
   @impl true
@@ -194,7 +261,17 @@ defmodule GlobalCombat.Games.Server do
     with 1 <- find_player_number(state, account_id),
          true <- length(state.players) >= 2 do
       engine = new_engine(state)
-      state = %{state | status: :playing, engine: engine, turn_started_at: DateTime.utc_now()}
+      {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
+
+      state = %{
+        state
+        | status: :playing,
+          engine: engine,
+          turn_started_at: DateTime.utc_now(),
+          db_last_turn_time: db_game.last_turn_time
+      }
+
+      persist_snapshot(state)
       GamePubSub.broadcast_reload(state.game_id)
       {:reply, :ok, state}
     else
@@ -204,6 +281,19 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_call({:start_game, _account_id}, _from, state) do
     {:reply, {:error, :already_started}, state}
+  end
+
+  def handle_call(
+        {:run_scheduled_turn, claimed_last_turn_time},
+        _from,
+        %{status: :playing} = state
+      ) do
+    state = run_turn(%{state | db_last_turn_time: claimed_last_turn_time}, advance_clock: false)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:run_scheduled_turn, _claimed_last_turn_time}, _from, state) do
+    {:reply, {:error, :not_playing}, state}
   end
 
   @impl true
@@ -288,7 +378,7 @@ defmodule GlobalCombat.Games.Server do
 
     %Engine{
       map_name: state.map_name,
-      rng: GlobalCombat.Engine.DotnetRandom.new(:erlang.unique_integer()),
+      rng: DotnetRandom.new(:erlang.unique_integer()),
       turn: 1,
       is_non_random: state.is_non_random,
       reverse_attack_order: state.reverse_attack_order,
@@ -327,9 +417,29 @@ defmodule GlobalCombat.Games.Server do
     Engine.players_in_order(engine) |> Enum.all?(& &1.done)
   end
 
-  defp run_turn(state) do
+  # `advance_clock: true` (the default — every self-triggered run: all-players-done, force_turn)
+  # advances games.turn/prev_turn_time/last_turn_time itself, mirroring what
+  # GlobalCombat.Games.Scheduling.claim_turn/2 would have done had the scheduler gotten there
+  # first. `advance_clock: false` is only passed from the {:run_scheduled_turn, _} handler, whose
+  # caller already advanced those columns via an actual claim_turn/2 call before handing off —
+  # see GlobalCombat.Games.advance_turn/4's moduledoc for why running it again here would be a
+  # double-advance, not idempotent.
+  defp run_turn(state, opts \\ []) do
+    advance_clock? = Keyword.get(opts, :advance_clock, true)
     engine = Engine.run_turn(state.engine)
-    state = %{state | engine: engine, turn_started_at: DateTime.utc_now()}
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    state = %{state | engine: engine, turn_started_at: now}
+
+    state =
+      if advance_clock? do
+        GamesDb.advance_turn(state.game_id, engine.turn, state.db_last_turn_time, now)
+        %{state | db_last_turn_time: now}
+      else
+        state
+      end
+
+    persist_snapshot(state)
+    if engine.ended, do: GamesDb.finish_game(state.game_id)
 
     for {number, account_id} <- notifiable_accounts(state) do
       GamePubSub.broadcast_notification(
@@ -342,6 +452,18 @@ defmodule GlobalCombat.Games.Server do
 
     GamePubSub.broadcast_reload(state.game_id)
     state
+  end
+
+  defp persist_snapshot(state) do
+    wire =
+      Wire.to_wire_game(state.engine,
+        game_id: state.game_id,
+        turn_length_minutes: state.turn_length_minutes,
+        max_players: state.max_players,
+        is_fogged: state.is_fogged
+      )
+
+    GamesDb.persist_serialized(state.game_id, GrpcHost.Game.encode(wire))
   end
 
   defp notifiable_accounts(state) do

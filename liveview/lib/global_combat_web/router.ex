@@ -125,6 +125,9 @@ defmodule GlobalCombatWeb.Router do
 
     get "/settings", AccountSettingsController, :edit
     put "/settings/password", AccountSettingsController, :update_password
+
+    get "/contact", AccountContactController, :new
+    post "/contact", AccountContactController, :create
   end
 
   # --- Legacy globalcombat.com URL scheme for the Account controller (GIF-31
@@ -137,8 +140,6 @@ defmodule GlobalCombatWeb.Router do
   # GIF-31's audit of legacy paths never covered this controller, so these
   # never got aliases. `LostPassword` is the legacy name for what's now
   # reset-password (`AccountController.LostPassword` called `ResetPassword`).
-  # `Account/Contact` is intentionally omitted: that controller/view hasn't
-  # been ported to LiveView yet.
   # Do not "clean up" these paths — if canonical paths are ever restructured,
   # redirect from here instead of deleting.
   scope "/Account", GlobalCombatWeb do
@@ -162,6 +163,8 @@ defmodule GlobalCombatWeb.Router do
     pipe_through [:browser, :require_authenticated_account]
 
     get "/Settings", AccountSettingsController, :edit
+    get "/Contact", AccountContactController, :new
+    post "/Contact", AccountContactController, :create
   end
 
   # Other scopes may use custom stacks.
