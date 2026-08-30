@@ -28,7 +28,7 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <GameLayout.game_layout>
+    <GameLayout.game_layout class="min-h-screen">
       <:status>
         <span class="font-semibold">Turn {@turn}</span>
         <StatusPill.status_pill tone="active">Resolving</StatusPill.status_pill>
