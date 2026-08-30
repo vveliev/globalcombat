@@ -18,6 +18,11 @@ defmodule Mix.Tasks.GameEngine.DiffHarness do
     --games                number of independent games to run this harness over (default 1)
     --non-random           exercise IsNonRandom (fixed-percentage, no-RNG) combat instead of dice rolls
     --reverse-attack-order exercise ReverseAttackOrder (smallest-first instead of largest-first)
+    --fogged               exercise IsFogged (fog-of-war). Confirmed display-only in the .NET
+                            oracle (Game.cs's GetStatus appends an <img> tag, nothing else reads
+                            it) and unimplemented in the Elixir port for the same reason - passing
+                            it through is expected to produce identical diffed state to --fogged
+                            omitted, which is itself the check.
 
   Exits non-zero if any turn, across any game, diverged.
   """
@@ -43,7 +48,8 @@ defmodule Mix.Tasks.GameEngine.DiffHarness do
           minimum_armies: :integer,
           games: :integer,
           non_random: :boolean,
-          reverse_attack_order: :boolean
+          reverse_attack_order: :boolean,
+          fogged: :boolean
         ]
       )
 
@@ -52,6 +58,7 @@ defmodule Mix.Tasks.GameEngine.DiffHarness do
     games = Keyword.get(opts, :games, 1)
     is_non_random = Keyword.get(opts, :non_random, false)
     reverse_attack_order = Keyword.get(opts, :reverse_attack_order, false)
+    is_fogged = Keyword.get(opts, :fogged, false)
 
     player_names =
       opts
@@ -69,7 +76,8 @@ defmodule Mix.Tasks.GameEngine.DiffHarness do
 
     IO.puts(
       "Running #{games} game(s) x #{turns} turns each (map=#{map_name}, players=#{Enum.join(player_names, "/")}, " <>
-        "base seed=#{base_seed}, non_random=#{is_non_random}, reverse_attack_order=#{reverse_attack_order})\n"
+        "base seed=#{base_seed}, non_random=#{is_non_random}, reverse_attack_order=#{reverse_attack_order}, " <>
+        "fogged=#{is_fogged})\n"
     )
 
     all_reports =
@@ -85,6 +93,7 @@ defmodule Mix.Tasks.GameEngine.DiffHarness do
             minimum_armies: minimum_armies,
             is_non_random: is_non_random,
             reverse_attack_order: reverse_attack_order,
+            is_fogged: is_fogged,
             on_turn: &print_turn(game_index, &1)
           )
 
