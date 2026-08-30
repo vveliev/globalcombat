@@ -10,6 +10,14 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   tracking/ad cruft with no functional value to the port. The `<audio id="notify">` chime and
   the SignalR bootstrap (`$.popupChat` replay from `OpenChatWindows`) are carried forward,
   wired to `assets/js/chat.js` instead of `Global.js`/jQuery.
+
+  `page_title` renders as a visually-hidden `<h1>` ahead of the content slot. The legacy
+  `_Layout.cshtml` never had one either (just a `ViewBag.Title` browser-tab string) — this
+  isn't a regression to preserve, since it left every page under this chrome with no
+  heading a screen-reader user could jump to for "what page is this" (WCAG 1.3.1, 2.4.6;
+  GIF-86). `sr-only` because the design has no visual slot for a page title (`Card`'s own
+  `:header` already carries the visible section titles) and this port isn't the place to
+  add one.
   """
 
   use Phoenix.Component
@@ -18,6 +26,7 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   import Phoenix.Controller, only: [get_csrf_token: 0]
 
   attr :current_account, :any, default: nil
+  attr :page_title, :string, default: nil
   slot :inner_block, required: true
 
   def site_chrome(assigns) do
@@ -50,6 +59,7 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         </nav>
       </:sidebar>
       <:content>
+        <h1 :if={@page_title} class="sr-only">{@page_title}</h1>
         {render_slot(@inner_block)}
       </:content>
     </GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout.admin_layout>

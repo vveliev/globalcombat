@@ -26,6 +26,33 @@ defmodule GlobalCombatWeb.Components.Boutique.CardTest do
     assert html =~ "shadow-md"
   end
 
+  test "renders :header as a real heading element, not a styled div (WCAG 1.3.1/2.4.6, GIF-86)" do
+    assigns = %{}
+
+    html =
+      rendered_to_string(~H"""
+      <Card.card>
+        <:header>Title</:header>
+      </Card.card>
+      """)
+
+    assert html =~ ~r{<h2[^>]*>\s*Title\s*</h2>}
+  end
+
+  test "heading_level lets a caller nest a card under a non-h2 section, e.g. h1" do
+    assigns = %{}
+
+    html =
+      rendered_to_string(~H"""
+      <Card.card heading_level="h1">
+        <:header>Title</:header>
+      </Card.card>
+      """)
+
+    assert html =~ ~r{<h1[^>]*>\s*Title\s*</h1>}
+    refute html =~ "<h2"
+  end
+
   test "omits header/footer wrappers when their slots are unused" do
     assigns = %{}
     html = rendered_to_string(~H"<Card.card>Just body</Card.card>")

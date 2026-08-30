@@ -175,6 +175,60 @@ defmodule GlobalCombatWeb.HomeControllerTest do
     end
   end
 
+  describe "heading structure (WCAG 1.3.1/2.4.6, GIF-86)" do
+    # Card's :header used to render as a plain styled <div> — these surfaces had zero
+    # real headings for a screen-reader user to navigate by. Every page under
+    # SiteChrome now carries exactly one <h1> (the page title, sr-only — the legacy
+    # design has no visual slot for one) plus real <h2>s from each Card's :header.
+    defp assert_single_h1_and_headings(body) do
+      assert Regex.scan(~r/<h1[\s>]/, body) |> length() == 1
+      assert body =~ ~r/<h2[\s>]/
+    end
+
+    test "index has one h1 and real h2 section headings when logged out", %{conn: conn} do
+      assert_single_h1_and_headings(get(conn, ~p"/") |> html_response(200))
+    end
+
+    test "index has one h1 and real h2 section headings when logged in", %{conn: conn} do
+      account = account_fixture()
+      body = conn |> log_in_account(account) |> get(~p"/") |> html_response(200)
+      assert_single_h1_and_headings(body)
+    end
+
+    test "Stats has one h1 and real h2 section headings", %{conn: conn} do
+      admin = admin_fixture()
+      body = conn |> log_in_account(admin) |> get(~p"/Stats") |> html_response(200)
+      assert_single_h1_and_headings(body)
+    end
+
+    test "Messages has one h1 and real h2 section headings", %{conn: conn} do
+      account = account_fixture()
+      body = conn |> log_in_account(account) |> get(~p"/Messages") |> html_response(200)
+      assert_single_h1_and_headings(body)
+    end
+
+    test "Player-Info has one h1 and real h2 section headings", %{conn: conn} do
+      account = account_fixture()
+      body = get(conn, ~p"/Player-Info-#{account.id}") |> html_response(200)
+      assert_single_h1_and_headings(body)
+    end
+
+    test "IpAddresses has one h1 and real h2 section headings", %{conn: conn} do
+      admin = admin_fixture()
+      body = conn |> log_in_account(admin) |> get(~p"/IpAddresses") |> html_response(200)
+      assert_single_h1_and_headings(body)
+    end
+
+    test "OptOut has one h1 and real h2 section headings", %{conn: conn} do
+      account = account_fixture()
+      body =
+        get(conn, ~p"/OptOut?Account=#{account.id}&Key=#{account.opt_out_key}")
+        |> html_response(200)
+
+      assert_single_h1_and_headings(body)
+    end
+  end
+
   describe "chat endpoints" do
     setup %{conn: conn} do
       sender = account_fixture()
