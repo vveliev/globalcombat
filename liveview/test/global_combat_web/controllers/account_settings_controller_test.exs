@@ -37,7 +37,10 @@ defmodule GlobalCombatWeb.AccountSettingsControllerTest do
           "new_password_confirmation" => "newpassword1"
         })
 
-      assert html_response(conn, 200) =~ "Password modified successfully."
+      html = html_response(conn, 200)
+      assert html =~ "Password modified successfully."
+      assert html =~ ~s(id="result-message")
+      assert html =~ ~s(role="status")
       assert {:ok, _} = Accounts.authenticate_account(account.name, "newpassword1")
     end
 
@@ -49,7 +52,11 @@ defmodule GlobalCombatWeb.AccountSettingsControllerTest do
           "new_password_confirmation" => "newpassword1"
         })
 
-      assert html_response(conn, 200) =~ "did not enter the correct current password"
+      html = html_response(conn, 200)
+      assert html =~ "did not enter the correct current password"
+      assert html =~ ~s(id="result-message")
+      assert html =~ ~s(role="alert")
+      assert html =~ ~s(aria-describedby="result-message")
       assert {:ok, _} = Accounts.authenticate_account(account.name, valid_account_password())
     end
 
@@ -61,7 +68,10 @@ defmodule GlobalCombatWeb.AccountSettingsControllerTest do
           "new_password_confirmation" => "somethingelse"
         })
 
-      assert html_response(conn, 200) =~ "do not match"
+      html = html_response(conn, 200)
+      assert html =~ "do not match"
+      assert html =~ ~s(role="alert")
+      assert html =~ ~s(aria-describedby="result-message")
     end
 
     test "rejects a too-short new password", %{conn: conn} do

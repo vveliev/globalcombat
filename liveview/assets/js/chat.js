@@ -25,17 +25,36 @@ function postForm(path, params) {
 
 let windowCount = 0
 
+// Shared assertive live region: announces a newly-opened chat window (triggered by an
+// incoming DM, not by the user clicking to open it) without moving focus away from
+// whatever the user is doing. Reused across calls — role="alert" only reliably announces
+// on *content changes* to a node already in the DOM, not on simultaneous insert+populate.
+function announce(text) {
+  let el = document.getElementById("chat-announcer")
+  if (!el) {
+    el = document.createElement("div")
+    el.id = "chat-announcer"
+    el.className = "sr-only"
+    el.setAttribute("role", "alert")
+    el.setAttribute("aria-live", "assertive")
+    el.setAttribute("aria-atomic", "true")
+    document.body.appendChild(el)
+  }
+  el.textContent = text
+}
+
 function appendChatMessage(sourceId, sourceName, text) {
   const existing = document.querySelector(`[data-chat-window][data-partner-id="${sourceId}"]`)
   if (!existing) {
     popupChat(sourceId, sourceName)
+    announce(`New message from ${sourceName}`)
     playChime()
   } else {
     const area = existing.querySelector(".chat-area")
     const line = document.createElement("div")
-    line.innerHTML = `<b></b> `
-    line.querySelector("b").textContent = sourceName + ":"
-    line.append(" " + text)
+    const name = document.createElement("b")
+    name.textContent = sourceName + ":"
+    line.append(name, " " + text)
     area.appendChild(line)
     area.scrollTop = area.scrollHeight
   }
@@ -46,8 +65,15 @@ function playChime() {
   if (audio) audio.play().catch(() => {})
 }
 
-function popupChat(partnerId, partnerName) {
-  if (document.querySelector(`[data-chat-window][data-partner-id="${partnerId}"]`)) return
+// `focusCompose: true` marks a window opened as a direct result of user action (the
+// `.chat-open-btn` click path) — focus moves into the textarea. Windows opened because a
+// message arrived leave focus alone; see `announce()` for how those are surfaced instead.
+function popupChat(partnerId, partnerName, {focusCompose = false} = {}) {
+  const existing = document.querySelector(`[data-chat-window][data-partner-id="${partnerId}"]`)
+  if (existing) {
+    if (focusCompose) existing.querySelector("textarea")?.focus()
+    return existing
+  }
 
   windowCount += 1
   const box = document.createElement("div")
@@ -56,24 +82,40 @@ function popupChat(partnerId, partnerName) {
   box.dataset.partnerId = partnerId
   box.dataset.partnerName = partnerName
   box.style.right = `${10 + (windowCount - 1) * 225}px`
-  box.innerHTML = `
-    <div class="chat-header">
-      <span>${partnerName}</span>
-      <button type="button" class="chat-close" aria-label="Close">×</button>
-    </div>
-    <div class="chat-area"></div>
-    <div class="chat-compose">
-      <textarea rows="2"></textarea>
-    </div>
-  `
+  box.setAttribute("role", "dialog")
+  box.setAttribute("aria-label", partnerName)
+
+  const header = document.createElement("div")
+  header.className = "chat-header"
+  const title = document.createElement("span")
+  title.textContent = partnerName
+  const closeBtn = document.createElement("button")
+  closeBtn.type = "button"
+  closeBtn.className = "chat-close"
+  closeBtn.setAttribute("aria-label", "Close")
+  closeBtn.textContent = "×"
+  header.append(title, closeBtn)
+
+  const area = document.createElement("div")
+  area.className = "chat-area"
+  area.setAttribute("role", "log")
+  area.setAttribute("aria-relevant", "additions")
+
+  const compose = document.createElement("div")
+  compose.className = "chat-compose"
+  const textarea = document.createElement("textarea")
+  textarea.rows = 2
+  textarea.setAttribute("aria-label", `Message to ${partnerName}`)
+  compose.appendChild(textarea)
+
+  box.append(header, area, compose)
   document.body.appendChild(box)
 
-  box.querySelector(".chat-close").addEventListener("click", () => {
+  closeBtn.addEventListener("click", () => {
     box.remove()
     postForm("/Home/CloseChatWindow", {targetId: partnerId, targetName: partnerName})
   })
 
-  const textarea = box.querySelector("textarea")
   textarea.addEventListener("keypress", e => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -86,9 +128,18 @@ function popupChat(partnerId, partnerName) {
     }
   })
 
+  if (focusCompose) textarea.focus()
+
   postForm("/Home/LoadChatMessages", {targetId: partnerId, targetName: partnerName})
     .then(r => r.json())
-    .then(history => history.forEach(m => appendChatMessage(partnerId, m.name, m.text)))
+    .then(history => {
+      history.forEach(m => appendChatMessage(partnerId, m.name, m.text))
+      // Enable aria-live only after the history backlog is in place, so opening a chat
+      // doesn't read the whole conversation aloud — only genuinely new messages announce.
+      area.setAttribute("aria-live", "polite")
+    })
+
+  return box
 }
 
 function connectChatSocket() {
@@ -118,7 +169,7 @@ function reopenSavedWindows() {
 document.addEventListener("click", e => {
   const trigger = e.target.closest(".chat-open-btn")
   if (!trigger) return
-  popupChat(trigger.dataset.accountId, trigger.dataset.accountName)
+  popupChat(trigger.dataset.accountId, trigger.dataset.accountName, {focusCompose: true})
 })
 
 document.addEventListener("DOMContentLoaded", () => {

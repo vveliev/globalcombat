@@ -207,9 +207,11 @@ defmodule GlobalCombatWeb.CoreComponents do
 
   def input(%{type: "checkbox"} = assigns) do
     assigns =
-      assign_new(assigns, :checked, fn ->
+      assigns
+      |> assign_new(:checked, fn ->
         Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value])
       end)
+      |> assign(:error_ids, error_ids(assigns[:id], assigns.errors))
 
     ~H"""
     <div class="fieldset mb-2">
@@ -229,16 +231,20 @@ defmodule GlobalCombatWeb.CoreComponents do
             value="true"
             checked={@checked}
             class={@class || "checkbox checkbox-sm"}
+            aria-invalid={@errors != [] && "true"}
+            aria-describedby={@error_ids != [] && Enum.join(@error_ids, " ")}
             {@rest}
           />{@label}
         </span>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={{msg, id} <- Enum.zip(@errors, @error_ids)} id={id}>{msg}</.error>
     </div>
     """
   end
 
   def input(%{type: "select"} = assigns) do
+    assigns = assign(assigns, :error_ids, error_ids(assigns[:id], assigns.errors))
+
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
@@ -248,18 +254,22 @@ defmodule GlobalCombatWeb.CoreComponents do
           name={@name}
           class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
           multiple={@multiple}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@error_ids != [] && Enum.join(@error_ids, " ")}
           {@rest}
         >
           <option :if={@prompt} value="">{@prompt}</option>
           {Phoenix.HTML.Form.options_for_select(@options, @value)}
         </select>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={{msg, id} <- Enum.zip(@errors, @error_ids)} id={id}>{msg}</.error>
     </div>
     """
   end
 
   def input(%{type: "textarea"} = assigns) do
+    assigns = assign(assigns, :error_ids, error_ids(assigns[:id], assigns.errors))
+
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
@@ -271,16 +281,20 @@ defmodule GlobalCombatWeb.CoreComponents do
             @class || "w-full textarea",
             @errors != [] && (@error_class || "textarea-error")
           ]}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@error_ids != [] && Enum.join(@error_ids, " ")}
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={{msg, id} <- Enum.zip(@errors, @error_ids)} id={id}>{msg}</.error>
     </div>
     """
   end
 
   # All other inputs text, datetime-local, url, password, etc. are handled here...
   def input(assigns) do
+    assigns = assign(assigns, :error_ids, error_ids(assigns[:id], assigns.errors))
+
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
@@ -294,18 +308,30 @@ defmodule GlobalCombatWeb.CoreComponents do
             @class || "w-full input",
             @errors != [] && (@error_class || "input-error")
           ]}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@error_ids != [] && Enum.join(@error_ids, " ")}
           {@rest}
         />
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={{msg, id} <- Enum.zip(@errors, @error_ids)} id={id}>{msg}</.error>
     </div>
     """
+  end
+
+  # Builds one DOM id per error message so each input's aria-describedby can
+  # point at the exact <.error> paragraphs announcing its own errors.
+  defp error_ids(nil, _errors), do: []
+
+  defp error_ids(id, errors) do
+    errors
+    |> Enum.with_index()
+    |> Enum.map(fn {_msg, index} -> "#{id}-error-#{index}" end)
   end
 
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""
-    <p class="mt-1.5 flex gap-2 items-center text-sm text-error">
+    <p id={assigns[:id]} role="alert" class="mt-1.5 flex gap-2 items-center text-sm text-error">
       <.icon name="hero-exclamation-circle" class="size-5" />
       {render_slot(@inner_block)}
     </p>

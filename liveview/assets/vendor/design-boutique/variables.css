@@ -818,7 +818,14 @@
   --color-text-muted: var(--zinc-4);
   --color-border: var(--zinc-7);
   --color-primary-contrast: var(--zinc-9);
-  --color-danger: var(--red-4);
+  /* GIF-89: red-4 measures ~3.82:1 against --zinc-8 here, below the AA 4.5:1
+     floor for text. red-3 clears it (~4.87:1). Local override — red-4 comes
+     from upstream vveliev/design-boutique tokens/themes/industry-dark.json,
+     which this repo can't push to; reconcile there and drop this override
+     the next time liveview/scripts/sync_design_boutique.sh runs (see
+     PROVENANCE.md). --color-status-offline reuses red-4 for a status dot,
+     not text, so it's left as-is. */
+  --color-danger: var(--red-3);
   --color-success: var(--green-3);
   --color-warning: var(--yellow-2);
   --color-info: var(--cyan-3);

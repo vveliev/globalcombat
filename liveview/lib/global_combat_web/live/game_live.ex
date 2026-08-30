@@ -162,7 +162,7 @@ defmodule GlobalCombatWeb.GameLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <GameLayout.game_layout id="game-board">
+    <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
       <:status>
         {status_line(assigns)}
       </:status>
@@ -186,6 +186,27 @@ defmodule GlobalCombatWeb.GameLive do
         />
       </:players>
     </GameLayout.game_layout>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
+      // Join/Start/End Turn/Force Turn all swap out significant subtrees
+      // (lobby -> board, a button disappearing once its action no longer
+      // applies). LiveView's morphdom patch drops focus to <body> when the
+      // focused element is removed — this restores it to the game layout's
+      // stable :status landmark (GameLayout, marked data-focus-landmark) so
+      // keyboard/screen-reader users don't lose their place (GIF-82).
+      export default {
+        beforeUpdate() {
+          const active = document.activeElement
+          this.focusedBeforeUpdate = this.el.contains(active) ? active : null
+        },
+        updated() {
+          const lost = this.focusedBeforeUpdate
+          this.focusedBeforeUpdate = null
+          if (lost && !document.body.contains(lost)) {
+            this.el.querySelector("[data-focus-landmark]")?.focus()
+          }
+        }
+      }
+    </script>
     """
   end
 
@@ -239,8 +260,14 @@ defmodule GlobalCombatWeb.GameLive do
   defp board(assigns) do
     ~H"""
     <div class="relative" style="width: 800px; height: 480px;">
-      <.area :for={area <- @view.areas} area={area} map_name={@view.map_name} />
+      <.area
+        :for={area <- @view.areas}
+        area={area}
+        map_name={@view.map_name}
+        players={@view.players}
+      />
     </div>
+    <.board_table areas={@view.areas} players={@view.players} />
     <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
@@ -253,6 +280,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   attr :area, :map, required: true
   attr :map_name, :atom, required: true
+  attr :players, :list, required: true
 
   defp area(assigns) do
     ~H"""
@@ -261,10 +289,11 @@ defmodule GlobalCombatWeb.GameLive do
         src={"/maps/#{@map_name}/#{@area.tech_name}#{owner_color(@area.owner_number)}.gif"}
         width={@area.width}
         height={@area.height}
+        alt={"#{@area.tech_name}, owned by #{owner_name(@players, @area.owner_number) || "unclaimed"}"}
       />
       <span
         :if={@area.armies}
-        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold"
+        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000]"
       >
         {@area.armies}
       </span>
@@ -272,15 +301,80 @@ defmodule GlobalCombatWeb.GameLive do
     """
   end
 
+  # White text alone doesn't meet WCAG 1.4.3 against every owner_color/1
+  # background — Player.GetColor()'s #FFE45F (owner 3) measures 1.27:1 and
+  # #D45D00 (owner 4) measures 3.91:1 against white, both below the 4.5:1
+  # (normal) / 3:1 (large) thresholds. The black outline above guarantees
+  # legibility independent of tile color, including future map/color
+  # additions (GIF-83).
   defp owner_color(nil), do: 0
   defp owner_color(number), do: rem(number, 9)
+
+  defp owner_name(_players, nil), do: nil
+
+  defp owner_name(players, owner_number) do
+    case Enum.find(players, &(&1.number == owner_number)) do
+      %{name: name} -> name
+      nil -> nil
+    end
+  end
+
+  # Non-visual equivalent of the pixel-positioned board (GIF-81, WCAG 1.3.1): the
+  # `<div>` above conveys territory/owner/army-count/adjacency purely through
+  # image position and color, which is meaningless to a screen reader in DOM
+  # order. This `sr-only` table (same pattern as BarChart/LineChart's fallback
+  # table) carries the identical, already fog-of-war-filtered `@view.areas` data
+  # as an ordered, navigable structure instead — visually hidden, never
+  # `aria-hidden`, so assistive tech can still read it.
+  #
+  # Owner/army text reuses `owner_name/2`'s "unclaimed" fallback verbatim rather
+  # than distinguishing "hidden by fog" from "actually unclaimed": area/1's alt
+  # text makes that same choice (GIF-79), and diverging here would hand a screen
+  # reader user more information than a sighted player looking at the same
+  # neutral-colored sprite ever gets — a fairness leak, not just an inconsistency.
+  # Adjacency, unlike owner/armies, is static map topology every viewer already
+  # sees rendered on the board regardless of fog, so it's listed in full.
+  attr :areas, :list, required: true
+  attr :players, :list, required: true
+
+  defp board_table(assigns) do
+    assigns = assign(assigns, :area_names, Map.new(assigns.areas, &{&1.number, &1.name}))
+
+    ~H"""
+    <table class="sr-only">
+      <caption>Board state: territory, owner, armies, and adjacency</caption>
+      <thead>
+        <tr>
+          <th scope="col">Territory</th>
+          <th scope="col">Owner</th>
+          <th scope="col">Armies</th>
+          <th scope="col">Adjacent to</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={area <- @areas}>
+          <th scope="row">{area.name}</th>
+          <td>{owner_name(@players, area.owner_number) || "unclaimed"}</td>
+          <td>{area.armies || "—"}</td>
+          <td>{adjacent_names(area, @area_names)}</td>
+        </tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  defp adjacent_names(area, area_names) do
+    area.adjacent
+    |> Enum.map(&Map.fetch!(area_names, &1))
+    |> Enum.join(", ")
+  end
 
   attr :players, :list, required: true
   attr :viewer_number, :any, required: true
 
   defp player_list(assigns) do
     ~H"""
-    <ul class="flex flex-col gap-[var(--space-2)]">
+    <ul aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
         <span class="flex items-center gap-[var(--space-2)]">
@@ -314,7 +408,7 @@ defmodule GlobalCombatWeb.GameLive do
         />
         <Button.button type="submit">Send</Button.button>
       </form>
-      <ul class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
+      <ul aria-live="polite" class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
         <li :for={m <- @messages}>
           <span class="font-semibold">{m.source_name}:</span> {m.text}
         </li>

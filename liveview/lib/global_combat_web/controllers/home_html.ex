@@ -58,6 +58,7 @@ defmodule GlobalCombatWeb.HomeHTML do
             do: "Click to chat with #{@name}.",
             else: "#{@name} is offline. Click to message."
         }
+        aria-label={"Chat with " <> @name <> if(@online?, do: " (online)", else: " (offline)")}
       >
         <Badge.badge intent={if @online?, do: "success", else: "neutral"} dot>
           {if @online?, do: "online", else: "offline"}

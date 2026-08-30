@@ -36,9 +36,9 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
       </:status>
 
       <:board>
-        <Card.card>
+        <Card.card heading_level="h1">
           <:header>
-            <h1 class="text-lg font-semibold">design-boutique renders here</h1>
+            design-boutique renders here
           </:header>
           <p class="text-text-muted">
             Colours, spacing and type come from the vendored token layer. Switching

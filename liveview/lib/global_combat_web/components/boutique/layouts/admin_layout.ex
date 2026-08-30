@@ -33,6 +33,16 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout do
       ]}
       {@rest}
     >
+      <a
+        href="#main-content"
+        class={[
+          "sr-only focus:not-sr-only focus:fixed focus:top-[var(--space-2)] focus:left-[var(--space-2)] focus:z-50",
+          "focus:rounded-[var(--radius-sm)] focus:bg-surface focus:px-[var(--space-4)] focus:py-[var(--space-2)]",
+          "focus:text-text focus:shadow-lg focus:outline focus:outline-2 focus:outline-offset-2"
+        ]}
+      >
+        Skip to main content
+      </a>
       <nav
         :if={@sidebar != []}
         aria-label="Sidebar"
@@ -49,7 +59,11 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout do
       >
         {render_slot(@topbar)}
       </header>
-      <main class="[grid-area:content] min-w-0 p-[var(--space-6)] overflow-y-auto">
+      <main
+        id="main-content"
+        tabindex="-1"
+        class="[grid-area:content] min-w-0 p-[var(--space-6)] overflow-y-auto focus:outline-none"
+      >
         {render_slot(@content)}
       </main>
     </div>

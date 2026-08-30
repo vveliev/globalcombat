@@ -18,8 +18,8 @@ defmodule GlobalCombatWeb.TourneyHTML do
 
   def bracket_round(assigns) do
     ~H"""
-    <td class="align-middle whitespace-nowrap p-[var(--space-3)]">
-      <b>Round {@round.number}</b><br />
+    <div class="align-middle whitespace-nowrap p-[var(--space-3)]">
+      <h3 class="font-bold text-base">Round {@round.number}</h3>
       <span class="text-text-muted text-sm">
         {round_subtitle(@round)}
       </span>
@@ -34,7 +34,7 @@ defmodule GlobalCombatWeb.TourneyHTML do
           {round_game(assigns, game_number)}
         </div>
       </div>
-    </td>
+    </div>
     """
   end
 

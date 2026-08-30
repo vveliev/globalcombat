@@ -35,7 +35,11 @@ defmodule GlobalCombatWeb.AccountResetPasswordControllerTest do
       conn: conn
     } do
       conn = post(conn, ~p"/account/reset-password", account: %{login: "nobody-here"})
-      assert html_response(conn, 200) =~ "Account not found."
+      html = html_response(conn, 200)
+      assert html =~ "Account not found."
+      assert html =~ ~s(id="login-error")
+      assert html =~ ~s(role="alert")
+      assert html =~ ~s(aria-describedby="login-error")
     end
 
     test "shows an error for a blank login", %{conn: conn} do

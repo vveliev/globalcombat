@@ -4,7 +4,7 @@ defmodule GlobalCombatWeb.AccountSettingsController do
   alias GlobalCombat.Accounts
 
   def edit(conn, _params) do
-    render(conn, :edit, result_message: nil)
+    render(conn, :edit, result_message: nil, result_error?: false)
   end
 
   # Ports `AccountController.Settings` -> `ModifyPassword(oldPassword, newPassword, newPasswordVerify)`.
@@ -17,13 +17,15 @@ defmodule GlobalCombatWeb.AccountSettingsController do
       new_password != new_password_confirmation ->
         render(conn, :edit,
           result_message:
-            "Unable to modify your password. The new passwords you entered do not match."
+            "Unable to modify your password. The new passwords you entered do not match.",
+          result_error?: true
         )
 
       String.length(new_password) < 5 ->
         render(conn, :edit,
           result_message:
-            "Unable to modify your password. Password must be at least five letters."
+            "Unable to modify your password. Password must be at least five letters.",
+          result_error?: true
         )
 
       true ->
@@ -31,16 +33,23 @@ defmodule GlobalCombatWeb.AccountSettingsController do
           {:ok, account} ->
             conn
             |> assign(:current_account, account)
-            |> render(:edit, result_message: "Password modified successfully.")
+            |> render(:edit,
+              result_message: "Password modified successfully.",
+              result_error?: false
+            )
 
           {:error, :bad_old_password} ->
             render(conn, :edit,
               result_message:
-                "Unable to modify your password. You did not enter the correct current password."
+                "Unable to modify your password. You did not enter the correct current password.",
+              result_error?: true
             )
 
           {:error, %Ecto.Changeset{}} ->
-            render(conn, :edit, result_message: "Unable to modify your password.")
+            render(conn, :edit,
+              result_message: "Unable to modify your password.",
+              result_error?: true
+            )
         end
     end
   end

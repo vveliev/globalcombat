@@ -32,40 +32,34 @@
 
   <h2 :if={@tourney.double_elimination} class="text-xl font-semibold mt-6 mb-2">Main Bracket</h2>
 
-  <table class="border-0" cellpadding="10">
-    <tr>
+  <div class="flex flex-row flex-wrap gap-4">
+    <.bracket_round
+      :for={round <- @bracket.winner_bracket}
+      round={round}
+      tourney={@tourney}
+      tourney_games={@tourney_games}
+    />
+  </div>
+
+  <div :if={@tourney.double_elimination}>
+    <h2 class="text-xl font-semibold mt-6 mb-2">Loser Bracket</h2>
+    <div class="flex flex-row flex-wrap gap-4">
       <.bracket_round
-        :for={round <- @bracket.winner_bracket}
+        :for={round <- @bracket.loser_bracket}
         round={round}
         tourney={@tourney}
         tourney_games={@tourney_games}
       />
-    </tr>
-  </table>
-
-  <div :if={@tourney.double_elimination}>
-    <h2 class="text-xl font-semibold mt-6 mb-2">Loser Bracket</h2>
-    <table class="border-0" cellpadding="10">
-      <tr>
-        <.bracket_round
-          :for={round <- @bracket.loser_bracket}
-          round={round}
-          tourney={@tourney}
-          tourney_games={@tourney_games}
-        />
-      </tr>
-    </table>
+    </div>
 
     <h2 class="text-xl font-semibold mt-6 mb-2">Final Game</h2>
-    <table class="border-0" cellpadding="10">
-      <tr>
-        <.bracket_round
-          round={@bracket.final_round}
-          tourney={@tourney}
-          tourney_games={@tourney_games}
-        />
-      </tr>
-    </table>
+    <div class="flex flex-row flex-wrap gap-4">
+      <.bracket_round
+        round={@bracket.final_round}
+        tourney={@tourney}
+        tourney_games={@tourney_games}
+      />
+    </div>
   </div>
 
   <div :if={not Tourney.started?(@tourney)}>
