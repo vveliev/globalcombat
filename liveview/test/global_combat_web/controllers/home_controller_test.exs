@@ -26,6 +26,16 @@ defmodule GlobalCombatWeb.HomeControllerTest do
       assert body =~ "Your Current Games"
     end
 
+    test "the logged-in viewer counts as online without a live chat connection (GIF-75)", %{
+      conn: conn
+    } do
+      account = account_fixture()
+      body = conn |> log_in_account(account) |> get(~p"/") |> html_response(200)
+
+      assert body =~ "Players Currently Online: 1"
+      assert body =~ account.name
+    end
+
     test "lists the account's current games and invites", %{conn: conn} do
       account = account_fixture()
       game_fixture(%{game_name: "My Current Game", started: true}, [{account.id, []}])
