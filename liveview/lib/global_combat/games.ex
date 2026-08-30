@@ -18,10 +18,16 @@ defmodule GlobalCombat.Games do
   alias GlobalCombat.Games.{Game, GamePlayer, GameSummary}
   alias GlobalCombat.Repo
 
-  @doc "Port of `GameServer.SaveNewGame` for a freshly-created game (insert only, no blob to save)."
+  @doc """
+  Port of `GameServer.SaveNewGame` for a freshly-created game (insert only, no blob to save).
+
+  `turn_length` (minutes) is optional and, per GIF-68, opts this game into the periodic turn
+  scheduler once it's `mark_active/1`'d -- a `nil` `turn_length` (the default) leaves it outside
+  `GlobalCombat.Games.Scheduling.list_due/1` entirely, same as today.
+  """
   def create_game(attrs \\ %{}) do
     %Game{}
-    |> Ecto.Changeset.cast(attrs, [:status, :private])
+    |> Ecto.Changeset.cast(attrs, [:status, :private, :turn_length])
     |> Repo.insert()
   end
 
@@ -39,9 +45,20 @@ defmodule GlobalCombat.Games do
     |> Repo.insert()
   end
 
-  @doc "Sets a game active once its bracket slot has filled -- there is no in-memory `Game.Start()` yet to do this implicitly."
+  @doc """
+  Sets a game active once its bracket slot has filled -- there is no in-memory `Game.Start()`
+  yet to do this implicitly. Stamps `last_turn_time` the same way `Game.cs`'s `Start()` does
+  (`LastTurnTime = DateTime.UtcNow`), so a `turn_length`-bearing game becomes schedulable the
+  moment it goes active rather than needing a first turn to run manually before the scheduler
+  can see it.
+  """
   def mark_active(%Game{} = game) do
-    game |> Ecto.Changeset.change(status: :active) |> Repo.update()
+    game
+    |> Ecto.Changeset.change(
+      status: :active,
+      last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
+    )
+    |> Repo.update()
   end
 
   @doc "Accounts seated in a game, in join order (mirrors `Game.Players` list order pre-play)."
