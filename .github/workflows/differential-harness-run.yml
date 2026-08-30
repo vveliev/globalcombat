@@ -1,0 +1,130 @@
+name: differential harness (reusable run)
+
+# Shared implementation for differential-harness.yml's `smoke` and `full`
+# jobs: boots the .NET oracle (GlobalCombat.GrpcHost) and runs
+# `liveview/scripts/gif72_sweep.exs` against it. Not triggered directly.
+
+on:
+  workflow_call:
+    inputs:
+      smoke:
+        description: "1 = GIF72_SMOKE fast subset, 0 = full 120-scenario matrix"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  MIX_ENV: test
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+        ports:
+          # host 11434 matches liveview/config/test.exs's MYSQL_PORT default (fleet's 11400 port block)
+          - 11434:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: versions
+        working-directory: liveview
+        run: |
+          echo "otp=$(grep '^erlang ' .tool-versions | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+          echo "elixir=$(grep '^elixir ' .tool-versions | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: |
+            GlobalCombat.GrpcHost/GlobalCombat.GrpcHost.csproj
+            GlobalCombat.Core/GlobalCombat.Core.csproj
+
+      - name: Restore and build the .NET oracle (GlobalCombat.GrpcHost)
+        run: dotnet build GlobalCombat.GrpcHost/GlobalCombat.GrpcHost.csproj -c Release
+
+      - name: Restore liveview/deps and _build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            liveview/deps
+            liveview/_build
+          key: ${{ runner.os }}-mix-${{ steps.versions.outputs.otp }}-${{ steps.versions.outputs.elixir }}-${{ hashFiles('liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ steps.versions.outputs.otp }}-${{ steps.versions.outputs.elixir }}-
+
+      - name: Install Elixir dependencies
+        working-directory: liveview
+        run: mix deps.get
+
+      - name: Compile
+        working-directory: liveview
+        run: mix compile --warnings-as-errors
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h 127.0.0.1 -P 11434 -u root --silent && break
+            sleep 2
+          done
+
+      - name: Create and migrate test database
+        working-directory: liveview
+        run: |
+          mix ecto.create --quiet
+          mix ecto.migrate --quiet
+
+      - name: Boot the .NET oracle (GlobalCombat.GrpcHost, port 5251)
+        run: |
+          nohup dotnet GlobalCombat.GrpcHost/bin/Release/net10.0/GlobalCombat.GrpcHost.dll \
+            > "$RUNNER_TEMP/oracle.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/oracle.pid"
+          for i in $(seq 1 30); do
+            (exec 3<>/dev/tcp/127.0.0.1/5251) 2>/dev/null && { exec 3<&- 3>&-; break; }
+            if [ "$i" -eq 30 ]; then
+              echo "Oracle never opened port 5251 - log:"
+              cat "$RUNNER_TEMP/oracle.log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run the differential harness sweep
+        working-directory: liveview
+        env:
+          GRPC_HOST: "127.0.0.1"
+          GRPC_PORT: "5251"
+          GIF72_SMOKE: ${{ inputs.smoke }}
+        run: mix run scripts/gif72_sweep.exs
+
+      - name: Oracle log (on failure)
+        if: failure()
+        run: cat "$RUNNER_TEMP/oracle.log" 2>/dev/null || true
+
+      - name: Stop the .NET oracle
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/oracle.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/oracle.pid")" 2>/dev/null || true
+          fi
