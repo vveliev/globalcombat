@@ -285,7 +285,7 @@ defmodule GlobalCombatWeb.GameLive do
       />
       <span
         :if={@area.armies}
-        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold"
+        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000]"
       >
         {@area.armies}
       </span>
@@ -293,6 +293,12 @@ defmodule GlobalCombatWeb.GameLive do
     """
   end
 
+  # White text alone doesn't meet WCAG 1.4.3 against every owner_color/1
+  # background — Player.GetColor()'s #FFE45F (owner 3) measures 1.27:1 and
+  # #D45D00 (owner 4) measures 3.91:1 against white, both below the 4.5:1
+  # (normal) / 3:1 (large) thresholds. The black outline above guarantees
+  # legibility independent of tile color, including future map/color
+  # additions (GIF-83).
   defp owner_color(nil), do: 0
   defp owner_color(number), do: rem(number, 9)
 

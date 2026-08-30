@@ -147,6 +147,22 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ ~r/aria-label="Game status"[^>]*tabindex="-1"[^>]*data-focus-landmark/
   end
 
+  test "army-count overlays carry a dark outline independent of the owner_color tile (WCAG 1.4.3, GIF-83)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    # text-white alone measures 1.27:1 against owner_color 3 (#FFE45F) and
+    # 3.91:1 against owner_color 4 (#D45D00) -- both below WCAG thresholds.
+    # The outline is background-color-independent by construction, so any
+    # rendered army-count span having it is sufficient evidence (no need to
+    # force a specific owner_color onto a territory here).
+    assert html =~
+             ~r/class="absolute top-1\/2 left-1\/2 -translate-x-1\/2 -translate-y-1\/2 text-white font-bold \[text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000\]"/
+  end
+
   describe "fog of war (leak regression)" do
     # deal_areas/2's round-robin can leave every area adjacent to some opponent (e.g. a
     # 2-way alternating deal on a densely-linked map) — that's a property of the demo
