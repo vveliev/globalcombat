@@ -28,7 +28,7 @@ defmodule GlobalCombat.Stats do
     since_day = DateTime.utc_now() |> DateTime.add(-1, :day)
 
     %{
-      running_games: Repo.aggregate(from(g in Game, where: g.status == 1), :count),
+      running_games: Repo.aggregate(from(g in Game, where: g.status == :active), :count),
       running_tourneys: Repo.aggregate(from(t in Tourney, where: t.status == :running), :count),
       accounts: Repo.aggregate(Account, :count),
       accounts_last_month:

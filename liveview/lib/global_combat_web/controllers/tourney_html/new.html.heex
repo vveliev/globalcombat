@@ -1,0 +1,37 @@
+<div class="mx-auto max-w-md px-4 py-10">
+  <h2 class="text-2xl font-semibold mb-6">Create a New Tourney</h2>
+
+  <.form
+    :let={f}
+    for={@changeset}
+    as={:tourney}
+    action={~p"/Create-Tournament"}
+    method="post"
+    class="flex flex-col gap-4"
+  >
+    <.input field={f[:name]} type="text" label="Tournament Name" required />
+
+    <.input
+      field={f[:game_size]}
+      type="select"
+      label="Game Size"
+      options={[2, 3, 4, 5, 6, 7, 8, 42]}
+    />
+
+    <.input
+      field={f[:initial_games]}
+      type="select"
+      label="Initial Games"
+      options={[2, 4, 8, 16, 32, 64, 128, 256]}
+    />
+
+    <.input field={f[:winners]} type="number" label="Number of Winners" required />
+    <.input field={f[:double_elimination]} type="checkbox" label="Double Elimination" />
+    <.input field={f[:option_game_id]} type="number" label="Option Game Id" />
+    <.input field={f[:auto_start]} type="checkbox" label="Auto Start" />
+    <.input field={f[:recurring]} type="checkbox" label="Recurring" />
+    <.input field={f[:description]} type="text" label="Description" />
+
+    <.button variant="primary" class="mt-2">Create Tournament</.button>
+  </.form>
+</div>

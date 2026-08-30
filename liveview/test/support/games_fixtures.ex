@@ -42,7 +42,7 @@ defmodule GlobalCombat.GamesFixtures do
 
     status =
       case Map.get(attrs, :status) do
-        nil -> if(started, do: if(ended, do: 2, else: 1), else: 0)
+        nil -> if(started, do: if(ended, do: :finished, else: :active), else: :new)
         explicit -> explicit
       end
 

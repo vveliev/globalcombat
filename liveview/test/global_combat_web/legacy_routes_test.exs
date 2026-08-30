@@ -6,15 +6,28 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   router, with the same capitalised-hyphenated shape and the same ids
   (`game.AUTO_INCREMENT` is at 684316 — ids are never renumbered).
 
-  Originally a pure router-shape test against thin GIF-31 stubs; GIF-33 replaced
-  `HomeController`'s stubs with real behavior, so the `Home`-routed assertions below now
-  check the real (unauthenticated) response instead of an echoed placeholder string —
-  still proving the same thing this file always proved: the URL shape and id survive.
-  `GameController`/`TourneyController` are still stubs (out of GIF-33's scope), so those
-  assertions are untouched.
+  Originally a pure router-shape test against thin GIF-31 stubs, where most controllers echoed
+  back the id/action they resolved -- enough to prove the route matched the right controller
+  with the right params. Two surfaces have since grown real behavior and their assertions were
+  upgraded to match: `Tournament-:id` (`TourneyController` is a real port as of GIF-32, so those
+  cases assert against a real tourney fixture instead of a stub echo), and the `Home`-routed
+  paths (GIF-33 replaced `HomeController`'s stubs with real behavior, so those assertions check
+  the real, often auth-gated, response instead of an echoed placeholder string). `GameController`
+  is still a stub (out of both issues' scope), so its assertions are untouched.
   """
 
   use GlobalCombatWeb.ConnCase
+
+  import GlobalCombat.AccountsFixtures
+
+  defp tourney_fixture(attrs \\ %{}) do
+    {:ok, tourney} =
+      %{"name" => "Legacy Route Cup", "initial_games" => 2, "game_size" => 2, "winners" => 1}
+      |> Map.merge(attrs)
+      |> GlobalCombat.Tourneys.create_tourney()
+
+    tourney
+  end
 
   describe "Game-{id:int}/{action=Index}" do
     test "GET /Game-:id defaults action to Index", %{conn: conn} do
@@ -65,8 +78,9 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
 
   describe "Tournament-{id:int}" do
     test "GET /Tournament-:id resolves the id", %{conn: conn} do
-      conn = get(conn, "/Tournament-42")
-      assert text_response(conn, 200) == "Tournament 42"
+      tourney = tourney_fixture()
+      conn = get(conn, "/Tournament-#{tourney.id}")
+      assert html_response(conn, 200) =~ tourney.name
     end
 
     test "GET /Tournament-:id 404s on a non-integer id", %{conn: conn} do
@@ -74,10 +88,16 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert conn.status == 404
     end
 
+    test "GET /Tournament-:id 404s on an id with no matching tourney", %{conn: conn} do
+      conn = get(conn, "/Tournament-99999999")
+      assert conn.status == 404
+    end
+
     test "GET /Tournament-:id/ resolves with a trailing slash, as the old app's own links used",
          %{conn: conn} do
-      conn = get(conn, "/Tournament-42/")
-      assert text_response(conn, 200) == "Tournament 42"
+      tourney = tourney_fixture()
+      conn = get(conn, "/Tournament-#{tourney.id}/")
+      assert html_response(conn, 200) =~ tourney.name
     end
   end
 
@@ -87,9 +107,19 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert text_response(conn, 200) == "Create Game"
     end
 
-    test "GET /Create-Tournament", %{conn: conn} do
+    test "GET /Create-Tournament redirects an anonymous visitor (admin-only, GIF-32)", %{
+      conn: conn
+    } do
       conn = get(conn, "/Create-Tournament")
-      assert text_response(conn, 200) == "Create Tournament"
+      assert redirected_to(conn) == "/"
+    end
+
+    test "GET /Create-Tournament renders the form for an admin", %{conn: conn} do
+      admin =
+        account_fixture() |> Ecto.Changeset.change(admin: true) |> GlobalCombat.Repo.update!()
+
+      conn = conn |> log_in_account(admin) |> get("/Create-Tournament")
+      assert html_response(conn, 200) =~ "Create a New Tourney"
     end
   end
 
@@ -187,9 +217,10 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert conn.status == 404
     end
 
-    test "GET /tournament-42 resolves like /Tournament-42", %{conn: conn} do
-      conn = get(conn, "/tournament-42")
-      assert text_response(conn, 200) == "Tournament 42"
+    test "GET /tournament-:id resolves like /Tournament-:id", %{conn: conn} do
+      tourney = tourney_fixture()
+      conn = get(conn, "/tournament-#{tourney.id}")
+      assert html_response(conn, 200) =~ tourney.name
     end
 
     test "GET /game-manual resolves like /Game-Manual", %{conn: conn} do
