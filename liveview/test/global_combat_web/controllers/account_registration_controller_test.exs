@@ -9,6 +9,16 @@ defmodule GlobalCombatWeb.AccountRegistrationControllerTest do
       response = html_response(conn, 200)
       assert response =~ "Register"
     end
+
+    test "renders the code of conduct", %{conn: conn} do
+      conn = get(conn, ~p"/account/register")
+      response = html_response(conn, 200)
+      assert response =~ "Code of Conduct"
+      assert response =~ "Don't play with multiple accounts, that's just lame."
+      assert response =~ "Be respectful and don't abuse fellow players."
+      assert response =~
+               "If you break these rules your account will be disabled and your IP address will be banned."
+    end
   end
 
   describe "POST /account/register" do
