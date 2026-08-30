@@ -284,7 +284,9 @@ defmodule GlobalCombatWeb.GameLive do
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
         <span class="flex items-center gap-[var(--space-2)]">
-          <span :if={!p.eliminated} class="text-text-muted">{p.armies} ({p.areas})</span>
+          <span :if={!p.eliminated && p.armies} class="text-text-muted">
+            {p.armies} ({p.areas})
+          </span>
           <span :if={p.eliminated} class="text-text-muted">place {p.place}</span>
           <StatusPill.status_pill :if={!p.eliminated} tone={if p.done, do: "done", else: "waiting"}>
             {if p.done, do: "Done", else: "Thinking"}
