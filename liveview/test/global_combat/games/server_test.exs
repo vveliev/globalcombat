@@ -91,6 +91,60 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
+  describe "new_engine/1 — initial reinforcement bonus (GIF-105)" do
+    test "a fresh turn-1 engine folds the unplaced reinforcement pool into Player.armies, matching .NET's Start()" do
+      state = %Server{
+        map_name: :original,
+        is_training: true,
+        is_non_random: false,
+        reverse_attack_order: false,
+        minimum_armies: 3,
+        players: [
+          {1, %{account_id: 101, name: "qatestlv1"}},
+          {2, %{account_id: nil, name: "Computer"}}
+        ]
+      }
+
+      engine = Server.new_engine(state)
+
+      # :original has 42 areas, so both players of 2 split evenly (21 each) and both
+      # qualify for Game.cs Start()'s "didn't get an extra area" +5 bonus: 20 base + 5 =
+      # 25 unassigned, folded into armies as 21 * 5 + 25 = 130 — the .NET total from the
+      # issue's Game #751211 repro, not the pre-fix 105 (areas * 5 with no pool folded in).
+      for player <- Engine.players_in_order(engine) do
+        assert player.areas == 21
+        assert player.unassigned_armies == 25
+        assert player.armies == 130
+      end
+    end
+
+    test "a player who lands only the base per-player share (no remainder area) still gets the +5 bonus, others don't" do
+      state = %Server{
+        map_name: :original,
+        is_training: false,
+        is_non_random: false,
+        reverse_attack_order: false,
+        minimum_armies: 3,
+        players: for(n <- 1..4, do: {n, %{account_id: n, name: "p#{n}"}})
+      }
+
+      engine = Server.new_engine(state)
+
+      # 42 areas / 4 players = 10 base each with 2 left over; round-robin dealing hands
+      # those 2 extras to players 1 and 2 (11 areas, no bonus), leaving 3 and 4 at the
+      # base 10 areas (bonus applies).
+      by_number = Map.new(Engine.players_in_order(engine), &{&1.number, &1})
+
+      assert by_number[1].areas == 11
+      assert by_number[1].unassigned_armies == 20
+      assert by_number[1].armies == 11 * 5 + 20
+
+      assert by_number[3].areas == 10
+      assert by_number[3].unassigned_armies == 25
+      assert by_number[3].armies == 10 * 5 + 25
+    end
+  end
+
   # A real, runnable two-player engine state (both alive, one area each on :original) encoded
   # exactly like `GlobalCombat.Games.Server.persist_snapshot/1` would have written it.
   defp serialized_engine(opts) do

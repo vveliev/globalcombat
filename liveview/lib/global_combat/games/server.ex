@@ -356,16 +356,26 @@ defmodule GlobalCombat.Games.Server do
   @doc false
   def new_engine(state) do
     player_count = length(state.players)
-    dealt = deal_areas(MapInfo.num_areas(state.map_name), player_count)
+    num_areas = MapInfo.num_areas(state.map_name)
+    dealt = deal_areas(num_areas, player_count)
 
     areas =
       Map.new(dealt, fn {area_number, owner_number} ->
         {area_number, %Engine.Area{number: area_number, owner_number: owner_number, armies: 5}}
       end)
 
+    # Port of `Game.cs Start()`'s "give initial armies to place and give army bonus for
+    # players who didn't get country" loop (line ~327): every player starts with 20
+    # unassigned armies, +5 more if they only got the base `NumAreas / CurrentPlayers`
+    # share (no extra area from divvying up the remainder). `Player.Armies` folds that
+    # pending pool in immediately, before any turn resolves — GIF-105 is `PlayerView`'s
+    # display total not doing the same.
+    initial_area_count = div(num_areas, player_count)
+
     players =
       Map.new(state.players, fn {number, p} ->
         owned = Enum.count(areas, fn {_n, a} -> a.owner_number == number end)
+        unassigned = if owned == initial_area_count, do: 25, else: 20
 
         {number,
          %Engine.Player{
@@ -373,7 +383,8 @@ defmodule GlobalCombat.Games.Server do
            account_id: p.account_id,
            name: p.name,
            areas: owned,
-           armies: owned * 5
+           armies: owned * 5 + unassigned,
+           unassigned_armies: unassigned
          }}
       end)
 
