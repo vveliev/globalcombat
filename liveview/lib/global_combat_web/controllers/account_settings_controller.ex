@@ -33,7 +33,10 @@ defmodule GlobalCombatWeb.AccountSettingsController do
           {:ok, account} ->
             conn
             |> assign(:current_account, account)
-            |> render(:edit, result_message: "Password modified successfully.", result_error?: false)
+            |> render(:edit,
+              result_message: "Password modified successfully.",
+              result_error?: false
+            )
 
           {:error, :bad_old_password} ->
             render(conn, :edit,
@@ -43,7 +46,10 @@ defmodule GlobalCombatWeb.AccountSettingsController do
             )
 
           {:error, %Ecto.Changeset{}} ->
-            render(conn, :edit, result_message: "Unable to modify your password.", result_error?: true)
+            render(conn, :edit,
+              result_message: "Unable to modify your password.",
+              result_error?: true
+            )
         end
     end
   end

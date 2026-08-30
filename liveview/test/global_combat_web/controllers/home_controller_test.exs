@@ -235,6 +235,7 @@ defmodule GlobalCombatWeb.HomeControllerTest do
 
     test "OptOut has one h1 and real h2 section headings", %{conn: conn} do
       account = account_fixture()
+
       body =
         get(conn, ~p"/OptOut?Account=#{account.id}&Key=#{account.opt_out_key}")
         |> html_response(200)

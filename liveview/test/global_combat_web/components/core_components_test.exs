@@ -71,7 +71,7 @@ defmodule GlobalCombatWeb.CoreComponentsTest do
           name="account[role]"
           type="select"
           value=""
-          options={["Admin": "admin"]}
+          options={[Admin: "admin"]}
           errors={["is invalid"]}
         />
         """)
