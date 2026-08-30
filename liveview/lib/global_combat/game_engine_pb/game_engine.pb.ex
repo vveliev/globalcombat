@@ -42,6 +42,18 @@ defmodule GlobalCombat.GrpcHost.Area do
   field :Amount, 7, type: :int32
 end
 
+defmodule GlobalCombat.GrpcHost.Assignment do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.Assignment",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :AreaNumber, 1, type: :int32
+  field :Amount, 2, type: :int32
+end
+
 defmodule GlobalCombat.GrpcHost.Game do
   @moduledoc false
 
@@ -96,6 +108,11 @@ defmodule GlobalCombat.GrpcHost.NewGameRequest do
 
   field :MapName, 1, type: GlobalCombat.GrpcHost.MapName, enum: true
   field :PlayerNames, 2, repeated: true, type: :string
+  field :Seed, 3, type: :int32
+  field :IsNonRandom, 4, type: :bool
+  field :IsFogged, 5, type: :bool
+  field :ReverseAttackOrder, 6, type: :bool
+  field :MinimumArmies, 7, type: :int32
 end
 
 defmodule GlobalCombat.GrpcHost.NewGameResponse do
@@ -145,6 +162,18 @@ defmodule GlobalCombat.GrpcHost.Player do
   field :RatingChange, 13, type: :int32
 end
 
+defmodule GlobalCombat.GrpcHost.ResolveQueuedTurnRequest do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.ResolveQueuedTurnRequest",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :GameId, 1, type: :int32
+  field :Seed, 2, type: :int32
+end
+
 defmodule GlobalCombat.GrpcHost.ResolveTurnRequest do
   @moduledoc false
 
@@ -155,6 +184,7 @@ defmodule GlobalCombat.GrpcHost.ResolveTurnRequest do
 
   field :Game, 1, type: GlobalCombat.GrpcHost.Game
   field :Orders, 2, repeated: true, type: GlobalCombat.GrpcHost.Order
+  field :Seed, 3, type: :int32
 end
 
 defmodule GlobalCombat.GrpcHost.ResolveTurnResponse do
@@ -169,6 +199,30 @@ defmodule GlobalCombat.GrpcHost.ResolveTurnResponse do
   field :TurnSummary, 2, type: :string
 end
 
+defmodule GlobalCombat.GrpcHost.ThinkRequest do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.ThinkRequest",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :GameId, 1, type: :int32
+  field :Seed, 2, type: :int32
+end
+
+defmodule GlobalCombat.GrpcHost.ThinkResponse do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.ThinkResponse",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :Assignments, 1, repeated: true, type: GlobalCombat.GrpcHost.Assignment
+  field :Orders, 2, repeated: true, type: GlobalCombat.GrpcHost.Order
+end
+
 defmodule GlobalCombat.GrpcHost.GameEngine.Service do
   @moduledoc false
 
@@ -177,10 +231,18 @@ defmodule GlobalCombat.GrpcHost.GameEngine.Service do
   rpc(:NewGame, GlobalCombat.GrpcHost.NewGameRequest, GlobalCombat.GrpcHost.NewGameResponse)
 
   rpc(
+    :ResolveQueuedTurn,
+    GlobalCombat.GrpcHost.ResolveQueuedTurnRequest,
+    GlobalCombat.GrpcHost.ResolveTurnResponse
+  )
+
+  rpc(
     :ResolveTurn,
     GlobalCombat.GrpcHost.ResolveTurnRequest,
     GlobalCombat.GrpcHost.ResolveTurnResponse
   )
+
+  rpc(:Think, GlobalCombat.GrpcHost.ThinkRequest, GlobalCombat.GrpcHost.ThinkResponse)
 end
 
 defmodule GlobalCombat.GrpcHost.GameEngine.Stub do
