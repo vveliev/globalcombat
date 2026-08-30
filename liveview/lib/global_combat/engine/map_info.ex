@@ -150,4 +150,113 @@ defmodule GlobalCombat.Engine.MapInfo do
     {_number, _name, _region, links} = area(map_name, a)
     b in links
   end
+
+  # --- render geometry (GIF-30) -----------------------------------------
+  #
+  # `AreaInfo`'s `TechName`/`X`/`Y`/`Width`/`Height` fields (`GlobalCombat.Core/MapInfo.cs`)
+  # never had rule logic attached — they're purely where GameLive positions each area's
+  # sprite — but the LiveView board still needs them to render without the client-side
+  # map.js/Main.js this ticket retires (`Web/wwwroot/maps/*/map.js`, `Web/wwwroot/Main.js`).
+  # Transcribed field-for-field from `MapInfo.cs` the same way `@original_areas`/
+  # `@elements_areas` above were, kept as a separate table rather than folded into the
+  # `{number, name, region, links}` tuples so callers that only need topology (the
+  # differential-harness-verified `links_to?/3`, `regions/1`, etc.) are untouched.
+
+  @original_render [
+    {1, "alaska", 135, 117, 64, 79},
+    {2, "northern", 182, 75, 144, 100},
+    {3, "alberta", 177, 142, 47, 77},
+    {4, "ontario", 210, 152, 69, 67},
+    {5, "quebec", 256, 160, 90, 61},
+    {6, "west", 203, 212, 59, 39},
+    {7, "east", 239, 204, 108, 67},
+    {8, "mexico", 216, 247, 104, 60},
+    {9, "greenland", 343, 65, 80, 123},
+    {10, "columbia", 282, 296, 58, 36},
+    {11, "peru", 275, 321, 51, 61},
+    {12, "brazil", 293, 324, 71, 75},
+    {13, "argentina", 290, 371, 39, 87},
+    {14, "algeria", 405, 264, 63, 73},
+    {15, "egypt", 459, 274, 65, 50},
+    {16, "congo", 429, 307, 71, 54},
+    {17, "tanzania", 474, 319, 67, 63},
+    {18, "southAfrica", 459, 352, 52, 67},
+    {19, "madagascar", 520, 353, 27, 47},
+    {20, "iceland", 406, 149, 24, 28},
+    {21, "united", 410, 189, 31, 40},
+    {22, "france", 419, 219, 35, 46},
+    {23, "italy", 444, 201, 32, 63},
+    {24, "scandinavia", 447, 138, 87, 72},
+    {25, "greece", 465, 201, 65, 62},
+    {26, "hungary", 508, 127, 75, 103},
+    {27, "turkey", 491, 247, 69, 68},
+    {28, "iran", 513, 179, 79, 94},
+    {29, "india", 553, 254, 76, 74},
+    {30, "kazakhstan", 560, 127, 79, 157},
+    {31, "ural", 600, 83, 69, 148},
+    {32, "china", 619, 209, 112, 75},
+    {33, "thailand", 616, 269, 67, 62},
+    {34, "mongolia", 648, 178, 79, 51},
+    {35, "siberia", 643, 117, 54, 79},
+    {36, "cherskiy", 672, 117, 60, 72},
+    {37, "pevek", 720, 137, 63, 49},
+    {38, "japan", 719, 199, 57, 56},
+    {39, "indonesia", 624, 299, 88, 70},
+    {40, "albany", 642, 376, 56, 54},
+    {41, "sydney", 691, 373, 89, 86},
+    {42, "newZealand", 700, 355, 73, 30}
+  ]
+
+  @elements_render [
+    {1, "cf", 410, 123, 107, 107},
+    {2, "ca", 322, 211, 107, 107},
+    {3, "ce", 411, 300, 107, 107},
+    {4, "cw", 499, 212, 107, 107},
+    {5, "bs", 374, 176, 91, 90},
+    {6, "bm", 463, 264, 91, 90},
+    {7, "f1o", 604, 142, 74, 71},
+    {8, "f2o", 489, 70, 81, 81},
+    {9, "f3o", 357, 70, 81, 81},
+    {10, "ftow", 464, 176, 71, 73},
+    {11, "f5i", 489, 123, 55, 54},
+    {12, "f6i", 462, 96, 56, 56},
+    {13, "f7i", 410, 96, 54, 55},
+    {14, "f8i", 383, 122, 56, 56},
+    {15, "w1o", 606, 318, 71, 73},
+    {16, "w2o", 579, 291, 80, 81},
+    {17, "w3o", 578, 159, 81, 81},
+    {18, "wtof", 482, 194, 71, 73},
+    {19, "w5i", 552, 291, 55, 54},
+    {20, "w6i", 579, 265, 53, 53},
+    {21, "w7i", 577, 212, 56, 56},
+    {22, "w8i", 551, 186, 55, 54},
+    {23, "a1o", 252, 141, 71, 73},
+    {24, "a2o", 269, 159, 81, 81},
+    {25, "a3o", 270, 290, 81, 80},
+    {26, "atoe", 375, 264, 71, 73},
+    {27, "a5i", 321, 185, 54, 55},
+    {28, "a6i", 295, 210, 56, 56},
+    {29, "a7i", 296, 265, 53, 53},
+    {30, "a8i", 322, 290, 54, 55},
+    {31, "e1o", 251, 317, 74, 71},
+    {32, "e2o", 358, 380, 81, 80},
+    {33, "e3o", 491, 379, 80, 81},
+    {34, "etoa", 393, 282, 71, 73},
+    {35, "e5i", 385, 354, 53, 53},
+    {36, "e6i", 411, 379, 54, 55},
+    {37, "e7i", 463, 379, 55, 54},
+    {38, "e8i", 491, 353, 53, 53}
+  ]
+
+  @doc "`{tech_name, x, y, width, height}` sprite geometry for `number` on `map_name` — `AreaInfo.TechName`/`X`/`Y`/`Width`/`Height`."
+  def render_info(map_name, number) do
+    {^number, tech_name, x, y, width, height} =
+      Enum.find(all_render_info(map_name), &(elem(&1, 0) == number))
+
+    {tech_name, x, y, width, height}
+  end
+
+  @doc "`{tech_name, x, y, width, height}` for every area of `map_name`, in area-number order."
+  def all_render_info(:original), do: @original_render
+  def all_render_info(:elements), do: @elements_render
 end
