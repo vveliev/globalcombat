@@ -4,7 +4,7 @@ defmodule GlobalCombatWeb.AccountSessionController do
   alias GlobalCombat.Accounts
 
   def new(conn, _params) do
-    render(conn, :new, error_message: nil)
+    render(conn, :new, error_message: nil, login: nil)
   end
 
   # Ports `AccountController.LogOn(LogOnModel, returnUrl)` / `AccountController.Login`.
@@ -22,7 +22,9 @@ defmodule GlobalCombatWeb.AccountSessionController do
         |> GlobalCombatWeb.UserAuth.log_in_account(account, params)
 
       {:error, reason} ->
-        render(conn, :new, error_message: error_message(reason))
+        # Mirrors `AccountController.LogOn` retaining the submitted login name in
+        # ModelState after a failed attempt — only the password is cleared.
+        render(conn, :new, error_message: error_message(reason), login: login)
     end
   end
 

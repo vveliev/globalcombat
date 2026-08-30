@@ -56,6 +56,19 @@ defmodule GlobalCombatWeb.AccountSessionControllerTest do
       refute get_session(conn, :account_id)
     end
 
+    test "preserves the submitted login name after a bad password", %{conn: conn} do
+      account = account_fixture()
+
+      conn =
+        post(conn, ~p"/account/log-on",
+          account: %{login: account.name, password: "wrongpassword"}
+        )
+
+      html = html_response(conn, 200)
+      assert html =~ "Bad Password"
+      assert html =~ ~s(value="#{account.name}")
+    end
+
     test "re-renders with an error for an unknown login", %{conn: conn} do
       conn =
         post(conn, ~p"/account/log-on", account: %{login: "nobody-here", password: "whatever1"})
