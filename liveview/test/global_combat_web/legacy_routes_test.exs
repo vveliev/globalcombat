@@ -8,12 +8,18 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
 
   Originally a pure router-shape test against thin GIF-31 stubs, where most controllers echoed
   back the id/action they resolved -- enough to prove the route matched the right controller
-  with the right params. Two surfaces have since grown real behavior and their assertions were
-  upgraded to match: `Tournament-:id` (`TourneyController` is a real port as of GIF-32, so those
-  cases assert against a real tourney fixture instead of a stub echo), and the `Home`-routed
+  with the right params. Several surfaces have since grown real behavior and their assertions
+  were upgraded to match: `Tournament-:id` (`TourneyController` is a real port as of GIF-32, so
+  those cases assert against a real tourney fixture instead of a stub echo), the `Home`-routed
   paths (GIF-33 replaced `HomeController`'s stubs with real behavior, so those assertions check
-  the real, often auth-gated, response instead of an echoed placeholder string). `GameController`
-  is still a stub (out of both issues' scope), so its assertions are untouched.
+  the real, often auth-gated, response instead of an echoed placeholder string), and the bare
+  `/Game-:id` / `/Create-Game` routes (GIF-30 turned them into LiveViews, so those tests no
+  longer assert stub text at a hardcoded historical id — `GlobalCombat.Games.Live` games are
+  ephemeral and id-generated, not the fixed `game.AUTO_INCREMENT` row 684316 the stub echoed
+  back; what's still very much a router-shape concern, and still asserted there, is that the
+  same URL shape resolves, the same id survives, and casing normalization still applies — it's
+  just a LiveView mount/redirect on the other end now instead of a stub controller action).
+  `/Game-:id/:action` (Join/Invite/Kick/etc.) is still a stub, out of both issues' scope.
   """
 
   use GlobalCombatWeb.ConnCase
@@ -30,9 +36,10 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "Game-{id:int}/{action=Index}" do
-    test "GET /Game-:id defaults action to Index", %{conn: conn} do
-      conn = get(conn, "/Game-684316")
-      assert text_response(conn, 200) == "Game 684316 action=Index"
+    test "GET /Game-:id mounts the board LiveView for a real game", %{conn: conn} do
+      game_id = GlobalCombat.Games.Live.create_game(%{max_players: 2})
+      conn = get(conn, "/Game-#{game_id}")
+      assert html_response(conn, 200) =~ "Game #{game_id}"
     end
 
     test "GET /Game-:id/:action resolves an arbitrary action", %{conn: conn} do
@@ -40,16 +47,23 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert text_response(conn, 200) == "Game 684316 action=Stats"
     end
 
-    test "GET /Game-:id 404s on a non-integer id", %{conn: conn} do
+    test "GET /Game-:id redirects home instead of 404ing on a non-integer id (LiveView mount, not a plug 404)",
+         %{conn: conn} do
       conn = get(conn, "/Game-abc")
-      assert conn.status == 404
+      assert redirected_to(conn) == "/"
+    end
+
+    test "GET /Game-:id redirects home for a well-formed id that doesn't exist", %{conn: conn} do
+      conn = get(conn, "/Game-999999999")
+      assert redirected_to(conn) == "/"
     end
 
     test "GET /Game-:id/ resolves with a trailing slash, as the old app's own links used", %{
       conn: conn
     } do
-      conn = get(conn, "/Game-684316/")
-      assert text_response(conn, 200) == "Game 684316 action=Index"
+      game_id = GlobalCombat.Games.Live.create_game(%{max_players: 2})
+      conn = get(conn, "/Game-#{game_id}/")
+      assert html_response(conn, 200) =~ "Game #{game_id}"
     end
   end
 
@@ -102,9 +116,16 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "Create-Game / Create-Tournament" do
-    test "GET /Create-Game", %{conn: conn} do
+    test "GET /Create-Game redirects home when logged out (GameCreateLive, GIF-30)", %{
+      conn: conn
+    } do
       conn = get(conn, "/Create-Game")
-      assert text_response(conn, 200) == "Create Game"
+      assert redirected_to(conn) == "/"
+    end
+
+    test "GET /Create-Game renders the create form when logged in", %{conn: conn} do
+      conn = conn |> log_in_account(account_fixture()) |> get(~p"/Create-Game")
+      assert html_response(conn, 200) =~ "Create a New Game"
     end
 
     test "GET /Create-Tournament redirects an anonymous visitor (admin-only, GIF-32)", %{
@@ -200,14 +221,16 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "case-insensitive matching (ASP.NET Core's default routing behavior)" do
-    test "GET /game-684316 resolves like /Game-684316", %{conn: conn} do
-      conn = get(conn, "/game-684316")
-      assert text_response(conn, 200) == "Game 684316 action=Index"
+    test "GET /game-:id resolves like /Game-:id (LiveView mount, GIF-30)", %{conn: conn} do
+      game_id = GlobalCombat.Games.Live.create_game(%{max_players: 2})
+      conn = get(conn, "/game-#{game_id}")
+      assert html_response(conn, 200) =~ "Game #{game_id}"
     end
 
-    test "GET /GAME-684316 resolves like /Game-684316", %{conn: conn} do
-      conn = get(conn, "/GAME-684316")
-      assert text_response(conn, 200) == "Game 684316 action=Index"
+    test "GET /GAME-:id resolves like /Game-:id (LiveView mount, GIF-30)", %{conn: conn} do
+      game_id = GlobalCombat.Games.Live.create_game(%{max_players: 2})
+      conn = get(conn, "/GAME-#{game_id}")
+      assert html_response(conn, 200) =~ "Game #{game_id}"
     end
 
     test "GET /player-info-684316 resolves like /Player-Info-684316 (404: no such account)", %{
@@ -240,9 +263,15 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
 
     test "a bare segment shorter than a legacy prefix 404s cleanly instead of crashing the casing normalizer",
          %{conn: conn} do
-      for path <- ["/tournament", "/player-info", "/game", "/game-manua", "/t"] do
+      for path <- ["/tournament", "/player-info", "/game", "/t"] do
         assert get(conn, path).status == 404
       end
+    end
+
+    test "/game-manua normalizes to Game-manua and hits the board LiveView, which redirects home on a bad id (not a router 404)",
+         %{conn: conn} do
+      conn = get(conn, "/game-manua")
+      assert redirected_to(conn) == "/"
     end
   end
 

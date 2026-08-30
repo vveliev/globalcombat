@@ -1,0 +1,177 @@
+defmodule GlobalCombatWeb.GameLiveTest do
+  @moduledoc """
+  Proves GIF-30's "done when": two browser sessions in one game see a turn resolve
+  live on both (`GameHub.Refresh`'s `:reload` equivalent), plus one test per
+  remaining SignalR event equivalent (`addMessage`, `setDone`, `receiveMessage`,
+  `sendNotification`), plus a fog-of-war leak regression at the rendered-HTML level
+  (the concrete failure mode the issue calls out: "a careless assign of full game
+  state").
+  """
+
+  use GlobalCombatWeb.ConnCase, async: true
+
+  import GlobalCombat.AccountsFixtures
+
+  alias GlobalCombat.Games.Live, as: Games
+  alias GlobalCombat.Games.PubSub, as: GamePubSub
+
+  # Two-session PubSub delivery to a LiveView's own process is inherently async —
+  # there's no synchronous call that proves handle_info/2 already ran. Polling
+  # render/1 for the expected content is the standard way to wait it out without
+  # coupling the test to exact message-ordering internals.
+  defp wait_for(view, text, attempts \\ 100)
+
+  defp wait_for(_view, text, 0), do: flunk("gave up waiting for #{inspect(text)} to render")
+
+  defp wait_for(view, text, attempts) do
+    html = render(view)
+
+    if html =~ text do
+      html
+    else
+      Process.sleep(10)
+      wait_for(view, text, attempts - 1)
+    end
+  end
+
+  defp start_two_player_game(conn1, conn2) do
+    alice = account_fixture(%{"name" => "Alice"})
+    bob = account_fixture(%{"name" => "Bob"})
+
+    game_id = Games.create_game(%{max_players: 2})
+    {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+    {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+    :ok = Games.start_game(game_id, alice.id)
+
+    {:ok, alice_view, _html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+    {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+
+    %{game_id: game_id, alice: alice, bob: bob, alice_view: alice_view, bob_view: bob_view}
+  end
+
+  test "a turn resolving on one session shows up live on the other (GameHub.Refresh -> :reload)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+    assert render(alice_view) =~ "Turn 1"
+    assert render(bob_view) =~ "Turn 1"
+
+    # Neither click's own handle_event updates assigns synchronously — both views
+    # only learn the turn resolved via the async :reload broadcast, same as neither
+    # browser tab reloading itself under SignalR; the server pushed it to both.
+    render_click(alice_view, "done")
+    render_click(bob_view, "done")
+
+    assert wait_for(alice_view, "Turn 2") =~ "Turn 2"
+    assert wait_for(bob_view, "Turn 2") =~ "Turn 2"
+  end
+
+  test "a chat message from one session appears live on the other (GameHub.Say -> addMessage)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+    render_submit(alice_view, "send_chat", %{"text" => "good luck!"})
+
+    assert wait_for(bob_view, "good luck!") =~ "Alice"
+  end
+
+  test "one player marking done shows up on the other session without a full reload (GameHub.SetDone -> setDone)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+    render_click(alice_view, "done")
+
+    assert wait_for(bob_view, "Done") =~ "Done"
+    # the turn hasn't resolved — only Bob is still owed a turn, Alice's Done marker
+    # updated in place.
+    assert render(bob_view) =~ "Turn 1"
+  end
+
+  test "a private message is delivered only to its target account's session (GameHub.SendMessage -> receiveMessage)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+
+    %{alice: alice, alice_view: alice_view, bob_view: bob_view} =
+      start_two_player_game(conn1, conn2)
+
+    GamePubSub.broadcast_receive_message(alice.id, 999, "Carl", "hey Alice")
+
+    assert wait_for(alice_view, "hey Alice") =~ "Carl"
+    refute render(bob_view) =~ "hey Alice"
+  end
+
+  test "a turn-run notification is delivered privately to a seated account (GameHub.SendNotification -> sendNotification)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+    render_click(alice_view, "done")
+    render_click(bob_view, "done")
+
+    assert wait_for(alice_view, "Turn 2 Run") =~ "Turn 2 Run"
+    assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
+  end
+
+  describe "fog of war (leak regression)" do
+    # deal_areas/2's round-robin can leave every area adjacent to some opponent (e.g. a
+    # 2-way alternating deal on a densely-linked map) — that's a property of the demo
+    # dealer, not of the fog rule under test, so this searches (deterministically, no
+    # RNG involved) for a player count that actually produces a hidden area instead of
+    # assuming any particular one does.
+    defp scenario_with_a_hidden_area(map_name) do
+      num_areas = GlobalCombat.Engine.MapInfo.num_areas(map_name)
+
+      Enum.find_value(2..8, fn player_count ->
+        dealt = Map.new(GlobalCombat.Games.Server.deal_areas(num_areas, player_count))
+
+        hidden =
+          Enum.find(dealt, fn {area_number, owner} ->
+            owner != 1 and
+              not Enum.any?(GlobalCombat.Engine.MapInfo.inbounds(map_name, area_number), fn n ->
+                Map.get(dealt, n) == 1
+              end)
+          end)
+
+        hidden && {player_count, elem(hidden, 0), elem(hidden, 1)}
+      end)
+    end
+
+    test "a fogged opponent's true army count for a non-adjacent area never reaches the other player's rendered HTML",
+         %{conn: conn1} do
+      map_name = :original
+      {player_count, hidden_area_number, true_owner} = scenario_with_a_hidden_area(map_name)
+
+      accounts = for n <- 1..player_count, do: account_fixture(%{"name" => "Player#{n}"})
+      [alice | _] = accounts
+
+      game_id =
+        Games.create_game(%{max_players: player_count, is_fogged: true, map_name: map_name})
+
+      accounts
+      |> Enum.with_index(1)
+      |> Enum.each(fn {account, number} ->
+        assert {:ok, ^number} = Games.join(game_id, account.id, account.name)
+      end)
+
+      :ok = Games.start_game(game_id, alice.id)
+
+      {:playing, alice_state} = Games.player_view(game_id, alice.id)
+      hidden_area = Enum.find(alice_state.areas, &(&1.number == hidden_area_number))
+      refute hidden_area.visible
+      refute hidden_area.armies
+
+      {:ok, alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      # The true owner's color-suffixed sprite for this area must never appear anywhere
+      # in Alice's rendered markup, on first render or after a reload — this is
+      # GameLive's whole reason for going through GlobalCombat.Games.PlayerView instead
+      # of assigning canonical state.
+      true_sprite = "#{hidden_area.tech_name}#{rem(true_owner, 9)}.gif"
+      refute html =~ true_sprite
+      refute render(alice_view) =~ true_sprite
+    end
+  end
+end

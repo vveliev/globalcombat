@@ -35,7 +35,6 @@ defmodule GlobalCombatWeb.Router do
     #
     # Literal/shortcut routes are declared before the "Game-:id" pattern
     # below so e.g. /Game-Manual doesn't get swallowed as id: "Manual".
-    get "/Create-Game", GameController, :create
     get "/Create-Tournament", TourneyController, :new
     post "/Create-Tournament", TourneyController, :create
     get "/Game-Manual", HomeController, :game_manual
@@ -87,11 +86,19 @@ defmodule GlobalCombatWeb.Router do
     post "/Home/SendMessage", HomeController, :send_message
 
     get "/Game-:id/:action", GameController, :show
-    get "/Game-:id", GameController, :show
     get "/Player-Info-:id", HomeController, :player_info
     get "/Tournament-:id", TourneyController, :index
     get "/Tournament-:id/Join", TourneyController, :join
     get "/Tournament-:id/Quit", TourneyController, :quit
+
+    # The game board (GIF-30): SignalR + server-rendered HTML replaced by a LiveView
+    # driven over GlobalCombat.Games.PubSub. `on_mount` resolves `:current_account`
+    # from the session the same way the `:browser` pipeline's `fetch_current_account`
+    # does for controllers (see `GlobalCombatWeb.UserAuth.on_mount/4`).
+    live_session :game, on_mount: {GlobalCombatWeb.UserAuth, :assign_current_account} do
+      live "/Create-Game", GameCreateLive
+      live "/Game-:id", GameLive, :show
+    end
   end
 
   # Account surface (GIF-29): register / log on / log off / password reset / settings.

@@ -88,6 +88,19 @@ defmodule GlobalCombatWeb.UserAuth do
     put_session(conn, @open_chat_windows_key, List.delete(windows, window_id))
   end
 
+  @doc """
+  `on_mount` hook: assigns `:current_account` for router-mounted LiveViews (GIF-30's
+  `GameLive`) the same way `fetch_current_account/2` does for controllers. Session keys
+  are looked up as both a string and an atom since which one a LiveView's `session` map
+  uses is a Phoenix-version/session-store detail, not something this port should be
+  coupled to — `put_session/3` above always writes the atom `@account_id_key`.
+  """
+  def on_mount(:assign_current_account, _params, session, socket) do
+    account_id = Map.get(session, "account_id") || Map.get(session, @account_id_key)
+    account = account_id && Accounts.get_account(account_id)
+    {:cont, Phoenix.Component.assign(socket, :current_account, account)}
+  end
+
   @doc "Plug: redirects logged-in visitors away from LogOn/Register, same intent as the legacy `RedirectToAction` after a successful LogOn."
   def redirect_if_account_is_authenticated(conn, _opts) do
     if conn.assigns[:current_account] do

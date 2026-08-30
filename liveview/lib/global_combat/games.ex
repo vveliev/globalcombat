@@ -7,7 +7,10 @@ defmodule GlobalCombat.Games do
   `game_players` in this single-repo port, docs/schema-map.md §1.1). Turn resolution, the board
   LiveView, and the ProtoBuf blob's actual play-state semantics are GIF-25/GIF-28/GIF-30's
   scope, not this module's -- the read side only ever decodes `serialized` for display, via
-  `GlobalCombat.Games.GameSummary`.
+  `GlobalCombat.Games.GameSummary`. The GIF-30 in-memory board lives in `GlobalCombat.Games.Live`
+  (renamed from an original `GlobalCombat.Games` to avoid colliding with this module once the
+  two landed together); the two don't share state yet -- see `GlobalCombat.Games.Server`'s
+  moduledoc for that follow-up.
   """
 
   import Ecto.Query
