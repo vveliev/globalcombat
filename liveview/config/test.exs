@@ -1,5 +1,10 @@
 import Config
 
+# GIF-68: the scheduler polls GlobalCombat.Repo on its own timer, outside any test's Ecto
+# Sandbox ownership — left running it would race sandboxed test transactions. Tests that exercise
+# GlobalCombat.Games.TurnScheduler start their own instance directly instead.
+config :global_combat, :start_turn_scheduler, false
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

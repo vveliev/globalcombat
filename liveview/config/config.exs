@@ -66,6 +66,11 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# GIF-68: no resolver configured yet — nothing persists live play state to a `games` row for the
+# scheduler to hand off to (see GlobalCombat.Games.TurnScheduler.Resolver's moduledoc). The
+# scheduler still runs and logs any games it finds due rather than staying silent.
+config :global_combat, GlobalCombat.Games.TurnScheduler, interval_ms: 15_000, resolver: nil
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

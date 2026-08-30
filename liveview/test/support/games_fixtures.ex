@@ -50,7 +50,11 @@ defmodule GlobalCombat.GamesFixtures do
       %Game{
         status: status,
         private: Map.get(attrs, :is_private, false),
-        serialized: GrpcHost.Game.encode(wire_game)
+        serialized: GrpcHost.Game.encode(wire_game),
+        turn: Map.get(attrs, :db_turn, 1),
+        turn_length: Map.get(attrs, :turn_length),
+        prev_turn_time: Map.get(attrs, :prev_turn_time),
+        last_turn_time: Map.get(attrs, :last_turn_time)
       }
       |> Repo.insert!()
 

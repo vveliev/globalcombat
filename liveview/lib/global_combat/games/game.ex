@@ -17,6 +17,15 @@ defmodule GlobalCombat.Games.Game do
     field :serialized, :binary
     field :private, :boolean, default: false
 
+    # GIF-68: scheduler-read turn-timing fields (docs/schema-map.md §3.5's `dead` columns,
+    # carried forward onto this live table — see the migration for why `realtime` is not among
+    # them). `turn_length` nil means "not scheduler-managed"; `GlobalCombat.Games.Scheduling`
+    # never selects such a row as due.
+    field :turn, :integer, default: 1
+    field :turn_length, :integer
+    field :prev_turn_time, :utc_datetime
+    field :last_turn_time, :utc_datetime
+
     has_many :game_players, GlobalCombat.Games.GamePlayer
   end
 end
