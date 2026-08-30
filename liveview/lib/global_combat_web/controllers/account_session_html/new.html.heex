@@ -1,0 +1,23 @@
+<div class="mx-auto max-w-sm px-4 py-16">
+  <h1 class="text-2xl font-semibold mb-6">Log On</h1>
+
+  <p :if={@error_message} class="alert alert-error mb-4">{@error_message}</p>
+
+  <.form
+    :let={f}
+    for={%{}}
+    as={:account}
+    action={~p"/account/log-on"}
+    method="post"
+    class="flex flex-col gap-4"
+  >
+    <.input field={f[:login]} type="text" label="Login name or email" required autofocus />
+    <.input field={f[:password]} type="password" label="Password" required />
+    <.button variant="primary" class="mt-2">Log On</.button>
+  </.form>
+
+  <div class="mt-6 text-sm flex flex-col gap-2">
+    <.link navigate={~p"/account/reset-password"}>Forgot your password?</.link>
+    <.link navigate={~p"/account/register"}>Need an account? Register</.link>
+  </div>
+</div>
