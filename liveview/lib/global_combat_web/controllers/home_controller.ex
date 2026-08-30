@@ -38,7 +38,7 @@ defmodule GlobalCombatWeb.HomeController do
     assigns = %{
       new_games: Games.list_new_games(),
       open_tourneys: Tourneys.list_open_tourneys(),
-      online_accounts: Presence.list_online_accounts()
+      online_accounts: Presence.list_online_accounts(account)
     }
 
     assigns =

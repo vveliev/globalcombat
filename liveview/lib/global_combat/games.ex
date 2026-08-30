@@ -18,15 +18,71 @@ defmodule GlobalCombat.Games do
   alias GlobalCombat.Games.{Game, GamePlayer, GameSummary}
   alias GlobalCombat.Repo
 
-  @doc "Port of `GameServer.SaveNewGame` for a freshly-created game (insert only, no blob to save)."
+  @doc """
+  Port of `GameServer.SaveNewGame` for a freshly-created game (insert only, no blob to save).
+
+  `turn_length` (minutes) is optional and, per GIF-68, opts this game into the periodic turn
+  scheduler once it's `mark_active/1`'d -- a `nil` `turn_length` (the default) leaves it outside
+  `GlobalCombat.Games.Scheduling.list_due/1` entirely, same as today.
+  """
   def create_game(attrs \\ %{}) do
     %Game{}
-    |> Ecto.Changeset.cast(attrs, [:status, :private])
+    |> Ecto.Changeset.cast(attrs, [:status, :private, :turn_length])
     |> Repo.insert()
   end
 
   @doc "Port of `GameServer.GetGame`."
   def get_game(id), do: Repo.get(Game, id)
+
+  @doc "Same as `get_game/1` but raises if `id` has no row — for callers where a missing row is an invariant violation, not a normal outcome (e.g. `GlobalCombat.Games.Server` acting on the DB row it was started against)."
+  def get_game!(id), do: Repo.get!(Game, id)
+
+  @doc """
+  Games currently `:active` — the boot-time rehydration set (GIF-74): every row a resolved
+  turn-scheduler claim might target, so `GlobalCombat.Games.Supervisor` knows which
+  `GlobalCombat.Games.Server` children to restart from persisted state after a node restart.
+  """
+  def list_active_games, do: Repo.all(from(g in Game, where: g.status == :active))
+
+  @doc """
+  Overwrites `serialized` for `game_id` (GIF-74) — `GlobalCombat.Games.Server` calls this after
+  every turn it runs, win or claimed, so `games.serialized` always holds the live board's latest
+  snapshot for boot-time rehydration/offline resolution to read back. A plain `update_all` by id
+  rather than a fetch-then-update: the caller (`Games.Server`) is the sole writer for its own
+  `game_id` by construction (one GenServer per game, `GlobalCombat.Games.TurnScheduler`'s live-
+  process resolve path also routes through it rather than writing directly), so there is no
+  concurrent writer to race.
+  """
+  def persist_serialized(game_id, serialized) do
+    from(g in Game, where: g.id == ^game_id)
+    |> Repo.update_all(set: [serialized: serialized])
+
+    :ok
+  end
+
+  @doc """
+  Advances `games.turn`/`prev_turn_time`/`last_turn_time` for a turn `GlobalCombat.Games.Server`
+  ran on its own initiative (a player forcing the turn, or every seat marking done) rather than
+  one `GlobalCombat.Games.TurnScheduler` already claimed via `GlobalCombat.Games.Scheduling.
+  claim_turn/2` — that path already advanced these columns before handing off to the resolver, so
+  `Games.Server` must not double-advance them there. Same reasoning as `persist_serialized/2` for
+  why this is a plain `update_all`, not an optimistically-locked claim: `Games.Server` is the
+  sole writer of its own game's clock columns outside a scheduler claim.
+  """
+  def advance_turn(game_id, turn, prev_turn_time, now) do
+    from(g in Game, where: g.id == ^game_id)
+    |> Repo.update_all(set: [turn: turn, prev_turn_time: prev_turn_time, last_turn_time: now])
+
+    :ok
+  end
+
+  @doc "Marks `game_id` `:finished` (GIF-74) — once `GlobalCombat.Engine.Game.run_turn/1` sets `ended: true`, the game must stop showing up in `GlobalCombat.Games.Scheduling.list_due/1`, or the scheduler would keep claiming and bumping its turn counter forever on a game with no more turns to run."
+  def finish_game(game_id) do
+    from(g in Game, where: g.id == ^game_id and g.status != :finished)
+    |> Repo.update_all(set: [status: :finished])
+
+    :ok
+  end
 
   @doc """
   Port of `GameServer.PlayerJoined`'s persistence half (the seat itself -- the live code's
@@ -39,9 +95,20 @@ defmodule GlobalCombat.Games do
     |> Repo.insert()
   end
 
-  @doc "Sets a game active once its bracket slot has filled -- there is no in-memory `Game.Start()` yet to do this implicitly."
+  @doc """
+  Sets a game active once its bracket slot has filled -- there is no in-memory `Game.Start()`
+  yet to do this implicitly. Stamps `last_turn_time` the same way `Game.cs`'s `Start()` does
+  (`LastTurnTime = DateTime.UtcNow`), so a `turn_length`-bearing game becomes schedulable the
+  moment it goes active rather than needing a first turn to run manually before the scheduler
+  can see it.
+  """
   def mark_active(%Game{} = game) do
-    game |> Ecto.Changeset.change(status: :active) |> Repo.update()
+    game
+    |> Ecto.Changeset.change(
+      status: :active,
+      last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
+    )
+    |> Repo.update()
   end
 
   @doc "Accounts seated in a game, in join order (mirrors `Game.Players` list order pre-play)."

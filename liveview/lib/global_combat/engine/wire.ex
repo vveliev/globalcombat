@@ -86,6 +86,86 @@ defmodule GlobalCombat.Engine.Wire do
     end)
   end
 
+  @doc """
+  Builds a wire `GlobalCombat.GrpcHost.Game` from a `GlobalCombat.Engine.Game` plus the
+  `GlobalCombat.Games.Server`-only config wrapping it (`:game_id`, `:turn_length_minutes`,
+  `:max_players`, `:is_fogged`) — for persisting live play state to `games.serialized` between
+  turns (GIF-74). Reuses the same wire format `GlobalCombat.Games.GameSummary` already decodes
+  for the tourney flow (GIF-33), so a `games` row's `serialized` blob means the same thing
+  regardless of which flow wrote it.
+
+  RNG state has no wire representation (the .NET oracle owns its `System.Random` internally and
+  never puts it on the wire) and is intentionally not round-tripped here: a game rehydrated from
+  this blob after a process restart continues with a freshly reseeded RNG, not the oracle's
+  matching stream — fine for production play (any valid seed is a fair game), but this blob must
+  never be fed into the differential harness expecting bit-exact continuation.
+  """
+  def to_wire_game(%Game{} = game, opts) do
+    %GrpcHost.Game{
+      Id: Keyword.fetch!(opts, :game_id),
+      GameName: "",
+      MapName: to_wire_map_name(game.map_name),
+      TurnLength: Keyword.fetch!(opts, :turn_length_minutes),
+      MaxPlayers: Keyword.fetch!(opts, :max_players),
+      IsFogged: Keyword.fetch!(opts, :is_fogged),
+      IsNonRandom: game.is_non_random,
+      ReverseAttackOrder: game.reverse_attack_order,
+      MinimumArmies: game.minimum_armies,
+      Turn: game.turn,
+      Started: true,
+      Ended: game.ended,
+      Areas: Enum.map(Game.areas_in_order(game), &to_wire_area/1),
+      Players: Enum.map(Game.players_in_order(game), &to_wire_player/1),
+      IsPrivate: Keyword.get(opts, :is_private, false),
+      IsTraining: game.is_training,
+      TourneyId: 0
+    }
+  end
+
+  defp to_wire_area(%Game.Area{} = a) do
+    %GrpcHost.Area{
+      Number: a.number,
+      Owner: a.owner_number && %GrpcHost.Player{Number: a.owner_number},
+      Armies: a.armies,
+      AssignedArmies: a.assigned_armies,
+      Command: to_wire_command(a.command),
+      Target: a.target_number && %GrpcHost.Area{Number: a.target_number},
+      Amount: a.amount
+    }
+  end
+
+  defp to_wire_player(%Game.Player{} = p) do
+    %GrpcHost.Player{
+      AccountId: p.account_id,
+      Number: p.number,
+      Name: p.name,
+      Done: p.done,
+      Areas: p.areas,
+      Armies: p.armies,
+      UnassignedArmies: p.unassigned_armies,
+      Place: p.place,
+      Score: p.score,
+      ScoreExpected: p.score_expected,
+      Rating: p.rating,
+      RatingChange: p.rating_change
+    }
+  end
+
+  @doc """
+  Reverse of `to_wire_game/2`: decodes a persisted wire `GlobalCombat.GrpcHost.Game` back into
+  a `%{engine: %GlobalCombat.Engine.Game{}, is_fogged: boolean, max_players: integer}` — the full
+  set `GlobalCombat.Games.Server` needs to rehydrate after a process/node restart (GIF-74), not
+  just the engine struct `from_wire_game/2` alone builds (that's also used by the differential
+  harness, which never needs `is_fogged`/`max_players` — Server-only config, not engine state).
+  """
+  def from_wire_snapshot(%GrpcHost.Game{} = wire, rng) do
+    %{
+      engine: from_wire_game(wire, rng),
+      is_fogged: f(wire, :IsFogged),
+      max_players: f(wire, :MaxPlayers)
+    }
+  end
+
   @doc "Builds wire `Order` structs from a `GlobalCombat.Engine.Game`'s currently-queued area commands, matching how `GameEngineService.Think` derives its `Orders` — used to diff the Elixir port's own AI decisions against the oracle's."
   def to_wire_orders(game) do
     game
@@ -103,6 +183,9 @@ defmodule GlobalCombat.Engine.Wire do
 
   defp from_wire_map_name(:Original), do: :original
   defp from_wire_map_name(:Elements), do: :elements
+
+  defp to_wire_map_name(:original), do: :Original
+  defp to_wire_map_name(:elements), do: :Elements
 
   defp from_wire_command(:None), do: :none
   defp from_wire_command(:Transfer), do: :transfer

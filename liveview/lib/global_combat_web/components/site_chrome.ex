@@ -38,6 +38,8 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
             <a href={~p"/Messages"} class="hover:underline">Messages</a>
             <a href={~p"/account/settings"} class="hover:underline">Settings</a>
             <hr class="border-border my-[var(--space-2)]" />
+            <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
+            <hr class="border-border my-[var(--space-2)]" />
             <form method="post" action={~p"/account/log-off"}>
               <input type="hidden" name="_method" value="delete" />
               <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
