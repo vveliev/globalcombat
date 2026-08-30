@@ -12,6 +12,8 @@ defmodule GlobalCombatWeb.GameCreateLive do
 
   use GlobalCombatWeb, :live_view
 
+  import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1]
+
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombatWeb.Components.Boutique.Button
 
@@ -55,40 +57,42 @@ defmodule GlobalCombatWeb.GameCreateLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mx-auto max-w-2xl p-[var(--space-4)]">
-      <h1 class="text-lg font-semibold mb-[var(--space-4)]">Create a New Game</h1>
+    <.site_chrome current_account={@current_account}>
+      <div class="mx-auto max-w-2xl p-[var(--space-4)]">
+        <h1 class="text-lg font-semibold mb-[var(--space-4)]">Create a New Game</h1>
 
-      <form phx-submit="create" class="flex flex-col gap-[var(--space-4)]">
-        <label class="flex flex-col gap-[var(--space-1)]">
-          Map
-          <select name="map_name" class="border border-border rounded px-[var(--space-2)]">
-            <option value="original">World War I Era</option>
-            <option value="elements">Battle of the Elements</option>
-          </select>
-        </label>
+        <form phx-submit="create" class="flex flex-col gap-[var(--space-4)]">
+          <label class="flex flex-col gap-[var(--space-1)]">
+            Map
+            <select name="map_name" class="border border-border rounded px-[var(--space-2)]">
+              <option value="original">World War I Era</option>
+              <option value="elements">Battle of the Elements</option>
+            </select>
+          </label>
 
-        <label class="flex flex-col gap-[var(--space-1)]">
-          Max Number of Players
-          <select name="max_players" class="border border-border rounded px-[var(--space-2)]">
-            <option :for={n <- 2..8} value={n} selected={n == 6}>{n}</option>
-          </select>
-        </label>
+          <label class="flex flex-col gap-[var(--space-1)]">
+            Max Number of Players
+            <select name="max_players" class="border border-border rounded px-[var(--space-2)]">
+              <option :for={n <- 2..8} value={n} selected={n == 6}>{n}</option>
+            </select>
+          </label>
 
-        <label class="flex items-center gap-[var(--space-2)]">
-          <input type="checkbox" name="is_fogged" value="true" /> Fog of War
-        </label>
+          <label class="flex items-center gap-[var(--space-2)]">
+            <input type="checkbox" name="is_fogged" value="true" /> Fog of War
+          </label>
 
-        <label class="flex items-center gap-[var(--space-2)]">
-          <input type="checkbox" name="reverse_attack_order" value="true" /> Reverse Attack Order
-        </label>
+          <label class="flex items-center gap-[var(--space-2)]">
+            <input type="checkbox" name="reverse_attack_order" value="true" /> Reverse Attack Order
+          </label>
 
-        <label class="flex items-center gap-[var(--space-2)]">
-          <input type="checkbox" name="is_non_random" value="true" /> Non-Random Attacks
-        </label>
+          <label class="flex items-center gap-[var(--space-2)]">
+            <input type="checkbox" name="is_non_random" value="true" /> Non-Random Attacks
+          </label>
 
-        <Button.button type="submit" intent="primary">Create Game</Button.button>
-      </form>
-    </div>
+          <Button.button type="submit" intent="primary">Create Game</Button.button>
+        </form>
+      </div>
+    </.site_chrome>
     """
   end
 end
