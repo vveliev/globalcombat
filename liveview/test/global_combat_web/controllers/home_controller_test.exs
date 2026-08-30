@@ -117,6 +117,20 @@ defmodule GlobalCombatWeb.HomeControllerTest do
 
       assert Accounts.get_account(target.id) != nil
     end
+
+    test "the contact form's Message textarea has a real label (WCAG 3.3.2, GIF-88)", %{
+      conn: conn
+    } do
+      viewer = account_fixture()
+      target = account_fixture()
+
+      body =
+        conn |> log_in_account(viewer) |> get(~p"/Player-Info-#{target.id}") |> html_response(200)
+
+      assert body =~ ~s(<label for="message">)
+      assert body =~ ~s(id="message")
+      assert body =~ ~s(name="Message")
+    end
   end
 
   describe "GET /IpAddresses" do
