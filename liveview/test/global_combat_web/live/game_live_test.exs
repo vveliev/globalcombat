@@ -81,6 +81,38 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ "Waiting for players"
   end
 
+  test "the board keeps the site chrome (header + left nav) visible during play (GIF-102)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    # GameLive used to render inside a bare GameLayout with no site_chrome, so a
+    # player mid-game lost the "GLOBAL COMBAT" wordmark/header and every nav link
+    # (Home, Game Manual, New Game, Messages, Settings, Log Off) — leaving browser
+    # navigation as the only way back to the rest of the site, unlike every other
+    # page (and unlike .NET's equivalent in-progress game view).
+    assert html =~ "GLOBAL COMBAT"
+    assert html =~ ~r/aria-label="Sidebar"/
+    assert html =~ "Game Manual"
+    assert html =~ "Log Off"
+    # the board itself must still be present, nested inside that chrome.
+    assert html =~ ~r/id="game-board"/
+  end
+
+  test "the lobby (pre-Start-Game) also keeps the site chrome visible (GIF-102)", %{conn: conn} do
+    alice = account_fixture(%{"name" => "Alice"})
+
+    game_id = Games.create_game(%{max_players: 6})
+    {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+    {:ok, _view, html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+    assert html =~ "GLOBAL COMBAT"
+    assert html =~ ~r/aria-label="Sidebar"/
+  end
+
   test "a chat message from one session appears live on the other (GameHub.Say -> addMessage)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()

@@ -22,6 +22,12 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   Collapses to a stacked status/board/players column at `lg:` (Tailwind's
   64rem breakpoint matches `--size-collapse`, tokens/scales.json), same
   convention as the ported shells.
+
+  Sizes to its container rather than forcing its own `min-h-screen` (GIF-102):
+  `GameLive` nests this inside `SiteChrome.site_chrome`'s already-`min-h-screen`
+  content slot, so a second forced viewport-height here would inflate the page
+  to roughly double the visible content. A standalone consumer (`DesignSmokeLive`)
+  passes `class="min-h-screen"` explicitly to get the old full-viewport look back.
   """
   use Phoenix.Component
 
@@ -38,7 +44,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
     <div
       id={@id}
       class={[
-        "grid min-h-screen bg-background text-text font-sans",
+        "grid bg-background text-text font-sans",
         "grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto]",
         "[grid-template-areas:'status'_'board'_'players']",
         "lg:grid-cols-[minmax(0,1fr)_var(--size-rail)] lg:grid-rows-[auto_minmax(0,1fr)]",

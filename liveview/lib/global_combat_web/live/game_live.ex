@@ -19,6 +19,8 @@ defmodule GlobalCombatWeb.GameLive do
 
   use GlobalCombatWeb, :live_view
 
+  import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1]
+
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombatWeb.Components.Boutique.Button
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
@@ -162,51 +164,53 @@ defmodule GlobalCombatWeb.GameLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
-      <:status>
-        {status_line(assigns)}
-      </:status>
+    <.site_chrome current_account={@current_account}>
+      <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
+        <:status>
+          {status_line(assigns)}
+        </:status>
 
-      <:board>
-        <Layouts.flash_group flash={@flash} />
-        <%= case @status do %>
-          <% :lobby -> %>
-            {lobby(assigns)}
-          <% :playing -> %>
-            {board(assigns)}
-        <% end %>
-      </:board>
+        <:board>
+          <Layouts.flash_group flash={@flash} />
+          <%= case @status do %>
+            <% :lobby -> %>
+              {lobby(assigns)}
+            <% :playing -> %>
+              {board(assigns)}
+          <% end %>
+        </:board>
 
-      <:players>
-        <.player_list players={@view.players} viewer_number={@view.viewer_number} />
-        <.chat
-          messages={Map.get(@view, :messages, [])}
-          chat_text={@chat_text}
-          logged_in={!!@current_account}
-        />
-      </:players>
-    </GameLayout.game_layout>
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
-      // Join/Start/End Turn/Force Turn all swap out significant subtrees
-      // (lobby -> board, a button disappearing once its action no longer
-      // applies). LiveView's morphdom patch drops focus to <body> when the
-      // focused element is removed — this restores it to the game layout's
-      // stable :status landmark (GameLayout, marked data-focus-landmark) so
-      // keyboard/screen-reader users don't lose their place (GIF-82).
-      export default {
-        beforeUpdate() {
-          const active = document.activeElement
-          this.focusedBeforeUpdate = this.el.contains(active) ? active : null
-        },
-        updated() {
-          const lost = this.focusedBeforeUpdate
-          this.focusedBeforeUpdate = null
-          if (lost && !document.body.contains(lost)) {
-            this.el.querySelector("[data-focus-landmark]")?.focus()
+        <:players>
+          <.player_list players={@view.players} viewer_number={@view.viewer_number} />
+          <.chat
+            messages={Map.get(@view, :messages, [])}
+            chat_text={@chat_text}
+            logged_in={!!@current_account}
+          />
+        </:players>
+      </GameLayout.game_layout>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
+        // Join/Start/End Turn/Force Turn all swap out significant subtrees
+        // (lobby -> board, a button disappearing once its action no longer
+        // applies). LiveView's morphdom patch drops focus to <body> when the
+        // focused element is removed — this restores it to the game layout's
+        // stable :status landmark (GameLayout, marked data-focus-landmark) so
+        // keyboard/screen-reader users don't lose their place (GIF-82).
+        export default {
+          beforeUpdate() {
+            const active = document.activeElement
+            this.focusedBeforeUpdate = this.el.contains(active) ? active : null
+          },
+          updated() {
+            const lost = this.focusedBeforeUpdate
+            this.focusedBeforeUpdate = null
+            if (lost && !document.body.contains(lost)) {
+              this.el.querySelector("[data-focus-landmark]")?.focus()
+            }
           }
         }
-      }
-    </script>
+      </script>
+    </.site_chrome>
     """
   end
 
