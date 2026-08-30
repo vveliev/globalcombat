@@ -1,0 +1,63 @@
+name: differential harness
+
+# GIF-101: standing CI wiring for the GIF-28/GIF-72 differential harness
+# (`liveview/scripts/gif72_sweep.exs`), which diffs the Elixir port against a
+# live .NET oracle (`GlobalCombat.GrpcHost`, ADR-0001) turn by turn. See the
+# `differential-harness` skill for the method this follows.
+#
+# Two jobs, per GIF-72's follow-up recommendation of "a smaller always-on
+# subset gating PRs, or a scheduled full-matrix run, or both":
+#
+#   - `smoke` gates every push/PR: same 120-scenario matrix as the full
+#     sweep, but GIF72_SMOKE=1 trims each scenario to 1 game / 8 turns
+#     (~960 turns total) so it's fast enough to block a PR.
+#   - `full` runs the entire 120-scenario / 328-game / ~39,000-turn matrix
+#     (~6 minutes against a live oracle, per GIF-72's sandbox run) on a
+#     nightly schedule and on demand (workflow_dispatch), not on every PR.
+#
+# SCOPE GAP (carried forward from GIF-72, not fixed by this workflow):
+# `GlobalCombat.GrpcHost` only exposes NewGame/Think/ResolveQueuedTurn over
+# gRPC. Tournament bracket resolution (`Web/Models/Tourney.cs`, ported in
+# GIF-32 to `GlobalCombat.Tourneys`) has no gRPC surface on the oracle at
+# all, so neither job here diffs it — that logic is covered only by the
+# Elixir port's own unit tests (`liveview/test/global_combat/tourneys_test.exs`
+# et al.). Extending GlobalCombat.GrpcHost with a Tourney RPC is separate,
+# larger scope.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "liveview/**"
+      - "GlobalCombat.Core/**"
+      - "GlobalCombat.GrpcHost/**"
+      - "GlobalCombat.sln"
+      - ".github/workflows/differential-harness.yml"
+  pull_request:
+    paths:
+      - "liveview/**"
+      - "GlobalCombat.Core/**"
+      - "GlobalCombat.GrpcHost/**"
+      - "GlobalCombat.sln"
+      - ".github/workflows/differential-harness.yml"
+  schedule:
+    # 03:17 UTC nightly - off the hour to avoid GitHub Actions' cron congestion.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+# No secrets are used and nothing is published; checkout is all this needs.
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    uses: ./.github/workflows/differential-harness-run.yml
+    with:
+      smoke: "1"
+
+  full:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/differential-harness-run.yml
+    with:
+      smoke: "0"
