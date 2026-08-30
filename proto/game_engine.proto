@@ -11,6 +11,10 @@ message Area {
    Area Target = 6;
    int32 Amount = 7;
 }
+message Assignment {
+   int32 AreaNumber = 1;
+   int32 Amount = 2;
+}
 enum Command {
    None = 0;
    Transfer = 1;
@@ -51,6 +55,11 @@ enum MapName {
 message NewGameRequest {
    MapName MapName = 1;
    repeated string PlayerNames = 2;
+   int32 Seed = 3;
+   bool IsNonRandom = 4;
+   bool IsFogged = 5;
+   bool ReverseAttackOrder = 6;
+   int32 MinimumArmies = 7;
 }
 message NewGameResponse {
    Game Game = 1;
@@ -75,15 +84,30 @@ message Player {
    int32 Rating = 12;
    int32 RatingChange = 13;
 }
+message ResolveQueuedTurnRequest {
+   int32 GameId = 1;
+   int32 Seed = 2;
+}
 message ResolveTurnRequest {
    Game Game = 1;
    repeated Order Orders = 2;
+   int32 Seed = 3;
 }
 message ResolveTurnResponse {
    Game Game = 1;
    string TurnSummary = 2;
 }
+message ThinkRequest {
+   int32 GameId = 1;
+   int32 Seed = 2;
+}
+message ThinkResponse {
+   repeated Assignment Assignments = 1;
+   repeated Order Orders = 2;
+}
 service GameEngine {
    rpc NewGame (NewGameRequest) returns (NewGameResponse);
+   rpc ResolveQueuedTurn (ResolveQueuedTurnRequest) returns (ResolveTurnResponse);
    rpc ResolveTurn (ResolveTurnRequest) returns (ResolveTurnResponse);
+   rpc Think (ThinkRequest) returns (ThinkResponse);
 }
