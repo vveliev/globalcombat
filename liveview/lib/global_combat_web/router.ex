@@ -35,7 +35,8 @@ defmodule GlobalCombatWeb.Router do
     # Literal/shortcut routes are declared before the "Game-:id" pattern
     # below so e.g. /Game-Manual doesn't get swallowed as id: "Manual".
     get "/Create-Game", GameController, :create
-    get "/Create-Tournament", TourneyController, :create
+    get "/Create-Tournament", TourneyController, :new
+    post "/Create-Tournament", TourneyController, :create
     get "/Game-Manual", HomeController, :game_manual
     get "/Send-Message", HomeController, :send_message
 
@@ -68,6 +69,8 @@ defmodule GlobalCombatWeb.Router do
     get "/Game-:id", GameController, :show
     get "/Player-Info-:id", HomeController, :player_info
     get "/Tournament-:id", TourneyController, :index
+    get "/Tournament-:id/Join", TourneyController, :join
+    get "/Tournament-:id/Quit", TourneyController, :quit
   end
 
   # Account surface (GIF-29): register / log on / log off / password reset / settings.
