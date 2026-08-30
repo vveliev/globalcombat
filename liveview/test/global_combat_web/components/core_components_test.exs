@@ -12,7 +12,13 @@ defmodule GlobalCombatWeb.CoreComponentsTest do
 
       html =
         rendered_to_string(~H"""
-        <CoreComponents.input id="account_email" name="account[email]" type="text" errors={["is invalid"]} />
+        <CoreComponents.input
+          id="account_email"
+          name="account[email]"
+          type="text"
+          value=""
+          errors={["is invalid"]}
+        />
         """)
 
       assert html =~ ~s(aria-invalid="true")
@@ -31,6 +37,7 @@ defmodule GlobalCombatWeb.CoreComponentsTest do
           id="account_password"
           name="account[password]"
           type="password"
+          value=""
           errors={["too short", "needs a digit"]}
         />
         """)
@@ -45,7 +52,7 @@ defmodule GlobalCombatWeb.CoreComponentsTest do
 
       html =
         rendered_to_string(~H"""
-        <CoreComponents.input id="account_email" name="account[email]" type="text" />
+        <CoreComponents.input id="account_email" name="account[email]" type="text" value="" />
         """)
 
       refute html =~ "aria-invalid"
@@ -63,6 +70,7 @@ defmodule GlobalCombatWeb.CoreComponentsTest do
           id="account_role"
           name="account[role]"
           type="select"
+          value=""
           options={["Admin": "admin"]}
           errors={["is invalid"]}
         />
