@@ -414,17 +414,22 @@ defmodule GlobalCombat.Games.Server do
   # (account_id 1, see `Engine.reset_done_flags/1`), so training games stuck on turn 1 forever.
   # Ports `GameController.Create`'s `model.Join(1, "Computer", 0).Done = true` — the Computer
   # seat is marked done the instant its turn starts, not waited on — but additionally runs
-  # `RandomAi.think/1` first (the oracle-side-only `RandomAiPlayer.Think` call in
+  # `RandomAi.think/2` first (the oracle-side-only `RandomAiPlayer.Think` call in
   # `GameEngineService.cs` was never ported to the live .NET web app either, leaving that
   # "AI" a purely passive placeholder there; this wires it up for real so Training Mode's
   # opponent actually plays instead of just rubber-stamping "done").
+  #
+  # GIF-118: passes `player.number` so `RandomAi` only draws from the Computer seat's own
+  # areas — the unscoped `think/1` (no player number) is whole-board-random by design, but
+  # that's only correct for `Harness`'s oracle-lockstep diffing, not for a live opponent
+  # whose orders should be constrained to its own territories like a real player's would be.
   defp run_ai_turns(%Engine{ended: true} = engine), do: engine
 
   defp run_ai_turns(engine) do
     Enum.reduce(Engine.players_in_order(engine), engine, fn player, engine ->
       if computer_seat?(player) and not Engine.eliminated?(player) do
         engine
-        |> RandomAi.think()
+        |> RandomAi.think(player.number)
         |> then(&put_in(&1.players[player.number].done, true))
       else
         engine
