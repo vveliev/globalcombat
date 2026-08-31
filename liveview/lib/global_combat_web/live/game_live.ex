@@ -2,8 +2,10 @@ defmodule GlobalCombatWeb.GameLive do
   @moduledoc """
   The game board (GIF-30) — replaces `Views/Game/Index.cshtml` + `Views/Game/_PlayerList.cshtml`
   and the `Web/wwwroot/Main.js`/`Global.js`/`jquery.signalR-0.5.1` client stack that kept them
-  live. Mounted at `/Game-:id` (see `router.ex`); `/Game-:id/:action` (Invite/Kick/etc.) stays
-  on the legacy `GameController` stub — out of scope here, see this ticket's follow-ups.
+  live. Mounted at `/Game-:id` (see `router.ex`). `/Game-:id/:action` (the legacy AJAX action
+  path) stays on the `GameController` stub — this rewrite has no legacy AJAX callers left to
+  serve, so Invite/Quit/Kick (GIF-114) are wired here instead, as `phx-click`/`phx-submit`
+  events consistent with join/start/done, rather than reviving that controller path.
 
   Realtime updates arrive over `GlobalCombat.Games.PubSub` instead of a SignalR hub connection:
   every socket subscribes to its game's board topic, and — once resolved to a seated player —
@@ -50,6 +52,7 @@ defmodule GlobalCombatWeb.GameLive do
        socket
        |> assign(:game_id, game_id)
        |> assign(:chat_text, "")
+       |> assign(:invite_login, "")
        |> refresh_view()}
     else
       {:ok, socket |> put_flash(:error, "Game not found.") |> push_navigate(to: ~p"/")}
@@ -122,6 +125,63 @@ defmodule GlobalCombatWeb.GameLive do
     end
   end
 
+  def handle_event("invite", %{"login" => login}, socket) do
+    login = String.trim(login)
+
+    case {login, require_account(socket)} do
+      {"", _} ->
+        {:noreply, socket}
+
+      {_login, {:ok, account}} ->
+        case Games.invite(socket.assigns.game_id, account.id, login) do
+          {:ok, invitee} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Invited #{invitee.name}.")
+             |> assign(:invite_login, "")
+             |> refresh_view()}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, invite_error_message(reason, login))}
+        end
+
+      {_login, :error} ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("quit", _params, socket) do
+    case require_account(socket) do
+      {:ok, account} ->
+        case Games.quit(socket.assigns.game_id, account.id) do
+          :ok ->
+            socket = refresh_view(socket)
+
+            if socket.assigns.status == :lobby and socket.assigns.view.players == [] do
+              {:noreply, push_navigate(socket, to: ~p"/")}
+            else
+              {:noreply, socket}
+            end
+
+          {:error, _reason} ->
+            {:noreply, socket}
+        end
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("kick", %{"player_number" => player_number}, socket) do
+    with {:ok, account} <- require_account(socket),
+         {player_number, ""} <- Integer.parse(player_number) do
+      Games.kick(socket.assigns.game_id, account.id, player_number)
+      {:noreply, refresh_view(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   def handle_event("send_chat", %{"text" => text}, socket) do
     text = String.trim(text)
 
@@ -161,6 +221,20 @@ defmodule GlobalCombatWeb.GameLive do
     end
   end
 
+  defp invite_error_message(:account_not_found, login), do: "No account found for \"#{login}\"."
+  defp invite_error_message(:cannot_invite_self, _login), do: "You can't invite yourself."
+
+  defp invite_error_message(:already_playing, login),
+    do: "#{login} is already in this game."
+
+  defp invite_error_message(:already_invited, login),
+    do: "#{login} has already been invited to this game."
+
+  defp invite_error_message(:not_in_lobby, _login),
+    do: "Invites can only be sent before the game starts."
+
+  defp invite_error_message(_reason, _login), do: "Unable to send that invite."
+
   # --- rendering -------------------------------------------------------------
 
   @impl true
@@ -183,7 +257,7 @@ defmodule GlobalCombatWeb.GameLive do
         </:board>
 
         <:players>
-          <.player_list players={@view.players} viewer_number={@view.viewer_number} />
+          <.player_list players={@view.players} viewer_number={@view.viewer_number} status={@status} />
           <.chat
             messages={Map.get(@view, :messages, [])}
             chat_text={@chat_text}
@@ -258,7 +332,20 @@ defmodule GlobalCombatWeb.GameLive do
         >
           Start Game
         </Button.button>
+        <Button.button :if={@view.viewer_number != nil} intent="neutral" phx-click="quit">
+          Quit
+        </Button.button>
       </div>
+      <form :if={@view.viewer_number != nil} phx-submit="invite" class="flex gap-[var(--space-2)]">
+        <input
+          type="text"
+          name="login"
+          value={@invite_login}
+          placeholder="Invite by username or email"
+          class="flex-1 rounded border border-border px-[var(--space-2)]"
+        />
+        <Button.button type="submit">Invite</Button.button>
+      </form>
     </div>
     """
   end
@@ -281,6 +368,9 @@ defmodule GlobalCombatWeb.GameLive do
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
+      <Button.button :if={!my_player(@view).eliminated} intent="neutral" phx-click="quit">
+        Quit
+      </Button.button>
     </div>
     """
   end
@@ -405,6 +495,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   attr :players, :list, required: true
   attr :viewer_number, :any, required: true
+  attr :status, :atom, required: true
 
   defp player_list(assigns) do
     ~H"""
@@ -419,6 +510,14 @@ defmodule GlobalCombatWeb.GameLive do
           <StatusPill.status_pill :if={!p.eliminated} tone={if p.done, do: "done", else: "waiting"}>
             {if p.done, do: "Done", else: "Thinking"}
           </StatusPill.status_pill>
+          <Button.button
+            :if={@status == :lobby and @viewer_number == 1 and p.number != @viewer_number}
+            intent="neutral"
+            phx-click="kick"
+            phx-value-player_number={p.number}
+          >
+            Kick
+          </Button.button>
         </span>
       </li>
     </ul>

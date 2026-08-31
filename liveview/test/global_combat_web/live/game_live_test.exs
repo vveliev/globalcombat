@@ -350,4 +350,145 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>unclaimed<\/td>/
     end
   end
+
+  describe "Invite/Quit/Kick (GIF-114)" do
+    test "a seated player inviting an existing account by name lands it on the invitee's pending invites",
+         %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      html = render_submit(view, "invite", %{"login" => bob.name})
+
+      assert html =~ "Invited Bob."
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
+    end
+
+    test "inviting an unknown login shows an error instead of crashing", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      html = render_submit(view, "invite", %{"login" => "no-such-account"})
+
+      assert html =~ "No account found for &quot;no-such-account&quot;."
+    end
+
+    test "an invited account can join a private game; a stranger is refused (GIF-93 gap this closes)" do
+      conn2 = Phoenix.ConnTest.build_conn()
+      conn3 = Phoenix.ConnTest.build_conn()
+
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+      carl = account_fixture(%{"name" => "Carl"})
+
+      game_id = Games.create_game(%{max_players: 4, is_private: true})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, _invitee} = Games.invite(game_id, alice.id, bob.name)
+
+      {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+      render_click(bob_view, "join")
+      assert wait_for(bob_view, "Bob") =~ "Bob"
+
+      {:ok, carl_view, _html} = conn3 |> log_in_account(carl) |> live(~p"/Game-#{game_id}")
+      html = render_click(carl_view, "join")
+      refute html =~ "Carl"
+      assert html =~ ~r/phx-click="join"/
+    end
+
+    test "the host can kick a player from the lobby, and it's reflected live for everyone", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+      {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+
+      assert html =~ "Kick"
+
+      render_click(alice_view, "kick", %{"player_number" => "2"})
+
+      refute wait_for(alice_view, "Waiting for players") =~ "Bob"
+      refute render(bob_view) =~ ~r/Kick/
+    end
+
+    test "a non-host player has no Kick control and a direct kick attempt is refused", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, _alice_view, _html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+      {:ok, bob_view, html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+
+      refute html =~ "Kick"
+
+      assert {:error, :not_host} = Games.kick(game_id, bob.id, 1)
+      assert render(bob_view) =~ "Alice"
+    end
+
+    test "a player quitting the lobby leaves and can rejoin as a fresh Join click", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      html = render_click(view, "quit")
+
+      assert html =~ ~r/phx-click="join"/
+      refute html =~ ~r/phx-click="quit"/
+      assert {:lobby, lobby_view} = Games.player_view(game_id, bob.id)
+      assert Enum.map(lobby_view.players, & &1.name) == ["Bob"]
+    end
+
+    test "the last player quitting an empty lobby is navigated home", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      render_click(view, "quit")
+      assert_redirect(view, "/")
+    end
+
+    test "a player quitting mid-play is eliminated live, and can no longer quit again", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, bob: bob, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_click(bob_view, "quit")
+
+      assert wait_for(alice_view, "place") =~ "place"
+      assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+    end
+  end
 end

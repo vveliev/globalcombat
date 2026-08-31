@@ -26,6 +26,7 @@ defmodule GlobalCombat.Games.Server do
 
   use GenServer
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.MapInfo
@@ -55,6 +56,7 @@ defmodule GlobalCombat.Games.Server do
     :db_last_turn_time,
     status: :lobby,
     players: [],
+    invites: [],
     engine: nil,
     messages: []
   ]
@@ -95,6 +97,38 @@ defmodule GlobalCombat.Games.Server do
   @doc "Joins `account_id` to the game's lobby. Returns `{:ok, player_number}` or `{:error, reason}`."
   def join(game_id, account_id, name) do
     GenServer.call(via(game_id), {:join, account_id, name})
+  end
+
+  @doc """
+  Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited` (GIF-114).
+  `account_id` must already be seated (matches this ticket's "a player can invite another
+  account" — the original C# action had no such check, but let any logged-in visitor
+  invite strangers into someone else's lobby). `login` is resolved the same way
+  `AccountController` resolves a name-or-email login. Lobby-only: once a game is playing,
+  `join/3` would refuse the invitee anyway. Returns `{:ok, invitee}` or `{:error, reason}`
+  with `reason` one of `:not_playing`, `:account_not_found`, `:cannot_invite_self`,
+  `:already_playing`, `:already_invited`, `:not_in_lobby`.
+  """
+  def invite(game_id, account_id, login) do
+    GenServer.call(via(game_id), {:invite, account_id, login})
+  end
+
+  @doc """
+  Port of `GameController.Quit` + `Game.Unjoin` (lobby) / `Game.EliminatePlayer` (mid-play).
+  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_playing`, `:already_eliminated`.
+  """
+  def quit(game_id, account_id) do
+    GenServer.call(via(game_id), {:quit, account_id})
+  end
+
+  @doc """
+  Port of `GameController.Kick` + `Game.Unjoin` — host only (`account_id` must resolve to
+  seat 1), lobby only, same restrictions as the original (`IsHost && !game.Started`).
+  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_host`, `:not_found`,
+  `:not_in_lobby`.
+  """
+  def kick(game_id, account_id, player_number) do
+    GenServer.call(via(game_id), {:kick, account_id, player_number})
   end
 
   @doc "Starts the game (host/player 1 only, matching `GameController.Start`'s `player.Number == 1` check)."
@@ -255,10 +289,20 @@ defmodule GlobalCombat.Games.Server do
       length(state.players) >= state.max_players ->
         {:reply, {:error, :full}, state}
 
+      # `players != []` exempts the founding join: `GameCreateLive` seats the creator via this
+      # same `join/3` right after `create_game/1`, mirroring `GameController.Create`'s
+      # `model.Join(...)` in the .NET original, which calls `Game.Join` directly and never runs
+      # the `IsPrivate` check that only lives in the controller's separate `Join` action.
+      state.players != [] and state.is_private and
+          not Enum.any?(state.invites, &(&1.account_id == account_id)) ->
+        {:reply, {:error, :not_invited}, state}
+
       true ->
         number = length(state.players) + 1
         players = state.players ++ [{number, %{account_id: account_id, name: name}}]
-        state = %{state | players: players}
+        invites = Enum.reject(state.invites, &(&1.account_id == account_id))
+        GamesDb.clear_invite(state.game_id, account_id)
+        state = %{state | players: players, invites: invites}
         GamePubSub.broadcast_reload(state.game_id)
         {:reply, {:ok, number}, state}
     end
@@ -266,6 +310,67 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_call({:join, _account_id, _name}, _from, state) do
     {:reply, {:error, :already_started}, state}
+  end
+
+  def handle_call({:invite, account_id, login}, _from, %{status: :lobby} = state) do
+    if find_player_number(state, account_id) do
+      handle_invite(state, account_id, login)
+    else
+      {:reply, {:error, :not_playing}, state}
+    end
+  end
+
+  def handle_call({:invite, _account_id, _login}, _from, state) do
+    {:reply, {:error, :not_in_lobby}, state}
+  end
+
+  def handle_call({:quit, account_id}, _from, %{status: :lobby} = state) do
+    case find_player_number(state, account_id) do
+      nil ->
+        {:reply, {:error, :not_playing}, state}
+
+      number ->
+        players = renumber_players(Enum.reject(state.players, fn {n, _p} -> n == number end))
+        state = %{state | players: players}
+        GamePubSub.broadcast_reload(state.game_id)
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:quit, account_id}, _from, %{status: :playing} = state) do
+    case find_player_number(state, account_id) do
+      nil ->
+        {:reply, {:error, :not_playing}, state}
+
+      number ->
+        if Engine.eliminated?(Engine.player!(state.engine, number)) do
+          {:reply, {:error, :already_eliminated}, state}
+        else
+          {:reply, :ok, eliminate_and_broadcast(state, number)}
+        end
+    end
+  end
+
+  def handle_call({:kick, account_id, player_number}, _from, %{status: :lobby} = state) do
+    cond do
+      find_player_number(state, account_id) != 1 ->
+        {:reply, {:error, :not_host}, state}
+
+      not Enum.any?(state.players, fn {n, _p} -> n == player_number end) ->
+        {:reply, {:error, :not_found}, state}
+
+      true ->
+        players =
+          renumber_players(Enum.reject(state.players, fn {n, _p} -> n == player_number end))
+
+        state = %{state | players: players}
+        GamePubSub.broadcast_reload(state.game_id)
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:kick, _account_id, _player_number}, _from, state) do
+    {:reply, {:error, :not_in_lobby}, state}
   end
 
   def handle_call({:start_game, account_id}, _from, %{status: :lobby} = state) do
@@ -365,6 +470,68 @@ defmodule GlobalCombat.Games.Server do
     persist_snapshot(state)
     GamePubSub.broadcast_reload(state.game_id)
     state
+  end
+
+  # Shared tail of {:invite, ...} once the inviter's own seat is confirmed — split out so
+  # the :lobby/otherwise dispatch above stays a plain function-head match like every other
+  # handle_call/3 clause in this module.
+  defp handle_invite(state, account_id, login) do
+    case Accounts.get_account_by_login(String.trim(login)) do
+      nil ->
+        {:reply, {:error, :account_not_found}, state}
+
+      %{id: ^account_id} ->
+        {:reply, {:error, :cannot_invite_self}, state}
+
+      invitee ->
+        cond do
+          find_player_number(state, invitee.id) ->
+            {:reply, {:error, :already_playing}, state}
+
+          Enum.any?(state.invites, &(&1.account_id == invitee.id)) ->
+            {:reply, {:error, :already_invited}, state}
+
+          true ->
+            {:ok, _} = GamesDb.invite(state.game_id, invitee.id)
+            invites = state.invites ++ [%{account_id: invitee.id, name: invitee.name}]
+            state = %{state | invites: invites}
+
+            GamePubSub.broadcast_notification(
+              invitee.id,
+              "Game Invite",
+              "You've been invited to a game of Global Combat.",
+              "/Game-#{state.game_id}/"
+            )
+
+            GamePubSub.broadcast_reload(state.game_id)
+            {:reply, {:ok, invitee}, state}
+        end
+    end
+  end
+
+  # Port of `Game.EliminatePlayer` called mid-play (a live Quit) rather than from
+  # `run_turn/1`'s own reinforcement pass — same engine call either way (GIF-114's fix
+  # direction: reuse the engine equivalent rather than reimplementing elimination here).
+  # Doesn't advance games.turn/last_turn_time: this isn't a turn resolving, just a seat
+  # dropping out mid-turn, so `run_turn/2`'s clock-advance machinery doesn't apply.
+  defp eliminate_and_broadcast(state, player_number) do
+    engine = Engine.eliminate_player(state.engine, player_number)
+    state = %{state | engine: engine}
+    persist_snapshot(state)
+    if engine.ended, do: GamesDb.finish_game(state.game_id)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
+  end
+
+  # Port of `Game.UpdatePlayerNumbers` — reassigns 1..n by list position after a lobby
+  # departure, so a later join's `length(players) + 1` never collides with a number a
+  # remaining player still holds (e.g. players [1,2,3], 2 leaves: without renumbering the
+  # next join would compute 3, colliding with the existing player 3).
+  defp renumber_players(players) do
+    players
+    |> Enum.map(fn {_n, p} -> p end)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {p, i} -> {i, p} end)
   end
 
   defp find_player_number(state, account_id) do
