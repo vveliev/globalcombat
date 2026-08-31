@@ -27,7 +27,7 @@ defmodule GlobalCombat.Games.ServerTest do
 
       {tourney, :started} =
         Enum.reduce(for(_ <- 1..4, do: account_fixture()), {tourney, nil}, fn account,
-                                                                               {tourney, _} ->
+                                                                              {tourney, _} ->
           {:ok, outcome} = Tourneys.join_tournament(tourney, account.id)
           {Tourneys.get_tourney!(tourney.id), outcome}
         end)
