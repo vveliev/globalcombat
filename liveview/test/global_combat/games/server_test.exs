@@ -1,6 +1,9 @@
 defmodule GlobalCombat.Games.ServerTest do
   use GlobalCombat.DataCase, async: true
 
+  import GlobalCombat.AccountsFixtures
+
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.Game.{Area, Player}
@@ -145,6 +148,89 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
+  describe "game completion persists wins/games/rating to account (GIF-120)" do
+    test "ending a non-training game updates the winner's wins/games and both players' rating, matching GameServer.OnEnd" do
+      winner_account = account_fixture()
+      loser_account = account_fixture()
+
+      serialized =
+        serialized_elimination_engine(winner_account.id, loser_account.id, is_training: false)
+
+      game =
+        %Game{status: :active, private: false, turn_length: 30, serialized: serialized}
+        |> Repo.insert!()
+
+      {:ok, game} = GamesDb.mark_active(game)
+
+      {:ok, _pid} =
+        Server.start_link(
+          game_id: game.id,
+          rehydrate_from: game.serialized,
+          turn_length_minutes: 30,
+          last_turn_time: game.last_turn_time,
+          callers: [self() | Process.get(:"$callers", [])]
+        )
+
+      # Player 2 already owns no areas going into this turn, so `resolve_reinforcements_and_
+      # eliminations/1` eliminates them and — since only one player then remains alive — ends
+      # the game in the same turn (mirrors `Game.EliminatePlayer`'s `Place <= 2` -> `End()`).
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+
+      persisted = GamesDb.get_game!(game.id)
+      decoded = GrpcHost.Game.decode(persisted.serialized)
+      assert Map.fetch!(decoded, :Ended)
+
+      winner = Repo.get!(Accounts.Account, winner_account.id)
+      loser = Repo.get!(Accounts.Account, loser_account.id)
+
+      assert winner.wins == winner_account.wins + 1
+      assert winner.games == winner_account.games + 1
+      # The loser's `games` bump comes from `GameServer.OnEliminated`'s branch, not `OnEnd`'s —
+      # they're eliminated (and their `games` incremented) the instant they hit 0 areas, which
+      # in this two-player fixture happens in the same turn the game ends.
+      assert loser.games == loser_account.games + 1
+      assert loser.wins == loser_account.wins
+
+      # Both players started at the same default rating (1200), so the Elo swing is symmetric.
+      assert winner.rating == winner_account.rating + 75
+      assert loser.rating == loser_account.rating - 75
+    end
+
+    test "a training game's completion leaves wins/games/rating untouched, matching GameServer's IsTraining gate" do
+      winner_account = account_fixture()
+      loser_account = account_fixture()
+
+      serialized =
+        serialized_elimination_engine(winner_account.id, loser_account.id, is_training: true)
+
+      game =
+        %Game{status: :active, private: false, turn_length: 30, serialized: serialized}
+        |> Repo.insert!()
+
+      {:ok, game} = GamesDb.mark_active(game)
+
+      {:ok, _pid} =
+        Server.start_link(
+          game_id: game.id,
+          rehydrate_from: game.serialized,
+          turn_length_minutes: 30,
+          last_turn_time: game.last_turn_time,
+          callers: [self() | Process.get(:"$callers", [])]
+        )
+
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+
+      winner = Repo.get!(Accounts.Account, winner_account.id)
+      loser = Repo.get!(Accounts.Account, loser_account.id)
+
+      assert winner.wins == winner_account.wins
+      assert winner.games == winner_account.games
+      assert winner.rating == winner_account.rating
+      assert loser.games == loser_account.games
+      assert loser.rating == loser_account.rating
+    end
+  end
+
   # A real, runnable two-player engine state (both alive, one area each on :original) encoded
   # exactly like `GlobalCombat.Games.Server.persist_snapshot/1` would have written it.
   defp serialized_engine(opts) do
@@ -161,6 +247,36 @@ defmodule GlobalCombat.Games.ServerTest do
       players: %{
         1 => %Player{number: 1, account_id: 101, name: "Alice", areas: 1, armies: 8},
         2 => %Player{number: 2, account_id: 102, name: "Bob", areas: 1, armies: 6}
+      }
+    }
+
+    wire =
+      Wire.to_wire_game(engine,
+        game_id: 0,
+        turn_length_minutes: 30,
+        max_players: 2,
+        is_fogged: false
+      )
+
+    GrpcHost.Game.encode(wire)
+  end
+
+  # A two-player engine one turn from ending: player 2 already owns no areas, so running this
+  # turn eliminates them (`Game.EliminatePlayer`) and, with only one player then left alive,
+  # ends the game in the same turn (`Place <= 2` -> `End()`) — exercises both the winner's
+  # wins/games bump and the rating award in one turn.
+  defp serialized_elimination_engine(winner_account_id, loser_account_id, opts) do
+    engine = %Engine{
+      map_name: :original,
+      rng: DotnetRandom.new(3),
+      turn: 5,
+      is_non_random: true,
+      is_training: Keyword.get(opts, :is_training, false),
+      minimum_armies: 3,
+      areas: %{1 => %Area{number: 1, owner_number: 1, armies: 8}},
+      players: %{
+        1 => %Player{number: 1, account_id: winner_account_id, name: "Alice", areas: 1, armies: 8},
+        2 => %Player{number: 2, account_id: loser_account_id, name: "Bob", areas: 0, armies: 0}
       }
     }
 

@@ -26,6 +26,7 @@ defmodule GlobalCombat.Games.Server do
 
   use GenServer
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.MapInfo
@@ -470,6 +471,7 @@ defmodule GlobalCombat.Games.Server do
   # double-advance, not idempotent.
   defp run_turn(state, opts \\ []) do
     advance_clock? = Keyword.get(opts, :advance_clock, true)
+    old_engine = state.engine
     engine = state.engine |> Engine.run_turn() |> run_ai_turns()
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     state = %{state | engine: engine, turn_started_at: now}
@@ -484,6 +486,7 @@ defmodule GlobalCombat.Games.Server do
 
     persist_snapshot(state)
     if engine.ended, do: GamesDb.finish_game(state.game_id)
+    record_game_results(old_engine, engine)
 
     for {number, account_id} <- notifiable_accounts(state) do
       GamePubSub.broadcast_notification(
@@ -497,6 +500,42 @@ defmodule GlobalCombat.Games.Server do
     GamePubSub.broadcast_reload(state.game_id)
     state
   end
+
+  # Port of `GameServer.OnEliminated`/`OnEnd`'s non-training DB writes (GIF-120). `Engine.Game`
+  # is deliberately pure (see its moduledoc), so unlike the C# original — which fires these as
+  # side effects straight out of `EliminatePlayer`/`End` — this diffs `old_engine` against the
+  # freshly-resolved `engine` to find the same two events: a player crossing from "in the game"
+  # to `Engine.eliminated?/1` this turn (`OnEliminated`'s `games + 1`, for every loser except the
+  # eventual winner, who also flips `eliminated?` true the instant `End()` sets `Place = 1`), and
+  # the game itself transitioning to `ended` (`OnEnd`'s winner `wins + 1, games + 1` plus every
+  # player's `rating + RatingChange`). `Engine.run_turn/1` no-ops once `ended`, so `old_engine`
+  # and `engine` are identical on any later call and this naturally fires exactly once per event.
+  defp record_game_results(_old_engine, %{is_training: true}), do: :ok
+
+  defp record_game_results(old_engine, engine) do
+    just_ended? = engine.ended and not old_engine.ended
+    winner = if just_ended?, do: find_winner(engine)
+    winner_number = winner && winner.number
+
+    for player <- Engine.players_in_order(engine),
+        player.number != winner_number,
+        not Engine.eliminated?(Engine.player!(old_engine, player.number)),
+        Engine.eliminated?(player) do
+      Accounts.record_game_played(player.account_id)
+    end
+
+    if winner do
+      Accounts.record_win(winner.account_id)
+
+      for player <- Engine.players_in_order(engine), player.rating_change != 0 do
+        Accounts.apply_rating_change(player.account_id, player.rating_change)
+      end
+    end
+
+    :ok
+  end
+
+  defp find_winner(engine), do: Engine.players_in_order(engine) |> Enum.find(&(&1.place == 1))
 
   defp persist_snapshot(state) do
     wire =
