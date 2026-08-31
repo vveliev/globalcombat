@@ -12,6 +12,7 @@ defmodule GlobalCombat.Games.ServerTest do
   alias GlobalCombat.Games.Game
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.Server
+  alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
   alias GlobalCombat.GrpcHost
   alias GlobalCombat.Tourneys
 
@@ -449,6 +450,70 @@ defmodule GlobalCombat.Games.ServerTest do
       assert winner.rating == winner_account.rating
       assert loser.games == loser_account.games
       assert loser.rating == loser_account.rating
+    end
+  end
+
+  describe "on-demand rehydration of a :finished game whose Server has died (GIF-124)" do
+    test "ensure_started/1 rehydrates from games.serialized instead of reporting :not_found, and the read-only view still shows the final board" do
+      winner_account = account_fixture()
+      loser_account = account_fixture()
+
+      serialized =
+        serialized_elimination_engine(winner_account.id, loser_account.id, is_training: false)
+
+      game =
+        %Game{status: :active, private: false, turn_length: 30, serialized: serialized}
+        |> Repo.insert!()
+
+      {:ok, game} = GamesDb.mark_active(game)
+
+      {:ok, _pid} =
+        Server.start_link(
+          game_id: game.id,
+          rehydrate_from: game.serialized,
+          turn_length_minutes: 30,
+          last_turn_time: game.last_turn_time,
+          callers: [self() | Process.get(:"$callers", [])]
+        )
+
+      # Resolving this turn eliminates player 2 and, with only one player then left alive,
+      # ends the game in the same turn — same fixture the GIF-120 tests above use.
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+      assert %{status: :finished} = GamesDb.get_game!(game.id)
+
+      kill_server!(game.id)
+      refute Server.alive?(game.id)
+
+      assert :ok = GamesSupervisor.ensure_started(game.id)
+      assert {:playing, view} = Server.player_view(game.id, winner_account.id)
+      assert view.ended
+      assert Enum.find(view.players, &(&1.number == 1)).place == 1
+    end
+
+    test "a :new (never-started) game with no persisted snapshot still reports not found" do
+      game = %Game{status: :new, private: false} |> Repo.insert!()
+      assert {:error, :not_found} = GamesSupervisor.ensure_started(game.id)
+    end
+  end
+
+  # Unlike GlobalCombat.Games.LiveTest's same-named helper, this file's Server processes are
+  # started directly via Server.start_link/1 (to exercise rehydrate_from: below the DynamicSupervisor
+  # layer), not as GamesSupervisor children — so there's no supervised child to terminate_child/2,
+  # just the bare pid to kill.
+  defp kill_server!(game_id) do
+    [{pid, _}] = Registry.lookup(GlobalCombat.Games.Registry, game_id)
+    ref = Process.monitor(pid)
+    # start_link/1 above links the Server to this test process, so an unlinked kill is needed
+    # here — a plain Process.exit(pid, :kill) would otherwise take the test process down with it.
+    Process.unlink(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    wait_until_deregistered(game_id)
+  end
+
+  defp wait_until_deregistered(game_id) do
+    unless Registry.lookup(GlobalCombat.Games.Registry, game_id) == [] do
+      wait_until_deregistered(game_id)
     end
   end
 
