@@ -153,6 +153,33 @@ namespace GlobalCombat.GrpcHost
         public List<Order> Orders { get; set; } = new List<Order>();
     }
 
+    // GIF-109: bracket seeding/advancement is deterministic, DB-free math (Web/Models/Tourney.cs's
+    // BuildRounds, extracted to GlobalCombat.Core.TourneyBracket) - unlike NewGame/Think/
+    // ResolveQueuedTurn, this RPC is stateless and takes no seed: same request always produces the
+    // same bracket, so there's nothing to reproduce beyond passing the same shape twice.
+    [ProtoContract]
+    public class TourneyBracketRequest
+    {
+        [ProtoMember(1)]
+        public int InitialGames { get; set; }
+
+        [ProtoMember(2)]
+        public int GameSize { get; set; }
+
+        [ProtoMember(3)]
+        public int Winners { get; set; }
+
+        [ProtoMember(4)]
+        public bool IsDoubleElimination { get; set; }
+    }
+
+    [ProtoContract]
+    public class TourneyBracketResponse
+    {
+        [ProtoMember(1)]
+        public GlobalCombat.Core.TourneyBracket Bracket { get; set; } = new GlobalCombat.Core.TourneyBracket();
+    }
+
     [Service]
     public interface IGameEngine
     {
@@ -167,5 +194,8 @@ namespace GlobalCombat.GrpcHost
 
         [Operation]
         Task<ResolveTurnResponse> ResolveQueuedTurn(ResolveQueuedTurnRequest request, CallContext context = default);
+
+        [Operation]
+        Task<TourneyBracketResponse> TourneyBracket(TourneyBracketRequest request, CallContext context = default);
     }
 }

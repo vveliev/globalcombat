@@ -40,7 +40,16 @@ defmodule GlobalCombat.Games.Live do
     turn_length = Map.get(attrs, :turn_length_minutes, @default_turn_length_minutes)
 
     {:ok, db_game} =
-      GamesDb.create_game(%{status: :new, private: false, turn_length: turn_length})
+      GamesDb.create_game(%{
+        status: :new,
+        private: false,
+        turn_length: turn_length,
+        map_name: Map.get(attrs, :map_name, :original),
+        is_fogged: Map.get(attrs, :is_fogged, false),
+        is_non_random: Map.get(attrs, :is_non_random, false),
+        reverse_attack_order: Map.get(attrs, :reverse_attack_order, false),
+        minimum_armies: Map.get(attrs, :minimum_armies, 3)
+      })
 
     # Captures the calling process's Ecto Sandbox ownership chain so the freshly-spawned
     # Games.Server — a *different* process than whoever called create_game/1, started by

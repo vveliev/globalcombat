@@ -147,5 +147,11 @@ namespace GlobalCombat.GrpcHost
                 TurnSummary = summary.ToString()
             });
         }
+
+        public Task<TourneyBracketResponse> TourneyBracket(TourneyBracketRequest request, CallContext context = default)
+        {
+            var bracket = GlobalCombat.Core.TourneyBracket.BuildRounds(request.InitialGames, request.GameSize, request.Winners, request.IsDoubleElimination);
+            return Task.FromResult(new TourneyBracketResponse { Bracket = bracket });
+        }
     }
 }

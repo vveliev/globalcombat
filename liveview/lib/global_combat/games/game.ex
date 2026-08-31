@@ -26,6 +26,17 @@ defmodule GlobalCombat.Games.Game do
     field :prev_turn_time, :utc_datetime
     field :last_turn_time, :utc_datetime
 
+    # GIF-112: the ruleset a lobby was created with, mirroring `Game.cs`'s `MapName`/`IsFogged`/
+    # `IsNonRandom`/`ReverseAttackOrder`/`MinimumArmies` columns -- durable so `tourney.
+    # option_game_id` has something to read regardless of whether this game ever started
+    # (`GlobalCombat.Games.Server`'s own copy of these is the live source of truth once a
+    # `Games.Live`-backed game is running; this column just needs to agree with it at creation).
+    field :map_name, Ecto.Enum, values: [:original, :elements], default: :original
+    field :is_fogged, :boolean, default: false
+    field :is_non_random, :boolean, default: false
+    field :reverse_attack_order, :boolean, default: false
+    field :minimum_armies, :integer, default: 3
+
     has_many :game_players, GlobalCombat.Games.GamePlayer
   end
 end
