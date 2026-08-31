@@ -142,6 +142,134 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
+  # deal_areas/2's round-robin on :original (42 areas) gives a 2-player game player 1
+  # every odd-numbered area, player 2 every even one. Area 1 links to [2, 3, 37]
+  # (`MapInfo.areas(:original)`), so area 1 <-> area 3 is an owned-adjacent pair for
+  # transfer, area 1 <-> area 2 is an owned-vs-enemy adjacent pair for attack, and
+  # area 1 <-> area 4 is an owned-vs-enemy *non-adjacent* pair for the fog/adjacency
+  # no-op cases below.
+  describe "order setters — assign/unassign/transfer/attack (GIF-111)" do
+    defp start_two_player_original(opts \\ %{}) do
+      game_id =
+        Games.create_game(Map.merge(%{map_name: :original, max_players: 2}, opts))
+
+      {:ok, 1} = Games.join(game_id, 101, "Alice")
+      {:ok, 2} = Games.join(game_id, 102, "Bob")
+      :ok = Games.start_game(game_id, 101)
+      game_id
+    end
+
+    defp area(view, number), do: Enum.find(view.areas, &(&1.number == number))
+    defp player(view, number), do: Enum.find(view.players, &(&1.number == number))
+
+    test "assign moves armies from the caller's unassigned pool onto an owned area" do
+      game_id = start_two_player_original()
+
+      {:playing, before} = Games.player_view(game_id, 101)
+      assert area(before, 1).armies == 5
+      assert player(before, 1).unassigned_armies == 25
+
+      Games.assign(game_id, 101, 1, 5)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 10
+      assert area(view, 1).pending_armies == 5
+      assert player(view, 1).unassigned_armies == 20
+    end
+
+    test "assign is a silent no-op on an area the caller doesn't own" do
+      game_id = start_two_player_original()
+      {:playing, before} = Games.player_view(game_id, 101)
+      assert area(before, 2).owner_number == 2
+
+      Games.assign(game_id, 101, 2, 5)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 2) == area(before, 2)
+      assert player(view, 1).unassigned_armies == player(before, 1).unassigned_armies
+    end
+
+    test "unassign returns a pending assignment to the caller's pool" do
+      game_id = start_two_player_original()
+      Games.assign(game_id, 101, 1, 5)
+
+      Games.unassign(game_id, 101, 1)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 1).pending_armies == 0
+      assert player(view, 1).unassigned_armies == 25
+    end
+
+    test "transfer queues armies to move between two owned, adjacent areas, resolved on turn run" do
+      game_id = start_two_player_original()
+
+      Games.transfer(game_id, 101, 1, 3, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert view.turn == 2
+      assert area(view, 1).armies == 3
+      assert area(view, 3).armies == 7
+    end
+
+    test "transfer is a silent no-op when the caller doesn't own both areas" do
+      game_id = start_two_player_original()
+
+      Games.transfer(game_id, 101, 1, 2, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 2).owner_number == 2
+    end
+
+    test "attack queues a strike against an adjacent enemy area, resolved deterministically (IsNonRandom) on turn run" do
+      game_id = start_two_player_original(%{is_non_random: true})
+
+      Games.attack(game_id, 101, 1, 2, 4)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert view.turn == 2
+      # attack_damage = trunc(4 * 0.6) = 2, defend_damage = trunc(5 * 0.75) = 3;
+      # not decisive (2 < defender's 5 armies), so both sides take their damage.
+      assert area(view, 1).armies == 2
+      assert area(view, 2).armies == 3
+      assert area(view, 2).owner_number == 2
+    end
+
+    test "attack is a silent no-op against a target the caller already owns" do
+      game_id = start_two_player_original()
+
+      Games.attack(game_id, 101, 1, 3, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 3).armies == 5
+    end
+
+    test "attack is a silent no-op against a non-adjacent enemy area" do
+      game_id = start_two_player_original()
+      {:playing, before} = Games.player_view(game_id, 101)
+      refute 4 in area(before, 1).adjacent
+
+      Games.attack(game_id, 101, 1, 4, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 4).armies == 5
+      assert area(view, 4).owner_number == 2
+    end
+  end
+
   describe "rehydrate_from: — boot-time reconstruction (GIF-74)" do
     test "starts straight into :playing with the persisted engine state, not an empty lobby" do
       game_id = System.unique_integer([:positive])
