@@ -15,14 +15,12 @@ name: differential harness
 #     (~6 minutes against a live oracle, per GIF-72's sandbox run) on a
 #     nightly schedule and on demand (workflow_dispatch), not on every PR.
 #
-# SCOPE GAP (carried forward from GIF-72, not fixed by this workflow):
-# `GlobalCombat.GrpcHost` only exposes NewGame/Think/ResolveQueuedTurn over
-# gRPC. Tournament bracket resolution (`Web/Models/Tourney.cs`, ported in
-# GIF-32 to `GlobalCombat.Tourneys`) has no gRPC surface on the oracle at
-# all, so neither job here diffs it — that logic is covered only by the
-# Elixir port's own unit tests (`liveview/test/global_combat/tourneys_test.exs`
-# et al.). Extending GlobalCombat.GrpcHost with a Tourney RPC is separate,
-# larger scope.
+# GIF-109 closed the scope gap GIF-72/101 carried forward: `GlobalCombat.GrpcHost` now also
+# exposes a `TourneyBracket` RPC (backed by `GlobalCombat.Core.TourneyBracket`, the pure
+# extraction of `Web/Models/Tourney.cs`'s `BuildRounds()`), and both jobs also run
+# `liveview/scripts/gif109_tourney_sweep.exs` to diff tournament bracket resolution
+# (`GlobalCombat.Tourneys.Bracket`, ported in GIF-32) against it - see
+# `differential-harness-run.yml`.
 
 on:
   push:
