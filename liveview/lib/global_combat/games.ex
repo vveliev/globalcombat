@@ -27,7 +27,16 @@ defmodule GlobalCombat.Games do
   """
   def create_game(attrs \\ %{}) do
     %Game{}
-    |> Ecto.Changeset.cast(attrs, [:status, :private, :turn_length])
+    |> Ecto.Changeset.cast(attrs, [
+      :status,
+      :private,
+      :turn_length,
+      :map_name,
+      :is_fogged,
+      :is_non_random,
+      :reverse_attack_order,
+      :minimum_armies
+    ])
     |> Repo.insert()
   end
 

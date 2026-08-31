@@ -215,6 +215,61 @@ defmodule GlobalCombat.TourneysTest do
     end
   end
 
+  describe "option_game_id inheritance (Tourney.CreateTourneyGame's OptionGame ruleset copy)" do
+    test "every bracket game inherits the option game's ruleset instead of bare schema defaults" do
+      {:ok, option_game} =
+        Games.create_game(%{
+          map_name: :elements,
+          is_fogged: true,
+          is_non_random: true,
+          reverse_attack_order: true,
+          minimum_armies: 7,
+          turn_length: 720
+        })
+
+      tourney =
+        tourney_fixture(%{
+          "initial_games" => 4,
+          "game_size" => 2,
+          "winners" => 1,
+          "option_game_id" => option_game.id
+        })
+
+      {tourney, :started} = join_all(tourney, accounts(8))
+
+      for tourney_game <- Tourneys.tourney_games(tourney) do
+        game = tourney_game.game
+        assert game.map_name == :elements
+        assert game.is_fogged == true
+        assert game.is_non_random == true
+        assert game.reverse_attack_order == true
+        assert game.minimum_armies == 7
+        assert game.turn_length == 720
+      end
+    end
+
+    test "falls back to schema defaults when option_game_id doesn't resolve to a real game" do
+      tourney =
+        tourney_fixture(%{
+          "initial_games" => 2,
+          "game_size" => 2,
+          "winners" => 1,
+          "option_game_id" => 999_999_999
+        })
+
+      {tourney, :started} = join_all(tourney, accounts(4))
+
+      for tourney_game <- Tourneys.tourney_games(tourney) do
+        game = tourney_game.game
+        assert game.map_name == :original
+        assert game.is_fogged == false
+        assert game.is_non_random == false
+        assert game.reverse_attack_order == false
+        assert game.minimum_armies == 3
+      end
+    end
+  end
+
   describe "double-elimination bracket advancement" do
     test "a round-1 loser drops into the loser bracket instead of being eliminated" do
       tourney =
