@@ -105,9 +105,32 @@ message ThinkResponse {
    repeated Assignment Assignments = 1;
    repeated Order Orders = 2;
 }
+message TourneyBracket {
+   repeated TourneyRound WinnerBracket = 1;
+   repeated TourneyRound LoserBracket = 2;
+   TourneyRound FinalRound = 3;
+}
+message TourneyBracketRequest {
+   int32 InitialGames = 1;
+   int32 GameSize = 2;
+   int32 Winners = 3;
+   bool IsDoubleElimination = 4;
+}
+message TourneyBracketResponse {
+   TourneyBracket Bracket = 1;
+}
+message TourneyRound {
+   int32 Number = 1;
+   int32 StartGame = 2;
+   int32 GameCount = 3;
+   int32 GameSize = 4;
+   int32 WinnersOfRoundNumber = 5;
+   int32 LosersOfRoundNumber = 6;
+}
 service GameEngine {
    rpc NewGame (NewGameRequest) returns (NewGameResponse);
    rpc ResolveQueuedTurn (ResolveQueuedTurnRequest) returns (ResolveTurnResponse);
    rpc ResolveTurn (ResolveTurnRequest) returns (ResolveTurnResponse);
    rpc Think (ThinkRequest) returns (ThinkResponse);
+   rpc TourneyBracket (TourneyBracketRequest) returns (TourneyBracketResponse);
 }

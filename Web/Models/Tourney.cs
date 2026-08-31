@@ -244,70 +244,30 @@ namespace WebGame
             return tourney;
         }
 
+        // Delegates the actual round-progression math to GlobalCombat.Core.TourneyBracket (GIF-109)
+        // - the same pure algorithm this method used to compute inline, extracted so it has a
+        // single implementation shared with the gRPC oracle's TourneyBracket RPC instead of two
+        // copies that could silently drift apart. Only the DB/Tourney-back-reference-bearing
+        // WebGame.TourneyRound wrapping is still done here.
         public void BuildRounds()
         {
-            int currentRound = 1;
-            int startGame = 1;
+            var bracket = GlobalCombat.Core.TourneyBracket.BuildRounds(InitialGames, GameSize, Winners, IsDoubleElimination);
 
-            // intial round
-            WinnerBracket.Add(new TourneyRound() { Tourney = this, Number = currentRound, GameCount = InitialGames, GameSize = GameSize, StartGame = startGame });
-            startGame += InitialGames;
-
-            var previousGameCount = InitialGames;
-            while (previousGameCount > 1)
-            {
-                currentRound++;
-                previousGameCount = previousGameCount / 2;
-                WinnerBracket.Add(new TourneyRound() { Tourney = this, Number = currentRound, GameCount = previousGameCount, GameSize = Winners * 2, WinnersOfRoundNumber = currentRound - 1, StartGame = startGame });
-                startGame += previousGameCount;
-            }
-
-            if (IsDoubleElimination)
-            {
-                int WinnerRound = 1;
-                currentRound++;
-                previousGameCount = InitialGames / 2;
-                LoserBracket.Add(new TourneyRound() { Tourney = this, Number = currentRound, GameCount = previousGameCount, GameSize = Losers * 2, LosersOfRoundNumber = WinnerRound, StartGame = startGame });
-                startGame += previousGameCount;
-
-                int WinnerRoundGameCount = InitialGames / 2;
-                while (previousGameCount > 1)
-                {
-                    int count = previousGameCount / 2;
-                    bool AddFlag = true;
-                    if ((WinnerRoundGameCount == 2) && (count > 1))
-                        AddFlag = false;
-                    if (WinnerRoundGameCount < 2)
-                        AddFlag = false;
-                    // TODO: if $PrevGameCount(times two?) + $ThisRoundGameCount != power of 2, then AddFlag = 0;
-                    // otherwise there will be bad round game counts when initial game > 16
-                    // may replace the above two checks
-
-                    currentRound++;
-                    if (!AddFlag)
-                    {
-                        previousGameCount = previousGameCount / 2;
-                        LoserBracket.Add(new TourneyRound() { Tourney = this, Number = currentRound, GameCount = previousGameCount, GameSize = Winners * 2, WinnersOfRoundNumber = currentRound - 1, StartGame = startGame });
-                        startGame += previousGameCount;
-                    }
-                    else
-                    {
-                        WinnerRound++;
-                        WinnerRoundGameCount = WinnerRoundGameCount / 2;
-                        LoserBracket.Add(new TourneyRound() { Tourney = this, Number = currentRound, GameCount = previousGameCount, GameSize = Winners * 2, WinnersOfRoundNumber = currentRound - 1, LosersOfRoundNumber = WinnerRound, StartGame = startGame });
-                        startGame += previousGameCount;
-                    }
-                }
-
-                WinnerRound++;
-                currentRound++;
-                LoserBracket.Add(new TourneyRound() { Tourney = this, Number = currentRound, GameCount = 1, GameSize = Winners * 2, WinnersOfRoundNumber = currentRound - 1, LosersOfRoundNumber = WinnerRound, StartGame = startGame });
-                startGame += 1;
-
-                currentRound++;
-                FinalRound = new TourneyRound { Tourney = this, Number = currentRound, GameCount = 1, GameSize = Winners * 2, WinnersOfRoundNumber = WinnerRound, LosersOfRoundNumber = -(currentRound - 1), StartGame = startGame };
-            }
+            WinnerBracket.AddRange(bracket.WinnerBracket.Select(ToTourneyRound));
+            LoserBracket.AddRange(bracket.LoserBracket.Select(ToTourneyRound));
+            FinalRound = bracket.FinalRound == null ? new TourneyRound() : ToTourneyRound(bracket.FinalRound);
         }
+
+        TourneyRound ToTourneyRound(GlobalCombat.Core.TourneyRound r) => new TourneyRound
+        {
+            Tourney = this,
+            Number = r.Number,
+            StartGame = r.StartGame,
+            GameCount = r.GameCount,
+            GameSize = r.GameSize,
+            WinnersOfRoundNumber = r.WinnersOfRoundNumber,
+            LosersOfRoundNumber = r.LosersOfRoundNumber
+        };
 
         public void LoadGames(DBConnection db)
         {

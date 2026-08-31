@@ -223,6 +223,60 @@ defmodule GlobalCombat.GrpcHost.ThinkResponse do
   field :Orders, 2, repeated: true, type: GlobalCombat.GrpcHost.Order
 end
 
+defmodule GlobalCombat.GrpcHost.TourneyBracket do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.TourneyBracket",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :WinnerBracket, 1, repeated: true, type: GlobalCombat.GrpcHost.TourneyRound
+  field :LoserBracket, 2, repeated: true, type: GlobalCombat.GrpcHost.TourneyRound
+  field :FinalRound, 3, type: GlobalCombat.GrpcHost.TourneyRound
+end
+
+defmodule GlobalCombat.GrpcHost.TourneyBracketRequest do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.TourneyBracketRequest",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :InitialGames, 1, type: :int32
+  field :GameSize, 2, type: :int32
+  field :Winners, 3, type: :int32
+  field :IsDoubleElimination, 4, type: :bool
+end
+
+defmodule GlobalCombat.GrpcHost.TourneyBracketResponse do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.TourneyBracketResponse",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :Bracket, 1, type: GlobalCombat.GrpcHost.TourneyBracket
+end
+
+defmodule GlobalCombat.GrpcHost.TourneyRound do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "GlobalCombat.GrpcHost.TourneyRound",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :Number, 1, type: :int32
+  field :StartGame, 2, type: :int32
+  field :GameCount, 3, type: :int32
+  field :GameSize, 4, type: :int32
+  field :WinnersOfRoundNumber, 5, type: :int32
+  field :LosersOfRoundNumber, 6, type: :int32
+end
+
 defmodule GlobalCombat.GrpcHost.GameEngine.Service do
   @moduledoc false
 
@@ -243,6 +297,12 @@ defmodule GlobalCombat.GrpcHost.GameEngine.Service do
   )
 
   rpc(:Think, GlobalCombat.GrpcHost.ThinkRequest, GlobalCombat.GrpcHost.ThinkResponse)
+
+  rpc(
+    :TourneyBracket,
+    GlobalCombat.GrpcHost.TourneyBracketRequest,
+    GlobalCombat.GrpcHost.TourneyBracketResponse
+  )
 end
 
 defmodule GlobalCombat.GrpcHost.GameEngine.Stub do
