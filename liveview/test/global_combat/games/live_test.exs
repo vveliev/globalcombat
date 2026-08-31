@@ -3,12 +3,216 @@ defmodule GlobalCombat.Games.LiveTest do
   # the Ecto Sandbox checkout DataCase provides — a plain ExUnit.Case has none.
   use GlobalCombat.DataCase, async: true
 
+  import GlobalCombat.AccountsFixtures
+
+  alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.PubSub, as: GamePubSub
 
   setup do
     game_id = Games.create_game(%{max_players: 3})
     %{game_id: game_id}
+  end
+
+  describe "invite/3 (GIF-114)" do
+    test "a seated player can invite an existing account by name, and it shows up as a pending invite",
+         %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+
+      assert {:ok, invitee} = Games.invite(game_id, alice.id, bob.name)
+      assert invitee.id == bob.id
+      assert [%{id: ^game_id}] = GamesDb.list_invited_games(bob.id)
+    end
+
+    test "invite works by email too", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+
+      assert {:ok, invitee} = Games.invite(game_id, alice.id, bob.email)
+      assert invitee.id == bob.id
+    end
+
+    test "an account not seated in the game can't invite anyone", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+
+      assert {:error, :not_playing} = Games.invite(game_id, alice.id, bob.name)
+    end
+
+    test "inviting an unknown login errors", %{game_id: game_id} do
+      alice = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+
+      assert {:error, :account_not_found} = Games.invite(game_id, alice.id, "nobody-like-this")
+    end
+
+    test "can't invite yourself", %{game_id: game_id} do
+      alice = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+
+      assert {:error, :cannot_invite_self} = Games.invite(game_id, alice.id, alice.name)
+    end
+
+    test "can't invite someone already playing", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.join(game_id, bob.id, bob.name)
+
+      assert {:error, :already_playing} = Games.invite(game_id, alice.id, bob.name)
+    end
+
+    test "can't invite the same account twice", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+
+      assert {:ok, _} = Games.invite(game_id, alice.id, bob.name)
+      assert {:error, :already_invited} = Games.invite(game_id, alice.id, bob.name)
+    end
+
+    test "invites are refused once the game has started", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert {:error, :not_in_lobby} = Games.invite(game_id, alice.id, carl.name)
+    end
+
+    test "an invited account can join a private game; an uninvited account can't" do
+      game_id = Games.create_game(%{max_players: 3, is_private: true})
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+
+      Games.join(game_id, alice.id, alice.name)
+      assert {:error, :not_invited} = Games.join(game_id, bob.id, bob.name)
+
+      assert {:ok, _} = Games.invite(game_id, alice.id, bob.name)
+      assert {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      assert {:error, :not_invited} = Games.join(game_id, carl.id, carl.name)
+    end
+
+    test "joining clears the pending invite so it stops showing up as an invite", %{
+      game_id: game_id
+    } do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.invite(game_id, alice.id, bob.name)
+
+      Games.join(game_id, bob.id, bob.name)
+
+      assert GamesDb.list_invited_games(bob.id) == []
+    end
+  end
+
+  describe "quit/2 (GIF-114)" do
+    test "a seated player quitting the lobby is removed and remaining players are renumbered", %{
+      game_id: game_id
+    } do
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      {:ok, 3} = Games.join(game_id, carl.id, carl.name)
+
+      assert :ok = Games.quit(game_id, bob.id)
+
+      assert {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert Enum.map(view.players, & &1.name) == [alice.name, carl.name]
+
+      # renumbering means the next join lands on 3, not colliding with Carl's existing seat
+      dana = account_fixture()
+      assert {:ok, 3} = Games.join(game_id, dana.id, dana.name)
+    end
+
+    test "an account not seated in the game can't quit", %{game_id: game_id} do
+      alice = account_fixture()
+      assert {:error, :not_playing} = Games.quit(game_id, alice.id)
+    end
+
+    test "quitting mid-play eliminates the player via the engine, without ending the game early",
+         %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.join(game_id, bob.id, bob.name)
+      Games.join(game_id, carl.id, carl.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert :ok = Games.quit(game_id, bob.id)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      quit_player = Enum.find(view.players, &(&1.name == bob.name))
+      assert quit_player.eliminated
+      refute view.ended
+    end
+
+    test "quitting mid-play twice is refused the second time", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert :ok = Games.quit(game_id, bob.id)
+      assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+    end
+  end
+
+  describe "kick/3 (GIF-114)" do
+    test "the host can kick a player from the lobby before start", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      assert :ok = Games.kick(game_id, alice.id, 2)
+
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert Enum.map(view.players, & &1.name) == [alice.name]
+    end
+
+    test "a non-host player can't kick anyone", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      {:ok, 3} = Games.join(game_id, carl.id, carl.name)
+
+      assert {:error, :not_host} = Games.kick(game_id, bob.id, 3)
+
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert length(view.players) == 3
+    end
+
+    test "kicking an unknown player number errors", %{game_id: game_id} do
+      alice = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      assert {:error, :not_found} = Games.kick(game_id, alice.id, 99)
+    end
+
+    test "kicking is refused once the game has started", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert {:error, :not_in_lobby} = Games.kick(game_id, alice.id, 2)
+    end
   end
 
   describe "lobby" do

@@ -71,6 +71,17 @@ defmodule GlobalCombat.Games.Live do
   @doc "Port of `GameController.Join` + `Game.Join`/`GameServer.PlayerJoined`."
   def join(game_id, account_id, name), do: with_game(game_id, &Server.join(&1, account_id, name))
 
+  @doc "Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited` (GIF-114)."
+  def invite(game_id, account_id, login),
+    do: with_game(game_id, &Server.invite(&1, account_id, login))
+
+  @doc "Port of `GameController.Quit` + `Game.Unjoin`/`Game.EliminatePlayer` (GIF-114)."
+  def quit(game_id, account_id), do: with_game(game_id, &Server.quit(&1, account_id))
+
+  @doc "Port of `GameController.Kick` + `Game.Unjoin` (GIF-114)."
+  def kick(game_id, account_id, player_number),
+    do: with_game(game_id, &Server.kick(&1, account_id, player_number))
+
   @doc "Port of `GameController.Start`."
   def start_game(game_id, account_id), do: with_game(game_id, &Server.start_game(&1, account_id))
 
