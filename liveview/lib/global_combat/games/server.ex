@@ -127,6 +127,37 @@ defmodule GlobalCombat.Games.Server do
   end
 
   @doc """
+  Port of `GameController.Assign` + `Game.SetAssigned`. `account_id` is resolved to a
+  seat and `area_number` ownership-checked inside the server, mirroring
+  `GameController.Assign`'s `area.Owner != player` guard — same reasoning as
+  `set_done/2`, a click handler can't be trusted to hand over a player number.
+  """
+  def assign(game_id, account_id, area_number, amount) do
+    GenServer.cast(via(game_id), {:assign, account_id, area_number, amount})
+  end
+
+  @doc "Port of `GameController.Unassign` + `Game.ClearAssigned`."
+  def unassign(game_id, account_id, area_number) do
+    GenServer.cast(via(game_id), {:unassign, account_id, area_number})
+  end
+
+  @doc """
+  Port of `GameController.Transfer` + `Game.SetTransfer`. Requires `account_id`'s seat
+  to own both `area_number` and `target_area_number`, matching `GameController.Transfer`.
+  """
+  def transfer(game_id, account_id, area_number, target_area_number, amount) do
+    GenServer.cast(via(game_id), {:transfer, account_id, area_number, target_area_number, amount})
+  end
+
+  @doc """
+  Port of `GameController.Attack` + `Game.SetAttack`. Requires `account_id`'s seat to
+  own `area_number` and *not* own `target_area_number`, matching `GameController.Attack`.
+  """
+  def attack(game_id, account_id, area_number, target_area_number, amount) do
+    GenServer.cast(via(game_id), {:attack, account_id, area_number, target_area_number, amount})
+  end
+
+  @doc """
   Runs the turn `GlobalCombat.Games.TurnScheduler` already claimed for this game (GIF-74) —
   `claimed_last_turn_time` is the `last_turn_time` `GlobalCombat.Games.Scheduling.claim_turn/2`
   just wrote, so this process's own clock bookkeeping stays in sync with the DB without
@@ -346,6 +377,76 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast({:force_turn, _account_id}, state), do: {:noreply, state}
 
+  # GIF-111: the four order-setters a player's territory clicks drive. Every clause
+  # re-derives the acting seat from `account_id` and re-checks ownership against the
+  # live engine state before touching it — a `phx-value-area` is just a number a
+  # browser sent us, never trusted the way `GameController`'s session-bound `player`
+  # was. An unauthorized/invalid order is a silent no-op, matching `GameController`'s
+  # own `return 0` guards, not a crash — `Map.fetch!`-based `Engine.area!/2` would
+  # take the whole game's GenServer down (every seated player, not just the sender)
+  # on a bad area number, which a raw client param absolutely can be.
+  def handle_cast({:assign, account_id, area_number, amount}, %{status: :playing} = state) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- valid_amount?(amount),
+         true <- owns_area?(state, player_number, area_number) do
+      {_amount, engine} = Engine.set_assigned(state.engine, area_number, amount)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:assign, _account_id, _area_number, _amount}, state), do: {:noreply, state}
+
+  def handle_cast({:unassign, account_id, area_number}, %{status: :playing} = state) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- owns_area?(state, player_number, area_number) do
+      {_amount, engine} = Engine.clear_assigned(state.engine, area_number)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:unassign, _account_id, _area_number}, state), do: {:noreply, state}
+
+  def handle_cast(
+        {:transfer, account_id, area_number, target_area_number, amount},
+        %{status: :playing} = state
+      ) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- valid_amount?(amount),
+         true <- owns_area?(state, player_number, area_number),
+         true <- owns_area?(state, player_number, target_area_number) do
+      {_amount, engine} = Engine.set_transfer(state.engine, area_number, target_area_number, amount)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:transfer, _account_id, _area_number, _target_area_number, _amount}, state),
+    do: {:noreply, state}
+
+  def handle_cast(
+        {:attack, account_id, area_number, target_area_number, amount},
+        %{status: :playing} = state
+      ) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- valid_amount?(amount),
+         true <- owns_area?(state, player_number, area_number),
+         true <- valid_area?(state, target_area_number),
+         false <- owns_area?(state, player_number, target_area_number) do
+      {_amount, engine} = Engine.set_attack(state.engine, area_number, target_area_number, amount)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:attack, _account_id, _area_number, _target_area_number, _amount}, state),
+    do: {:noreply, state}
+
   # --- internals -----------------------------------------------------------
 
   # Shared by {:start_game, account_id} (host-authorized) and :force_start (unconditional,
@@ -372,6 +473,26 @@ defmodule GlobalCombat.Games.Server do
       {number, _p} -> number
       nil -> nil
     end
+  end
+
+  defp valid_amount?(amount), do: is_integer(amount) and amount >= 0
+
+  defp valid_area?(state, number), do: is_integer(number) and Map.has_key?(state.engine.areas, number)
+
+  defp owns_area?(state, player_number, area_number) do
+    valid_area?(state, area_number) and
+      Engine.area!(state.engine, area_number).owner_number == player_number
+  end
+
+  # Common tail of every order-setter above: land the new engine state, persist it
+  # (so a crash/rehydrate mid-turn doesn't silently drop a queued order — same
+  # `persist_snapshot/1` `start_game`/`run_turn` already use), and reload every
+  # subscriber, including the sender's own view.
+  defp apply_order(state, engine) do
+    state = %{state | engine: engine}
+    persist_snapshot(state)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
   end
 
   defp time_left(%{turn_started_at: nil}), do: 0

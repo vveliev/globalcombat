@@ -137,6 +137,24 @@ defmodule GlobalCombat.Engine.Game do
     end
   end
 
+  @doc "Port of `Game.ClearAssigned`."
+  def clear_assigned(game, area_number) do
+    area = area!(game, area_number)
+    amount = area.assigned_armies
+
+    game =
+      game
+      |> update_player(
+        area.owner_number,
+        &%{&1 | unassigned_armies: &1.unassigned_armies + amount}
+      )
+      |> update_area(area_number, fn a ->
+        %{a | assigned_armies: 0, amount: min(a.amount, a.armies - 1)}
+      end)
+
+    {amount, game}
+  end
+
   @doc "Port of `Game.SetTransfer`."
   def set_transfer(game, source_number, target_number, amount) do
     source = area!(game, source_number)
