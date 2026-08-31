@@ -314,7 +314,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
     test "a second click on an adjacent owned territory switches the panel to transfer mode",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
-      %{alice_view: alice_view, alice: alice, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
 
       {:playing, view} = Games.player_view(game_id, alice.id)
       area_three_name = Enum.find(view.areas, &(&1.number == 3)).name
@@ -329,7 +331,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
     test "a second click on an adjacent enemy territory switches the panel to attack mode",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
-      %{alice_view: alice_view, alice: alice, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
 
       {:playing, view} = Games.player_view(game_id, alice.id)
       area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
@@ -367,7 +371,10 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # GenServer) than this test's own — the resulting :reload broadcast, not the
       # `render_submit/3` return value, is what actually carries the updated army
       # count back to this view, hence polling rather than asserting on `html` above.
-      assert wait_for(alice_view, ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>10<\/td>/)
+      assert wait_for(
+               alice_view,
+               ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>10<\/td>/
+             )
     end
 
     test "cancel_order closes the panel without changing any state", %{conn: conn1} do
@@ -395,7 +402,11 @@ defmodule GlobalCombatWeb.GameLiveTest do
       html = render_click(alice_view, "unassign_order", %{})
 
       refute html =~ "Assign new armies or select a target area"
-      assert wait_for(alice_view, ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>5<\/td>/)
+
+      assert wait_for(
+               alice_view,
+               ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>5<\/td>/
+             )
     end
   end
 

@@ -242,8 +242,11 @@ defmodule GlobalCombatWeb.GameLive do
       true ->
         source = find_area(view, socket.assigns.selected_area)
 
-        if source && area.visible and area.number in source.adjacent do
-          assign(socket, target_area: area.number, order_amount: to_string(max(source.armies - 1, 0)))
+        if (source && area.visible) and area.number in source.adjacent do
+          assign(socket,
+            target_area: area.number,
+            order_amount: to_string(max(source.armies - 1, 0))
+          )
         else
           socket
         end
@@ -480,13 +483,20 @@ defmodule GlobalCombatWeb.GameLive do
     <Card.card class="min-w-[16rem]">
       <:header>{order_panel_title(@mode, @target)}</:header>
       <form phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
-        <Input.input id="order-amount" name="amount" type="number" min="0" label="Armies" value={@order_amount} />
+        <Input.input
+          id="order-amount"
+          name="amount"
+          type="number"
+          min="0"
+          label="Armies"
+          value={@order_amount}
+        />
         <div class="flex flex-wrap gap-[var(--space-2)]">
           <Button.button type="submit" intent="primary">
             {order_submit_label(@mode)}
           </Button.button>
           <Button.button
-            :if={@mode == :assign and @source && @source.pending_armies > 0}
+            :if={(@mode == :assign and @source) && @source.pending_armies > 0}
             type="button"
             intent="neutral"
             phx-click="unassign_order"
@@ -503,7 +513,9 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   defp order_mode(_view, nil), do: :assign
-  defp order_mode(view, target), do: if(target.owner_number == view.viewer_number, do: :transfer, else: :attack)
+
+  defp order_mode(view, target),
+    do: if(target.owner_number == view.viewer_number, do: :transfer, else: :attack)
 
   defp order_panel_title(:assign, _target), do: "Assign new armies or select a target area"
   defp order_panel_title(:transfer, target), do: "Transfer how many armies to #{target.name}?"

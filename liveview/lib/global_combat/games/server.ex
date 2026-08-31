@@ -418,7 +418,9 @@ defmodule GlobalCombat.Games.Server do
          true <- valid_amount?(amount),
          true <- owns_area?(state, player_number, area_number),
          true <- owns_area?(state, player_number, target_area_number) do
-      {_amount, engine} = Engine.set_transfer(state.engine, area_number, target_area_number, amount)
+      {_amount, engine} =
+        Engine.set_transfer(state.engine, area_number, target_area_number, amount)
+
       {:noreply, apply_order(state, engine)}
     else
       _ -> {:noreply, state}
@@ -477,7 +479,8 @@ defmodule GlobalCombat.Games.Server do
 
   defp valid_amount?(amount), do: is_integer(amount) and amount >= 0
 
-  defp valid_area?(state, number), do: is_integer(number) and Map.has_key?(state.engine.areas, number)
+  defp valid_area?(state, number),
+    do: is_integer(number) and Map.has_key?(state.engine.areas, number)
 
   defp owns_area?(state, player_number, area_number) do
     valid_area?(state, area_number) and
