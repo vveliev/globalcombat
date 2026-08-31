@@ -115,6 +115,57 @@ defmodule GlobalCombat.Engine.GameTest do
     end
   end
 
+  describe "clear_assigned/2 (GIF-111, port of Game.ClearAssigned)" do
+    test "returns the area's pending armies to the owner's unassigned pool and zeroes the area" do
+      game = %Game{
+        areas: %{1 => %Area{number: 1, owner_number: 1, armies: 10, assigned_armies: 4}},
+        players: %{1 => %Player{number: 1, account_id: 1, name: "A", unassigned_armies: 6}}
+      }
+
+      {amount, resolved} = Game.clear_assigned(game, 1)
+
+      assert amount == 4
+      assert Game.area!(resolved, 1).assigned_armies == 0
+      assert Game.player!(resolved, 1).unassigned_armies == 10
+    end
+
+    test "a no-op clear (nothing was ever assigned) returns 0 and leaves state untouched" do
+      game = %Game{
+        areas: %{1 => %Area{number: 1, owner_number: 1, armies: 10, assigned_armies: 0}},
+        players: %{1 => %Player{number: 1, account_id: 1, name: "A", unassigned_armies: 6}}
+      }
+
+      {amount, resolved} = Game.clear_assigned(game, 1)
+
+      assert amount == 0
+      assert resolved == game
+    end
+
+    test "clamps a stale pending transfer/attack Amount down to the now-lower Armies - 1, matching Game.cs's defensive Math.Min" do
+      game = %Game{
+        areas: %{
+          1 => %Area{
+            number: 1,
+            owner_number: 1,
+            armies: 3,
+            assigned_armies: 4,
+            command: :attack,
+            target_number: 2,
+            # set while `assigned_armies` inflated this area's total to 7 (armies 3 +
+            # assigned 4) -- clearing the assignment must clamp this back down too, or
+            # the queued attack could spend armies the area no longer has.
+            amount: 6
+          }
+        },
+        players: %{1 => %Player{number: 1, account_id: 1, name: "A", unassigned_armies: 0}}
+      }
+
+      {_amount, resolved} = Game.clear_assigned(game, 1)
+
+      assert Game.area!(resolved, 1).amount == 2
+    end
+  end
+
   describe "reset_done_flags/1" do
     test "AccountId 1 is always done; eliminated players are always done; everyone else resets to false" do
       game = %Game{

@@ -103,6 +103,30 @@ defmodule GlobalCombat.Games.Live do
   def force_turn(game_id, account_id),
     do: with_game(game_id, &Server.force_turn(&1, account_id))
 
+  @doc "Port of `GameController.Assign`. Same `account_id`/ownership resolution as `set_done/2`."
+  def assign(game_id, account_id, area_number, amount),
+    do: with_game(game_id, &Server.assign(&1, account_id, area_number, amount))
+
+  @doc "Port of `GameController.Unassign`."
+  def unassign(game_id, account_id, area_number),
+    do: with_game(game_id, &Server.unassign(&1, account_id, area_number))
+
+  @doc "Port of `GameController.Transfer`."
+  def transfer(game_id, account_id, area_number, target_area_number, amount),
+    do:
+      with_game(
+        game_id,
+        &Server.transfer(&1, account_id, area_number, target_area_number, amount)
+      )
+
+  @doc "Port of `GameController.Attack`."
+  def attack(game_id, account_id, area_number, target_area_number, amount),
+    do:
+      with_game(
+        game_id,
+        &Server.attack(&1, account_id, area_number, target_area_number, amount)
+      )
+
   @doc """
   Returns `{:lobby, view} | {:playing, %GlobalCombat.Games.PlayerView{}}` for the player
   `account_id` resolves to, or a spectator's view if `account_id` is `nil`/not seated.

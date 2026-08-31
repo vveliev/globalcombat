@@ -93,6 +93,13 @@ defmodule GlobalCombat.Games.PlayerView do
       visible: visible?,
       owner_number: if(visible?, do: area.owner_number, else: nil),
       armies: area_armies(area, visible?, owns_it?),
+      # GIF-111: how many of `armies` above are still a pending (unresolved) assignment
+      # this owner queued this turn, as opposed to already-resolved troops — the same
+      # `assigned_armies` this area's `armies` already folds in for its owner (see
+      # `area_armies/3` below), exposed separately so the order panel can offer
+      # "Unassign" only when there is something to undo. Zero for every non-owner,
+      # for the same reason `armies` itself is never split out for them.
+      pending_armies: if(visible? and owns_it?, do: area.assigned_armies, else: 0),
       # Map topology (which territories border which) is never secret — it's the
       # same static layout every viewer already sees rendered on the board
       # regardless of fog, unlike `owner_number`/`armies` above. Safe to expose in
