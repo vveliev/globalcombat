@@ -191,9 +191,10 @@ defmodule GlobalCombat.Tourneys do
 
   defp create_round_games(tourney, round, flat_rounds) do
     {winner_round, loser_round} = Bracket.advancement_targets(round, flat_rounds)
+    game_attrs = option_game_attrs(tourney)
 
     for game_num <- round.start_game..(round.start_game + round.game_count - 1) do
-      {:ok, game} = Games.create_game(%{})
+      {:ok, game} = Games.create_game(game_attrs)
 
       {:ok, _tourney_game} =
         %TourneyGame{}
@@ -220,6 +221,28 @@ defmodule GlobalCombat.Tourneys do
           ]
         )
         |> Repo.insert()
+    end
+  end
+
+  # Port of `Tourney.CreateTourneyGame`'s `OptionGame` ruleset copy (`Tourney.cs:76-81`): every
+  # bracket game inherits `option_game_id`'s map/fog/non-random/reverse-attack-order/minimum-
+  # armies/turn-length instead of the bare `Games.create_game/1` schema defaults -- mirroring
+  # `OptionGame`'s `GameServer.GetGame(OptionGameId)` lookup, this silently falls back to the
+  # defaults (rather than raising) if `option_game_id` doesn't resolve to a real game.
+  defp option_game_attrs(%Tourney{option_game_id: option_game_id}) do
+    case option_game_id && Games.get_game(option_game_id) do
+      nil ->
+        %{}
+
+      option_game ->
+        Map.take(option_game, [
+          :map_name,
+          :is_fogged,
+          :is_non_random,
+          :reverse_attack_order,
+          :minimum_armies,
+          :turn_length
+        ])
     end
   end
 
