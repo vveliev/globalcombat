@@ -188,14 +188,32 @@ cleanly, with no player-facing system left half-up.
 
 | Decision | Owner | Action |
 |---|---|---|
-| Domain (contact upstream / register alternate) | vveliev | Out-of-band, no fixed deadline on track 1 |
-| Fleet host + port block + reverse proxy/TLS | vveliev | Provision before any release can deploy |
-| Production release Dockerfiles + `phx.gen.release` | Follow-up issue (new) | Blocks first deploy |
-| 1Password secrets wired into fleet deploy mechanism | vveliev | Blocks first deploy |
+| Domain (contact upstream / register alternate) | vveliev | Track 1 open, no fixed deadline. Track 2 decided: launch on hosting provider's default subdomain first (zero-cost interim) — see Status below |
+| Fleet host + port block + reverse proxy/TLS | vveliev | Not yet provisioned — vveliev will ping when ready to hand off details |
+| Production release Dockerfiles + `phx.gen.release` | **Done** — GIF-110, PR #34 (merged to `main`) | Shipped `Dockerfile.prod` for both services, `bin/server`/`bin/migrate` overlays, `docker-compose.prod.yml` |
+| 1Password secrets wired into fleet deploy mechanism | vveliev | Not yet provisioned |
 | Mailer provider decision | Follow-up issue (new) | Blocks password-reset emails only, not launch |
 | MySQL instance sizing + backup job | vveliev | Provision alongside app host |
-| Migration execution (`mix ecto.migrate`) on deploy | Release-owner (same as Dockerfiles) | Part of release pipeline |
+| Migration execution (`mix ecto.migrate`) on deploy | Release-owner (same as Dockerfiles) | `bin/migrate` shipped in PR #34, ready to run once a host exists |
 | Rollback execution during the 14-day window | vveliev | On call for the window |
+
+## Status: GIF-110 execution (2026-08-31)
+
+Per the decisions vveliev made on GIF-110's launch-decisions interaction:
+
+- **Domain:** launch on the hosting provider's default subdomain first (zero-cost interim per §1
+  track 2), not a fresh registration. Track 1 (contacting the upstream owner about
+  `globalcombat.com`) remains open with no fixed timeline.
+- **Fleet host:** not yet provisioned. vveliev will ping when ready to hand off the host/port/TLS
+  details from §2.1.
+- **Secrets:** not yet provisioned in 1Password.
+- **Go-live:** vveliev will run the actual deploy from the release artifacts in PR #34, not an
+  agent — the same cross-company fleet boundary as GIF-57 (`vveliev/home-lab` is unreachable from
+  this company's agents).
+
+This closes the in-repo portion of this plan (§2.2's Dockerfiles/release scaffolding). Everything
+else in the Owners summary above is an out-of-band action on vveliev's fleet; there is nothing
+further an agent can provision toward a live URL until the fleet host exists.
 
 ## Gaps and follow-ups this doc surfaces but does not close
 

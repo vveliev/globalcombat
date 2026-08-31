@@ -75,8 +75,26 @@ defmodule GlobalCombat.Games.Live do
   @doc "Port of `GameController.Join` + `Game.Join`/`GameServer.PlayerJoined`."
   def join(game_id, account_id, name), do: with_game(game_id, &Server.join(&1, account_id, name))
 
+  @doc "Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited` (GIF-114)."
+  def invite(game_id, account_id, login),
+    do: with_game(game_id, &Server.invite(&1, account_id, login))
+
+  @doc "Port of `GameController.Quit` + `Game.Unjoin`/`Game.EliminatePlayer` (GIF-114)."
+  def quit(game_id, account_id), do: with_game(game_id, &Server.quit(&1, account_id))
+
+  @doc "Port of `GameController.Kick` + `Game.Unjoin` (GIF-114)."
+  def kick(game_id, account_id, player_number),
+    do: with_game(game_id, &Server.kick(&1, account_id, player_number))
+
   @doc "Port of `GameController.Start`."
   def start_game(game_id, account_id), do: with_game(game_id, &Server.start_game(&1, account_id))
+
+  @doc """
+  Starts a game once its seats are full without a designated host — port of `Game.cs`'s `Join`
+  auto-start (`if (Players.Count >= MaxPlayers) Start()`), used by tourney bracket seeding
+  (GIF-115) where no single seat is the "host" authorized to call `start_game/2`.
+  """
+  def force_start(game_id), do: with_game(game_id, &Server.force_start/1)
 
   @doc "Port of `GameController.Send`."
   def send_chat(game_id, account_id, name, text),
@@ -88,6 +106,30 @@ defmodule GlobalCombat.Games.Live do
   @doc "Port of `GameController.ForceTurn`. Same `account_id` resolution as `set_done/2`."
   def force_turn(game_id, account_id),
     do: with_game(game_id, &Server.force_turn(&1, account_id))
+
+  @doc "Port of `GameController.Assign`. Same `account_id`/ownership resolution as `set_done/2`."
+  def assign(game_id, account_id, area_number, amount),
+    do: with_game(game_id, &Server.assign(&1, account_id, area_number, amount))
+
+  @doc "Port of `GameController.Unassign`."
+  def unassign(game_id, account_id, area_number),
+    do: with_game(game_id, &Server.unassign(&1, account_id, area_number))
+
+  @doc "Port of `GameController.Transfer`."
+  def transfer(game_id, account_id, area_number, target_area_number, amount),
+    do:
+      with_game(
+        game_id,
+        &Server.transfer(&1, account_id, area_number, target_area_number, amount)
+      )
+
+  @doc "Port of `GameController.Attack`."
+  def attack(game_id, account_id, area_number, target_area_number, amount),
+    do:
+      with_game(
+        game_id,
+        &Server.attack(&1, account_id, area_number, target_area_number, amount)
+      )
 
   @doc """
   Returns `{:lobby, view} | {:playing, %GlobalCombat.Games.PlayerView{}}` for the player

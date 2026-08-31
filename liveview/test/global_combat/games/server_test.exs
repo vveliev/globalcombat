@@ -13,6 +13,99 @@ defmodule GlobalCombat.Games.ServerTest do
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.Server
   alias GlobalCombat.GrpcHost
+  alias GlobalCombat.Tourneys
+
+  describe "GIF-116: engine.ended wires into Tourneys.finish_game/2" do
+    test "a tourney game ending through the live Server advances the winner into the next round" do
+      {:ok, tourney} =
+        Tourneys.create_tourney(%{
+          "name" => "GIF-116 Cup #{System.unique_integer([:positive])}",
+          "initial_games" => 2,
+          "game_size" => 2,
+          "winners" => 1,
+          "auto_start" => true
+        })
+
+      {tourney, :started} =
+        Enum.reduce(for(_ <- 1..4, do: account_fixture()), {tourney, nil}, fn account,
+                                                                              {tourney, _} ->
+          {:ok, outcome} = Tourneys.join_tournament(tourney, account.id)
+          {Tourneys.get_tourney!(tourney.id), outcome}
+        end)
+
+      [round_one_game | _] =
+        tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 1))
+
+      [loser, winner] = round_one_game.game.game_players
+
+      end_game_through_server(round_one_game.game_id,
+        winner_account_id: winner.account_id,
+        loser_account_id: loser.account_id
+      )
+
+      # Confirmed live on a real bracket (GIF-116): before this fix, nothing outside tests
+      # ever called Tourneys.finish_game/2, so a finished round-1 game left round 2 sitting at
+      # `:new` with zero seated game_players forever. `run_turn/2`'s `engine.ended` branch now
+      # calls it, so the winner should already be seated once the turn that ends the game
+      # finishes running -- no manual `Tourneys.finish_game/2` call from the test.
+      round_two = tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 2))
+      assert [round_two_game] = round_two
+
+      seated = round_two_game.game.game_players |> Enum.map(& &1.account_id) |> MapSet.new()
+      assert MapSet.member?(seated, winner.account_id)
+      refute MapSet.member?(seated, loser.account_id)
+
+      persisted_game = GamesDb.get_game!(round_one_game.game_id)
+      assert persisted_game.status == :finished
+    end
+  end
+
+  # Rigs a 2-player engine one turn away from ending (the loser already at 0 areas) inside the
+  # `Games.Server` the tourney bracket seeding (GIF-115) already started for `game_id` — a real
+  # fought-out game would exercise the same `run_turn/2` `engine.ended` branch, just via many
+  # more turns of combat RNG this doesn't need to reproduce to prove the bracket-advancement
+  # wiring itself.
+  defp end_game_through_server(game_id, winner_account_id: winner_id, loser_account_id: loser_id) do
+    engine = %Engine{
+      map_name: :original,
+      rng: DotnetRandom.new(1),
+      turn: 3,
+      minimum_armies: 3,
+      areas: %{1 => %Area{number: 1, owner_number: 1, armies: 5}},
+      players: %{
+        1 => %Player{number: 1, account_id: winner_id, name: "winner", areas: 1, armies: 5},
+        2 => %Player{
+          number: 2,
+          account_id: loser_id,
+          name: "loser",
+          areas: 0,
+          armies: 0,
+          done: true
+        }
+      }
+    }
+
+    :sys.replace_state(Server.via(game_id), fn state ->
+      %{
+        state
+        | status: :playing,
+          engine: engine,
+          players: [
+            {1, %{account_id: winner_id, name: "winner"}},
+            {2, %{account_id: loser_id, name: "loser"}}
+          ],
+          turn_started_at: DateTime.utc_now(),
+          db_last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
+      }
+    end)
+
+    :ok = Server.set_done(game_id, winner_id)
+    # Synchronizes on the cast above: a GenServer processes messages from the same sender in
+    # the order they were sent, so this call only returns once `set_done`'s `run_turn/2` (and
+    # therefore the `Tourneys.finish_game/2` call under test) has already completed.
+    assert {:playing, view} = Server.player_view(game_id, winner_id)
+    assert view.turn == 4
+  end
 
   describe "training mode: the Computer opponent takes its turn on its own (GIF-104)" do
     test "the Computer seat is Done the instant its turn starts, never left Thinking forever" do
@@ -47,6 +140,134 @@ defmodule GlobalCombat.Games.ServerTest do
 
       computer = Enum.find(after_turn.players, &(&1.name == "Computer"))
       assert computer.done
+    end
+  end
+
+  # deal_areas/2's round-robin on :original (42 areas) gives a 2-player game player 1
+  # every odd-numbered area, player 2 every even one. Area 1 links to [2, 3, 37]
+  # (`MapInfo.areas(:original)`), so area 1 <-> area 3 is an owned-adjacent pair for
+  # transfer, area 1 <-> area 2 is an owned-vs-enemy adjacent pair for attack, and
+  # area 1 <-> area 4 is an owned-vs-enemy *non-adjacent* pair for the fog/adjacency
+  # no-op cases below.
+  describe "order setters — assign/unassign/transfer/attack (GIF-111)" do
+    defp start_two_player_original(opts \\ %{}) do
+      game_id =
+        Games.create_game(Map.merge(%{map_name: :original, max_players: 2}, opts))
+
+      {:ok, 1} = Games.join(game_id, 101, "Alice")
+      {:ok, 2} = Games.join(game_id, 102, "Bob")
+      :ok = Games.start_game(game_id, 101)
+      game_id
+    end
+
+    defp area(view, number), do: Enum.find(view.areas, &(&1.number == number))
+    defp player(view, number), do: Enum.find(view.players, &(&1.number == number))
+
+    test "assign moves armies from the caller's unassigned pool onto an owned area" do
+      game_id = start_two_player_original()
+
+      {:playing, before} = Games.player_view(game_id, 101)
+      assert area(before, 1).armies == 5
+      assert player(before, 1).unassigned_armies == 25
+
+      Games.assign(game_id, 101, 1, 5)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 10
+      assert area(view, 1).pending_armies == 5
+      assert player(view, 1).unassigned_armies == 20
+    end
+
+    test "assign is a silent no-op on an area the caller doesn't own" do
+      game_id = start_two_player_original()
+      {:playing, before} = Games.player_view(game_id, 101)
+      assert area(before, 2).owner_number == 2
+
+      Games.assign(game_id, 101, 2, 5)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 2) == area(before, 2)
+      assert player(view, 1).unassigned_armies == player(before, 1).unassigned_armies
+    end
+
+    test "unassign returns a pending assignment to the caller's pool" do
+      game_id = start_two_player_original()
+      Games.assign(game_id, 101, 1, 5)
+
+      Games.unassign(game_id, 101, 1)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 1).pending_armies == 0
+      assert player(view, 1).unassigned_armies == 25
+    end
+
+    test "transfer queues armies to move between two owned, adjacent areas, resolved on turn run" do
+      game_id = start_two_player_original()
+
+      Games.transfer(game_id, 101, 1, 3, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert view.turn == 2
+      assert area(view, 1).armies == 3
+      assert area(view, 3).armies == 7
+    end
+
+    test "transfer is a silent no-op when the caller doesn't own both areas" do
+      game_id = start_two_player_original()
+
+      Games.transfer(game_id, 101, 1, 2, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 2).owner_number == 2
+    end
+
+    test "attack queues a strike against an adjacent enemy area, resolved deterministically (IsNonRandom) on turn run" do
+      game_id = start_two_player_original(%{is_non_random: true})
+
+      Games.attack(game_id, 101, 1, 2, 4)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert view.turn == 2
+      # attack_damage = trunc(4 * 0.6) = 2, defend_damage = trunc(5 * 0.75) = 3;
+      # not decisive (2 < defender's 5 armies), so both sides take their damage.
+      assert area(view, 1).armies == 2
+      assert area(view, 2).armies == 3
+      assert area(view, 2).owner_number == 2
+    end
+
+    test "attack is a silent no-op against a target the caller already owns" do
+      game_id = start_two_player_original()
+
+      Games.attack(game_id, 101, 1, 3, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 3).armies == 5
+    end
+
+    test "attack is a silent no-op against a non-adjacent enemy area" do
+      game_id = start_two_player_original()
+      {:playing, before} = Games.player_view(game_id, 101)
+      refute 4 in area(before, 1).adjacent
+
+      Games.attack(game_id, 101, 1, 4, 2)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+
+      {:playing, view} = Games.player_view(game_id, 101)
+      assert area(view, 1).armies == 5
+      assert area(view, 4).armies == 5
+      assert area(view, 4).owner_number == 2
     end
   end
 

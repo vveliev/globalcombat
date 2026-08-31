@@ -188,4 +188,34 @@ defmodule GlobalCombat.Games do
 
   @doc "Ports `GetPlayerGames(accountId, false, true)` — the account's pending invites."
   def list_invited_games(account_id), do: list_player_games(account_id, invites: true)
+
+  @doc """
+  Persists a pending invite (`GamePlayer.is_invite = true`) — the DB half of
+  `GameServer.PlayerInvited` (GIF-114). `GlobalCombat.Games.Server` holds the in-memory
+  pending-invite list that actually gates joining a private game; this only keeps
+  `list_invited_games/1` (the Home dashboard's "Games Invites" panel) in sync with it.
+  """
+  def invite(game_id, account_id) do
+    %GamePlayer{}
+    |> Ecto.Changeset.cast(%{game_id: game_id, account_id: account_id, is_invite: true}, [
+      :game_id,
+      :account_id,
+      :is_invite
+    ])
+    |> Ecto.Changeset.unique_constraint([:account_id, :game_id])
+    |> Repo.insert()
+  end
+
+  @doc """
+  Clears a pending invite once it's been accepted (joined) or is otherwise no longer
+  relevant — keeps `list_invited_games/1` from showing a game the account already joined.
+  """
+  def clear_invite(game_id, account_id) do
+    from(gp in GamePlayer,
+      where: gp.game_id == ^game_id and gp.account_id == ^account_id and gp.is_invite == true
+    )
+    |> Repo.delete_all()
+
+    :ok
+  end
 end

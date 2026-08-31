@@ -253,8 +253,13 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # The outline is background-color-independent by construction, so any
     # rendered army-count span having it is sufficient evidence (no need to
     # force a specific owner_color onto a territory here).
+    #
+    # `pointer-events-none` (GIF-111) keeps this overlay from stealing clicks
+    # meant for the territory's `select_area` button underneath it -- without
+    # it, clicking the army-count digits (often dead center of the territory)
+    # would silently do nothing.
     assert html =~
-             ~r/class="absolute top-1\/2 left-1\/2 -translate-x-1\/2 -translate-y-1\/2 text-white font-bold \[text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000\]"/
+             ~r/class="absolute top-1\/2 left-1\/2 -translate-x-1\/2 -translate-y-1\/2 text-white font-bold \[text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000\] pointer-events-none"/
   end
 
   test "the board shows a Region Bonuses panel listing every continent's control bonus (GIF-103)",
@@ -272,6 +277,136 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # sourced-from-MapInfo contract the fix itself relies on.
     for {_number, name, _num_areas, army_bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
       assert html =~ ~r/#{Regex.escape(name)}[\s\S]*?#{army_bonus}/
+    end
+  end
+
+  describe "territory click-to-order composition (GIF-111)" do
+    # `start_two_player_game/2` deals :original's 42 areas round-robin over 2 players
+    # (`Games.Server.deal_areas/2`): Alice (player 1) gets every odd area, Bob (player
+    # 2) every even one. Area 1 links to [2, 3, 37] (`MapInfo.areas(:original)`), so
+    # area 1 <-> 3 is an owned-adjacent pair (transfer), area 1 <-> 2 is an
+    # owned-vs-enemy adjacent pair (attack), and area 1 <-> 4 is enemy but
+    # non-adjacent.
+
+    test "clicking an owned territory opens the panel in assign mode, prefilled with the unassigned pool",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      html = render_click(alice_view, "select_area", %{"area" => "1"})
+
+      assert html =~ "Assign new armies or select a target area"
+      assert html =~ ~r/<input[^>]*name="amount"[^>]*value="25"/
+    end
+
+    test "clicking an enemy territory first does nothing (no panel, matching .NET hiding the click for a non-owner)",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      html = render_click(alice_view, "select_area", %{"area" => "2"})
+
+      refute html =~ "Assign new armies"
+      refute html =~ "Transfer how many"
+      refute html =~ "Attack"
+    end
+
+    test "a second click on an adjacent owned territory switches the panel to transfer mode",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_three_name = Enum.find(view.areas, &(&1.number == 3)).name
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      html = render_click(alice_view, "select_area", %{"area" => "3"})
+
+      assert html =~ "Transfer how many armies to #{area_three_name}?"
+      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Transfer\s*<\/button>/
+    end
+
+    test "a second click on an adjacent enemy territory switches the panel to attack mode",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      html = render_click(alice_view, "select_area", %{"area" => "2"})
+
+      assert html =~ "Attack #{area_two_name} with how many armies?"
+      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Attack\s*<\/button>/
+    end
+
+    test "a second click on a non-adjacent enemy territory is a no-op (order panel stays in assign mode)",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      html = render_click(alice_view, "select_area", %{"area" => "4"})
+
+      assert html =~ "Assign new armies or select a target area"
+    end
+
+    test "submitting an assign order moves armies onto the area and closes the panel", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      html = render_submit(alice_view, "submit_order", %{"amount" => "5"})
+
+      refute html =~ "Assign new armies or select a target area"
+
+      # `Games.assign/4` is a cast processed by a different process (the game's
+      # GenServer) than this test's own — the resulting :reload broadcast, not the
+      # `render_submit/3` return value, is what actually carries the updated army
+      # count back to this view, hence polling rather than asserting on `html` above.
+      assert wait_for(
+               alice_view,
+               ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>10<\/td>/
+             )
+    end
+
+    test "cancel_order closes the panel without changing any state", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      html = render_click(alice_view, "cancel_order", %{})
+
+      refute html =~ "Assign new armies or select a target area"
+      assert html =~ ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>5<\/td>/
+    end
+
+    test "unassign_order returns a pending assignment to the pool and closes the panel", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_submit(alice_view, "submit_order", %{"amount" => "5"})
+      wait_for(alice_view, ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>10<\/td>/)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      html = render_click(alice_view, "unassign_order", %{})
+
+      refute html =~ "Assign new armies or select a target area"
+
+      assert wait_for(
+               alice_view,
+               ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>5<\/td>/
+             )
     end
   end
 
@@ -386,6 +521,147 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # would-be-visible-but-untouched) still uses.
       neutral_sprite = "#{hidden_area.tech_name}0.gif"
       refute html =~ neutral_sprite
+    end
+  end
+
+  describe "Invite/Quit/Kick (GIF-114)" do
+    test "a seated player inviting an existing account by name lands it on the invitee's pending invites",
+         %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      html = render_submit(view, "invite", %{"login" => bob.name})
+
+      assert html =~ "Invited Bob."
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
+    end
+
+    test "inviting an unknown login shows an error instead of crashing", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      html = render_submit(view, "invite", %{"login" => "no-such-account"})
+
+      assert html =~ "No account found for &quot;no-such-account&quot;."
+    end
+
+    test "an invited account can join a private game; a stranger is refused (GIF-93 gap this closes)" do
+      conn2 = Phoenix.ConnTest.build_conn()
+      conn3 = Phoenix.ConnTest.build_conn()
+
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+      carl = account_fixture(%{"name" => "Carl"})
+
+      game_id = Games.create_game(%{max_players: 4, is_private: true})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, _invitee} = Games.invite(game_id, alice.id, bob.name)
+
+      {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+      render_click(bob_view, "join")
+      assert wait_for(bob_view, "Bob") =~ "Bob"
+
+      {:ok, carl_view, _html} = conn3 |> log_in_account(carl) |> live(~p"/Game-#{game_id}")
+      html = render_click(carl_view, "join")
+      refute html =~ "Carl"
+      assert html =~ ~r/phx-click="join"/
+    end
+
+    test "the host can kick a player from the lobby, and it's reflected live for everyone", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+      {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+
+      assert html =~ "Kick"
+
+      render_click(alice_view, "kick", %{"player_number" => "2"})
+
+      refute wait_for(alice_view, "Waiting for players") =~ "Bob"
+      refute render(bob_view) =~ ~r/Kick/
+    end
+
+    test "a non-host player has no Kick control and a direct kick attempt is refused", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, _alice_view, _html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+      {:ok, bob_view, html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+
+      refute html =~ "Kick"
+
+      assert {:error, :not_host} = Games.kick(game_id, bob.id, 1)
+      assert render(bob_view) =~ "Alice"
+    end
+
+    test "a player quitting the lobby leaves and can rejoin as a fresh Join click", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      html = render_click(view, "quit")
+
+      assert html =~ ~r/phx-click="join"/
+      refute html =~ ~r/phx-click="quit"/
+      assert {:lobby, lobby_view} = Games.player_view(game_id, bob.id)
+      assert Enum.map(lobby_view.players, & &1.name) == ["Bob"]
+    end
+
+    test "the last player quitting an empty lobby is navigated home", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      render_click(view, "quit")
+      assert_redirect(view, "/")
+    end
+
+    test "a player quitting mid-play is eliminated live, and can no longer quit again", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, bob: bob, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_click(bob_view, "quit")
+
+      assert wait_for(alice_view, "place") =~ "place"
+      assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
     end
   end
 end

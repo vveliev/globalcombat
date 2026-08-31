@@ -2,8 +2,10 @@ defmodule GlobalCombatWeb.GameLive do
   @moduledoc """
   The game board (GIF-30) — replaces `Views/Game/Index.cshtml` + `Views/Game/_PlayerList.cshtml`
   and the `Web/wwwroot/Main.js`/`Global.js`/`jquery.signalR-0.5.1` client stack that kept them
-  live. Mounted at `/Game-:id` (see `router.ex`); `/Game-:id/:action` (Invite/Kick/etc.) stays
-  on the legacy `GameController` stub — out of scope here, see this ticket's follow-ups.
+  live. Mounted at `/Game-:id` (see `router.ex`). `/Game-:id/:action` (the legacy AJAX action
+  path) stays on the `GameController` stub — this rewrite has no legacy AJAX callers left to
+  serve, so Invite/Quit/Kick (GIF-114) are wired here instead, as `phx-click`/`phx-submit`
+  events consistent with join/start/done, rather than reviving that controller path.
 
   Realtime updates arrive over `GlobalCombat.Games.PubSub` instead of a SignalR hub connection:
   every socket subscribes to its game's board topic, and — once resolved to a seated player —
@@ -25,6 +27,7 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombatWeb.Components.Boutique.Button
   alias GlobalCombatWeb.Components.Boutique.Card
+  alias GlobalCombatWeb.Components.Boutique.Input
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
   alias GlobalCombatWeb.Components.Boutique.StatusPill
 
@@ -50,6 +53,10 @@ defmodule GlobalCombatWeb.GameLive do
        socket
        |> assign(:game_id, game_id)
        |> assign(:chat_text, "")
+       |> assign(:invite_login, "")
+       |> assign(:selected_area, nil)
+       |> assign(:target_area, nil)
+       |> assign(:order_amount, "")
        |> refresh_view()}
     else
       {:ok, socket |> put_flash(:error, "Game not found.") |> push_navigate(to: ~p"/")}
@@ -65,7 +72,21 @@ defmodule GlobalCombatWeb.GameLive do
   # --- realtime events (GlobalCombat.Games.PubSub) ------------------------
 
   @impl true
-  def handle_info(:reload, socket), do: {:noreply, refresh_view(socket)}
+  def handle_info(:reload, socket) do
+    previous_turn = playing_turn(socket.assigns)
+    socket = refresh_view(socket)
+
+    # An order submission (assign/transfer/attack/unassign) also broadcasts :reload —
+    # to every seat, not just the one that submitted it — so this can't unconditionally
+    # clear the local selection panel: that would let one player's order wipe another
+    # player's in-progress click-to-select state out from under them. Only a turn
+    # actually resolving invalidates a pending selection (orders don't survive
+    # `run_turn`'s `clear_commands/1`, and area ownership can only change there).
+    socket =
+      if playing_turn(socket.assigns) != previous_turn, do: clear_selection(socket), else: socket
+
+    {:noreply, socket}
+  end
 
   def handle_info({:add_message, message}, %{assigns: %{status: :playing}} = socket) do
     view = %{
@@ -99,6 +120,9 @@ defmodule GlobalCombatWeb.GameLive do
     {:noreply, put_flash(socket, :info, body)}
   end
 
+  defp playing_turn(%{status: :playing, view: view}), do: view.turn
+  defp playing_turn(_assigns), do: nil
+
   # --- user actions --------------------------------------------------------
 
   @impl true
@@ -116,6 +140,63 @@ defmodule GlobalCombatWeb.GameLive do
   def handle_event("start", _params, socket) do
     with {:ok, account} <- require_account(socket),
          :ok <- Games.start_game(socket.assigns.game_id, account.id) do
+      {:noreply, refresh_view(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("invite", %{"login" => login}, socket) do
+    login = String.trim(login)
+
+    case {login, require_account(socket)} do
+      {"", _} ->
+        {:noreply, socket}
+
+      {_login, {:ok, account}} ->
+        case Games.invite(socket.assigns.game_id, account.id, login) do
+          {:ok, invitee} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Invited #{invitee.name}.")
+             |> assign(:invite_login, "")
+             |> refresh_view()}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, invite_error_message(reason, login))}
+        end
+
+      {_login, :error} ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("quit", _params, socket) do
+    case require_account(socket) do
+      {:ok, account} ->
+        case Games.quit(socket.assigns.game_id, account.id) do
+          :ok ->
+            socket = refresh_view(socket)
+
+            if socket.assigns.status == :lobby and socket.assigns.view.players == [] do
+              {:noreply, push_navigate(socket, to: ~p"/")}
+            else
+              {:noreply, socket}
+            end
+
+          {:error, _reason} ->
+            {:noreply, socket}
+        end
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("kick", %{"player_number" => player_number}, socket) do
+    with {:ok, account} <- require_account(socket),
+         {player_number, ""} <- Integer.parse(player_number) do
+      Games.kick(socket.assigns.game_id, account.id, player_number)
       {:noreply, refresh_view(socket)}
     else
       _ -> {:noreply, socket}
@@ -154,12 +235,130 @@ defmodule GlobalCombatWeb.GameLive do
     {:noreply, socket}
   end
 
+  # GIF-111: click-to-select order composition, mirroring `Main.js`'s `OnClick`/
+  # `ShowControl`/`SelectTarget` state machine (`ActiveArea`/`TargetArea` there ->
+  # `:selected_area`/`:target_area` here). First click on a visible, owned area opens
+  # the order panel in "assign" mode; a second click on a visible area adjacent to it
+  # switches the panel to "transfer" (owned target) or "attack" (enemy target) mode.
+  # Every other click (unowned first click, non-adjacent or hidden second click) is a
+  # no-op, same as the original hiding non-adjacent territories entirely while a
+  # source is active.
+  def handle_event("select_area", %{"area" => area_str}, %{assigns: %{status: :playing}} = socket) do
+    case Integer.parse(area_str) do
+      {area_number, ""} ->
+        case find_area(socket.assigns.view, area_number) do
+          nil -> {:noreply, socket}
+          area -> {:noreply, handle_area_click(socket, area)}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("select_area", _params, socket), do: {:noreply, socket}
+
+  def handle_event("submit_order", %{"amount" => amount_str}, socket) do
+    with {:ok, account} <- require_account(socket),
+         source when not is_nil(source) <- socket.assigns.selected_area,
+         amount when amount >= 0 <- parse_amount(amount_str) do
+      submit_order(socket, account, source, socket.assigns.target_area, amount)
+      {:noreply, clear_selection(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("unassign_order", _params, socket) do
+    with {:ok, account} <- require_account(socket),
+         source when not is_nil(source) <- socket.assigns.selected_area do
+      Games.unassign(socket.assigns.game_id, account.id, source)
+      {:noreply, clear_selection(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
+
+  defp handle_area_click(socket, area) do
+    view = socket.assigns.view
+
+    cond do
+      is_nil(socket.assigns.selected_area) ->
+        if area.visible and area.owner_number == view.viewer_number do
+          assign(socket,
+            selected_area: area.number,
+            target_area: nil,
+            order_amount: to_string(my_player(view).unassigned_armies)
+          )
+        else
+          socket
+        end
+
+      area.number == socket.assigns.selected_area ->
+        socket
+
+      true ->
+        source = find_area(view, socket.assigns.selected_area)
+
+        if (source && area.visible) and area.number in source.adjacent do
+          assign(socket,
+            target_area: area.number,
+            order_amount: to_string(max(source.armies - 1, 0))
+          )
+        else
+          socket
+        end
+    end
+  end
+
+  defp submit_order(socket, account, source, nil, amount) do
+    Games.assign(socket.assigns.game_id, account.id, source, amount)
+  end
+
+  defp submit_order(socket, account, source, target, amount) do
+    target_area = find_area(socket.assigns.view, target)
+
+    if target_area && target_area.owner_number == socket.assigns.view.viewer_number do
+      Games.transfer(socket.assigns.game_id, account.id, source, target, amount)
+    else
+      Games.attack(socket.assigns.game_id, account.id, source, target, amount)
+    end
+  end
+
+  defp find_area(view, number), do: Enum.find(view.areas, &(&1.number == number))
+
+  defp parse_amount(amount_str) do
+    case Integer.parse(String.trim(to_string(amount_str))) do
+      {amount, _} when amount >= 0 -> amount
+      _ -> -1
+    end
+  end
+
+  defp clear_selection(socket),
+    do: assign(socket, selected_area: nil, target_area: nil, order_amount: "")
+
   defp require_account(socket) do
     case socket.assigns.current_account do
       nil -> :error
       account -> {:ok, account}
     end
   end
+
+  defp invite_error_message(:account_not_found, login), do: "No account found for \"#{login}\"."
+  defp invite_error_message(:cannot_invite_self, _login), do: "You can't invite yourself."
+
+  defp invite_error_message(:already_playing, login),
+    do: "#{login} is already in this game."
+
+  defp invite_error_message(:already_invited, login),
+    do: "#{login} has already been invited to this game."
+
+  defp invite_error_message(:not_in_lobby, _login),
+    do: "Invites can only be sent before the game starts."
+
+  defp invite_error_message(_reason, _login), do: "Unable to send that invite."
 
   # --- rendering -------------------------------------------------------------
 
@@ -183,7 +382,7 @@ defmodule GlobalCombatWeb.GameLive do
         </:board>
 
         <:players>
-          <.player_list players={@view.players} viewer_number={@view.viewer_number} />
+          <.player_list players={@view.players} viewer_number={@view.viewer_number} status={@status} />
           <.chat
             messages={Map.get(@view, :messages, [])}
             chat_text={@chat_text}
@@ -258,7 +457,20 @@ defmodule GlobalCombatWeb.GameLive do
         >
           Start Game
         </Button.button>
+        <Button.button :if={@view.viewer_number != nil} intent="neutral" phx-click="quit">
+          Quit
+        </Button.button>
       </div>
+      <form :if={@view.viewer_number != nil} phx-submit="invite" class="flex gap-[var(--space-2)]">
+        <input
+          type="text"
+          name="login"
+          value={@invite_login}
+          placeholder="Invite by username or email"
+          class="flex-1 rounded border border-border px-[var(--space-2)]"
+        />
+        <Button.button type="submit">Invite</Button.button>
+      </form>
     </div>
     """
   end
@@ -272,15 +484,27 @@ defmodule GlobalCombatWeb.GameLive do
           area={area}
           map_name={@view.map_name}
           players={@view.players}
+          selected_area={@selected_area}
+          target_area={@target_area}
         />
       </div>
       <.region_bonuses map_name={@view.map_name} />
+      <.order_panel
+        :if={@selected_area}
+        view={@view}
+        selected_area={@selected_area}
+        target_area={@target_area}
+        order_amount={@order_amount}
+      />
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
     <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
+      <Button.button :if={!my_player(@view).eliminated} intent="neutral" phx-click="quit">
+        Quit
+      </Button.button>
     </div>
     """
   end
@@ -290,17 +514,34 @@ defmodule GlobalCombatWeb.GameLive do
   attr :area, :map, required: true
   attr :map_name, :atom, required: true
   attr :players, :list, required: true
+  attr :selected_area, :any, required: true
+  attr :target_area, :any, required: true
 
   defp area(assigns) do
     ~H"""
     <span style={"position: absolute; left: #{@area.x}px; top: #{@area.y}px; width: #{@area.width}px; height: #{@area.height}px;"}>
-      <img
-        :if={@area.visible}
-        src={"/maps/#{@map_name}/#{@area.tech_name}#{owner_color(@area.owner_number)}.gif"}
-        width={@area.width}
-        height={@area.height}
-        alt={"#{@area.tech_name}, owned by #{owner_name(@players, @area.owner_number) || "unclaimed"}"}
-      />
+      <button
+        type="button"
+        phx-click="select_area"
+        phx-value-area={@area.number}
+        disabled={!@area.visible}
+        aria-pressed={@area.number == @selected_area or @area.number == @target_area}
+        class={[
+          "block appearance-none border-0 bg-transparent p-0 m-0",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
+          @area.visible && "cursor-pointer",
+          @area.number == @selected_area &&
+            "outline outline-2 outline-offset-2 outline-focus-ring",
+          @area.number == @target_area && "outline outline-2 outline-offset-2 outline-danger"
+        ]}
+      >
+        <img
+          src={"/maps/#{@map_name}/#{@area.tech_name}#{owner_color(@area.owner_number)}.gif"}
+          width={@area.width}
+          height={@area.height}
+          alt={"#{@area.tech_name}, owned by #{owner_name(@players, @area.owner_number) || "unclaimed"}"}
+        />
+      </button>
       <span
         :if={!@area.visible}
         role="img"
@@ -311,13 +552,76 @@ defmodule GlobalCombatWeb.GameLive do
       </span>
       <span
         :if={@area.armies}
-        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000]"
+        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000] pointer-events-none"
       >
         {@area.armies}
       </span>
     </span>
     """
   end
+
+  # GIF-111's order-composition panel — LiveView equivalent of `Main.js`'s
+  # `EntryForm`/`ActionMessage`/`AmountInput`/`ActionSubmit`. `:assign` (no target
+  # picked yet) offers Assign + Unassign (only if there's something pending to undo);
+  # `:transfer`/`:attack` (a target picked) offer a single verb button matching
+  # `SelectTarget`'s owned-vs-enemy branch.
+  attr :view, :map, required: true
+  attr :selected_area, :integer, required: true
+  attr :target_area, :any, required: true
+  attr :order_amount, :string, required: true
+
+  defp order_panel(assigns) do
+    source = find_area(assigns.view, assigns.selected_area)
+    target = assigns.target_area && find_area(assigns.view, assigns.target_area)
+    mode = order_mode(assigns.view, target)
+
+    assigns = assign(assigns, source: source, target: target, mode: mode)
+
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>{order_panel_title(@mode, @target)}</:header>
+      <form phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
+        <Input.input
+          id="order-amount"
+          name="amount"
+          type="number"
+          min="0"
+          label="Armies"
+          value={@order_amount}
+        />
+        <div class="flex flex-wrap gap-[var(--space-2)]">
+          <Button.button type="submit" intent="primary">
+            {order_submit_label(@mode)}
+          </Button.button>
+          <Button.button
+            :if={(@mode == :assign and @source) && @source.pending_armies > 0}
+            type="button"
+            intent="neutral"
+            phx-click="unassign_order"
+          >
+            Unassign
+          </Button.button>
+          <Button.button type="button" intent="neutral" phx-click="cancel_order">
+            Cancel
+          </Button.button>
+        </div>
+      </form>
+    </Card.card>
+    """
+  end
+
+  defp order_mode(_view, nil), do: :assign
+
+  defp order_mode(view, target),
+    do: if(target.owner_number == view.viewer_number, do: :transfer, else: :attack)
+
+  defp order_panel_title(:assign, _target), do: "Assign new armies or select a target area"
+  defp order_panel_title(:transfer, target), do: "Transfer how many armies to #{target.name}?"
+  defp order_panel_title(:attack, target), do: "Attack #{target.name} with how many armies?"
+
+  defp order_submit_label(:assign), do: "Assign"
+  defp order_submit_label(:transfer), do: "Transfer"
+  defp order_submit_label(:attack), do: "Attack"
 
   # Player-facing rule info (GIF-103): every region's control bonus, sourced
   # from the same `MapInfo.regions/1` the board's areas/adjacency already
@@ -425,6 +729,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   attr :players, :list, required: true
   attr :viewer_number, :any, required: true
+  attr :status, :atom, required: true
 
   defp player_list(assigns) do
     ~H"""
@@ -439,6 +744,14 @@ defmodule GlobalCombatWeb.GameLive do
           <StatusPill.status_pill :if={!p.eliminated} tone={if p.done, do: "done", else: "waiting"}>
             {if p.done, do: "Done", else: "Thinking"}
           </StatusPill.status_pill>
+          <Button.button
+            :if={@status == :lobby and @viewer_number == 1 and p.number != @viewer_number}
+            intent="neutral"
+            phx-click="kick"
+            phx-value-player_number={p.number}
+          >
+            Kick
+          </Button.button>
         </span>
       </li>
     </ul>

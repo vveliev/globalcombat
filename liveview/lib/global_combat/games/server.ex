@@ -36,6 +36,7 @@ defmodule GlobalCombat.Games.Server do
   alias GlobalCombat.Games.PlayerView
   alias GlobalCombat.Games.PubSub, as: GamePubSub
   alias GlobalCombat.GrpcHost
+  alias GlobalCombat.Tourneys
 
   @registry GlobalCombat.Games.Registry
   @max_messages 150
@@ -55,6 +56,7 @@ defmodule GlobalCombat.Games.Server do
     :db_last_turn_time,
     status: :lobby,
     players: [],
+    invites: [],
     engine: nil,
     messages: []
   ]
@@ -97,9 +99,50 @@ defmodule GlobalCombat.Games.Server do
     GenServer.call(via(game_id), {:join, account_id, name})
   end
 
+  @doc """
+  Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited` (GIF-114).
+  `account_id` must already be seated (matches this ticket's "a player can invite another
+  account" — the original C# action had no such check, but let any logged-in visitor
+  invite strangers into someone else's lobby). `login` is resolved the same way
+  `AccountController` resolves a name-or-email login. Lobby-only: once a game is playing,
+  `join/3` would refuse the invitee anyway. Returns `{:ok, invitee}` or `{:error, reason}`
+  with `reason` one of `:not_playing`, `:account_not_found`, `:cannot_invite_self`,
+  `:already_playing`, `:already_invited`, `:not_in_lobby`.
+  """
+  def invite(game_id, account_id, login) do
+    GenServer.call(via(game_id), {:invite, account_id, login})
+  end
+
+  @doc """
+  Port of `GameController.Quit` + `Game.Unjoin` (lobby) / `Game.EliminatePlayer` (mid-play).
+  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_playing`, `:already_eliminated`.
+  """
+  def quit(game_id, account_id) do
+    GenServer.call(via(game_id), {:quit, account_id})
+  end
+
+  @doc """
+  Port of `GameController.Kick` + `Game.Unjoin` — host only (`account_id` must resolve to
+  seat 1), lobby only, same restrictions as the original (`IsHost && !game.Started`).
+  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_host`, `:not_found`,
+  `:not_in_lobby`.
+  """
+  def kick(game_id, account_id, player_number) do
+    GenServer.call(via(game_id), {:kick, account_id, player_number})
+  end
+
   @doc "Starts the game (host/player 1 only, matching `GameController.Start`'s `player.Number == 1` check)."
   def start_game(game_id, account_id) do
     GenServer.call(via(game_id), {:start_game, account_id})
+  end
+
+  @doc """
+  Starts the game once it has enough seats, without checking who's calling — mirrors `Game.cs`'s
+  `Join`-driven auto-start (`if (Players.Count >= MaxPlayers) Start()`), for callers like tourney
+  bracket seeding (GIF-115) where no single seat is a "host" to authorize `start_game/2`'s check.
+  """
+  def force_start(game_id) do
+    GenServer.call(via(game_id), :force_start)
   end
 
   @doc "Port of `GameController.Send` + `Game.SendForumMessage` — broadcasts to everyone on the board."
@@ -115,6 +158,37 @@ defmodule GlobalCombat.Games.Server do
   @doc "Port of `GameController.ForceTurn` + `Game.ForceTurn`."
   def force_turn(game_id, account_id) do
     GenServer.cast(via(game_id), {:force_turn, account_id})
+  end
+
+  @doc """
+  Port of `GameController.Assign` + `Game.SetAssigned`. `account_id` is resolved to a
+  seat and `area_number` ownership-checked inside the server, mirroring
+  `GameController.Assign`'s `area.Owner != player` guard — same reasoning as
+  `set_done/2`, a click handler can't be trusted to hand over a player number.
+  """
+  def assign(game_id, account_id, area_number, amount) do
+    GenServer.cast(via(game_id), {:assign, account_id, area_number, amount})
+  end
+
+  @doc "Port of `GameController.Unassign` + `Game.ClearAssigned`."
+  def unassign(game_id, account_id, area_number) do
+    GenServer.cast(via(game_id), {:unassign, account_id, area_number})
+  end
+
+  @doc """
+  Port of `GameController.Transfer` + `Game.SetTransfer`. Requires `account_id`'s seat
+  to own both `area_number` and `target_area_number`, matching `GameController.Transfer`.
+  """
+  def transfer(game_id, account_id, area_number, target_area_number, amount) do
+    GenServer.cast(via(game_id), {:transfer, account_id, area_number, target_area_number, amount})
+  end
+
+  @doc """
+  Port of `GameController.Attack` + `Game.SetAttack`. Requires `account_id`'s seat to
+  own `area_number` and *not* own `target_area_number`, matching `GameController.Attack`.
+  """
+  def attack(game_id, account_id, area_number, target_area_number, amount) do
+    GenServer.cast(via(game_id), {:attack, account_id, area_number, target_area_number, amount})
   end
 
   @doc """
@@ -246,10 +320,20 @@ defmodule GlobalCombat.Games.Server do
       length(state.players) >= state.max_players ->
         {:reply, {:error, :full}, state}
 
+      # `players != []` exempts the founding join: `GameCreateLive` seats the creator via this
+      # same `join/3` right after `create_game/1`, mirroring `GameController.Create`'s
+      # `model.Join(...)` in the .NET original, which calls `Game.Join` directly and never runs
+      # the `IsPrivate` check that only lives in the controller's separate `Join` action.
+      state.players != [] and state.is_private and
+          not Enum.any?(state.invites, &(&1.account_id == account_id)) ->
+        {:reply, {:error, :not_invited}, state}
+
       true ->
         number = length(state.players) + 1
         players = state.players ++ [{number, %{account_id: account_id, name: name}}]
-        state = %{state | players: players}
+        invites = Enum.reject(state.invites, &(&1.account_id == account_id))
+        GamesDb.clear_invite(state.game_id, account_id)
+        state = %{state | players: players, invites: invites}
         GamePubSub.broadcast_reload(state.game_id)
         {:reply, {:ok, number}, state}
     end
@@ -259,29 +343,89 @@ defmodule GlobalCombat.Games.Server do
     {:reply, {:error, :already_started}, state}
   end
 
+  def handle_call({:invite, account_id, login}, _from, %{status: :lobby} = state) do
+    if find_player_number(state, account_id) do
+      handle_invite(state, account_id, login)
+    else
+      {:reply, {:error, :not_playing}, state}
+    end
+  end
+
+  def handle_call({:invite, _account_id, _login}, _from, state) do
+    {:reply, {:error, :not_in_lobby}, state}
+  end
+
+  def handle_call({:quit, account_id}, _from, %{status: :lobby} = state) do
+    case find_player_number(state, account_id) do
+      nil ->
+        {:reply, {:error, :not_playing}, state}
+
+      number ->
+        players = renumber_players(Enum.reject(state.players, fn {n, _p} -> n == number end))
+        state = %{state | players: players}
+        GamePubSub.broadcast_reload(state.game_id)
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:quit, account_id}, _from, %{status: :playing} = state) do
+    case find_player_number(state, account_id) do
+      nil ->
+        {:reply, {:error, :not_playing}, state}
+
+      number ->
+        if Engine.eliminated?(Engine.player!(state.engine, number)) do
+          {:reply, {:error, :already_eliminated}, state}
+        else
+          {:reply, :ok, eliminate_and_broadcast(state, number)}
+        end
+    end
+  end
+
+  def handle_call({:kick, account_id, player_number}, _from, %{status: :lobby} = state) do
+    cond do
+      find_player_number(state, account_id) != 1 ->
+        {:reply, {:error, :not_host}, state}
+
+      not Enum.any?(state.players, fn {n, _p} -> n == player_number end) ->
+        {:reply, {:error, :not_found}, state}
+
+      true ->
+        players =
+          renumber_players(Enum.reject(state.players, fn {n, _p} -> n == player_number end))
+
+        state = %{state | players: players}
+        GamePubSub.broadcast_reload(state.game_id)
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:kick, _account_id, _player_number}, _from, state) do
+    {:reply, {:error, :not_in_lobby}, state}
+  end
+
   def handle_call({:start_game, account_id}, _from, %{status: :lobby} = state) do
     with 1 <- find_player_number(state, account_id),
          true <- length(state.players) >= 2 do
-      engine = state |> new_engine() |> run_ai_turns()
-      {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
-
-      state = %{
-        state
-        | status: :playing,
-          engine: engine,
-          turn_started_at: DateTime.utc_now(),
-          db_last_turn_time: db_game.last_turn_time
-      }
-
-      persist_snapshot(state)
-      GamePubSub.broadcast_reload(state.game_id)
-      {:reply, :ok, state}
+      {:reply, :ok, do_start(state)}
     else
       _ -> {:reply, {:error, :cannot_start}, state}
     end
   end
 
   def handle_call({:start_game, _account_id}, _from, state) do
+    {:reply, {:error, :already_started}, state}
+  end
+
+  def handle_call(:force_start, _from, %{status: :lobby} = state) do
+    if length(state.players) >= 2 do
+      {:reply, :ok, do_start(state)}
+    else
+      {:reply, {:error, :not_enough_players}, state}
+    end
+  end
+
+  def handle_call(:force_start, _from, state) do
     {:reply, {:error, :already_started}, state}
   end
 
@@ -338,13 +482,187 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast({:force_turn, _account_id}, state), do: {:noreply, state}
 
+  # GIF-111: the four order-setters a player's territory clicks drive. Every clause
+  # re-derives the acting seat from `account_id` and re-checks ownership against the
+  # live engine state before touching it — a `phx-value-area` is just a number a
+  # browser sent us, never trusted the way `GameController`'s session-bound `player`
+  # was. An unauthorized/invalid order is a silent no-op, matching `GameController`'s
+  # own `return 0` guards, not a crash — `Map.fetch!`-based `Engine.area!/2` would
+  # take the whole game's GenServer down (every seated player, not just the sender)
+  # on a bad area number, which a raw client param absolutely can be.
+  def handle_cast({:assign, account_id, area_number, amount}, %{status: :playing} = state) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- valid_amount?(amount),
+         true <- owns_area?(state, player_number, area_number) do
+      {_amount, engine} = Engine.set_assigned(state.engine, area_number, amount)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:assign, _account_id, _area_number, _amount}, state), do: {:noreply, state}
+
+  def handle_cast({:unassign, account_id, area_number}, %{status: :playing} = state) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- owns_area?(state, player_number, area_number) do
+      {_amount, engine} = Engine.clear_assigned(state.engine, area_number)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:unassign, _account_id, _area_number}, state), do: {:noreply, state}
+
+  def handle_cast(
+        {:transfer, account_id, area_number, target_area_number, amount},
+        %{status: :playing} = state
+      ) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- valid_amount?(amount),
+         true <- owns_area?(state, player_number, area_number),
+         true <- owns_area?(state, player_number, target_area_number) do
+      {_amount, engine} =
+        Engine.set_transfer(state.engine, area_number, target_area_number, amount)
+
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:transfer, _account_id, _area_number, _target_area_number, _amount}, state),
+    do: {:noreply, state}
+
+  def handle_cast(
+        {:attack, account_id, area_number, target_area_number, amount},
+        %{status: :playing} = state
+      ) do
+    with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
+         true <- valid_amount?(amount),
+         true <- owns_area?(state, player_number, area_number),
+         true <- valid_area?(state, target_area_number),
+         false <- owns_area?(state, player_number, target_area_number) do
+      {_amount, engine} = Engine.set_attack(state.engine, area_number, target_area_number, amount)
+      {:noreply, apply_order(state, engine)}
+    else
+      _ -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:attack, _account_id, _area_number, _target_area_number, _amount}, state),
+    do: {:noreply, state}
+
   # --- internals -----------------------------------------------------------
+
+  # Shared by {:start_game, account_id} (host-authorized) and :force_start (unconditional,
+  # GIF-115) — everything past "who's allowed to start this" is identical.
+  defp do_start(state) do
+    engine = state |> new_engine() |> run_ai_turns()
+    {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
+
+    state = %{
+      state
+      | status: :playing,
+        engine: engine,
+        turn_started_at: DateTime.utc_now(),
+        db_last_turn_time: db_game.last_turn_time
+    }
+
+    persist_snapshot(state)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
+  end
+
+  # Shared tail of {:invite, ...} once the inviter's own seat is confirmed — split out so
+  # the :lobby/otherwise dispatch above stays a plain function-head match like every other
+  # handle_call/3 clause in this module.
+  defp handle_invite(state, account_id, login) do
+    case Accounts.get_account_by_login(String.trim(login)) do
+      nil ->
+        {:reply, {:error, :account_not_found}, state}
+
+      %{id: ^account_id} ->
+        {:reply, {:error, :cannot_invite_self}, state}
+
+      invitee ->
+        cond do
+          find_player_number(state, invitee.id) ->
+            {:reply, {:error, :already_playing}, state}
+
+          Enum.any?(state.invites, &(&1.account_id == invitee.id)) ->
+            {:reply, {:error, :already_invited}, state}
+
+          true ->
+            {:ok, _} = GamesDb.invite(state.game_id, invitee.id)
+            invites = state.invites ++ [%{account_id: invitee.id, name: invitee.name}]
+            state = %{state | invites: invites}
+
+            GamePubSub.broadcast_notification(
+              invitee.id,
+              "Game Invite",
+              "You've been invited to a game of Global Combat.",
+              "/Game-#{state.game_id}/"
+            )
+
+            GamePubSub.broadcast_reload(state.game_id)
+            {:reply, {:ok, invitee}, state}
+        end
+    end
+  end
+
+  # Port of `Game.EliminatePlayer` called mid-play (a live Quit) rather than from
+  # `run_turn/1`'s own reinforcement pass — same engine call either way (GIF-114's fix
+  # direction: reuse the engine equivalent rather than reimplementing elimination here).
+  # Doesn't advance games.turn/last_turn_time: this isn't a turn resolving, just a seat
+  # dropping out mid-turn, so `run_turn/2`'s clock-advance machinery doesn't apply.
+  defp eliminate_and_broadcast(state, player_number) do
+    engine = Engine.eliminate_player(state.engine, player_number)
+    state = %{state | engine: engine}
+    persist_snapshot(state)
+    if engine.ended, do: GamesDb.finish_game(state.game_id)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
+  end
+
+  # Port of `Game.UpdatePlayerNumbers` — reassigns 1..n by list position after a lobby
+  # departure, so a later join's `length(players) + 1` never collides with a number a
+  # remaining player still holds (e.g. players [1,2,3], 2 leaves: without renumbering the
+  # next join would compute 3, colliding with the existing player 3).
+  defp renumber_players(players) do
+    players
+    |> Enum.map(fn {_n, p} -> p end)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {p, i} -> {i, p} end)
+  end
 
   defp find_player_number(state, account_id) do
     case Enum.find(state.players, fn {_n, p} -> p.account_id == account_id end) do
       {number, _p} -> number
       nil -> nil
     end
+  end
+
+  defp valid_amount?(amount), do: is_integer(amount) and amount >= 0
+
+  defp valid_area?(state, number),
+    do: is_integer(number) and Map.has_key?(state.engine.areas, number)
+
+  defp owns_area?(state, player_number, area_number) do
+    valid_area?(state, area_number) and
+      Engine.area!(state.engine, area_number).owner_number == player_number
+  end
+
+  # Common tail of every order-setter above: land the new engine state, persist it
+  # (so a crash/rehydrate mid-turn doesn't silently drop a queued order — same
+  # `persist_snapshot/1` `start_game`/`run_turn` already use), and reload every
+  # subscriber, including the sender's own view.
+  defp apply_order(state, engine) do
+    state = %{state | engine: engine}
+    persist_snapshot(state)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
   end
 
   defp time_left(%{turn_started_at: nil}), do: 0
@@ -485,8 +803,20 @@ defmodule GlobalCombat.Games.Server do
       end
 
     persist_snapshot(state)
-    if engine.ended, do: GamesDb.finish_game(state.game_id)
     record_game_results(old_engine, engine)
+
+    if engine.ended do
+      GamesDb.finish_game(state.game_id)
+
+      # GIF-116: wires the seam `Tourneys.finish_game/2`'s moduledoc documents but nothing
+      # ever called outside tests -- mirrors `Web/Models/GameServer.cs`'s `Game.OnEnd` calling
+      # into `Tourney.PlayerFinishedCheck`/`TourneyFinishedCheck`. Unconditional: `finish_game/2`
+      # already no-ops (via `record_player_result/3`'s `Repo.get_by(TourneyGame, ...)` lookup)
+      # for a game_id that isn't part of any tourney, so a plain lobby/training game costs one
+      # harmless extra query rather than needing this call gated on a tourney_id this schema
+      # doesn't have.
+      Tourneys.finish_game(state.game_id, tourney_results(engine))
+    end
 
     for {number, account_id} <- notifiable_accounts(state) do
       GamePubSub.broadcast_notification(
@@ -556,5 +886,12 @@ defmodule GlobalCombat.Games.Server do
   defp player_turn_summary(engine, number) do
     player = Engine.player!(engine, number)
     "#{player.armies} armies, #{player.areas} areas."
+  end
+
+  # `Tourneys.finish_game/2`'s `results` shape: `[{account_id, place}]`. Every player has a
+  # nonzero `place` by the time `engine.ended` is true (`Engine.eliminate_player/2` assigns it
+  # on the way out, `Engine.end_game/1` backfills the last survivor's place as 1).
+  defp tourney_results(engine) do
+    Enum.map(Engine.players_in_order(engine), fn p -> {p.account_id, p.place} end)
   end
 end
