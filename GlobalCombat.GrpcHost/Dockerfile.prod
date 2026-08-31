@@ -1,0 +1,30 @@
+# Production release image for the gRPC turn-resolution engine host.
+#
+# Replaces the `dotnet run` spike image (see Dockerfile) with a real
+# multi-stage `dotnet publish` build, per docs/launch.md §2.2. Kestrel still
+# binds plaintext h2c on 5251 (Program.cs) — acceptable because this
+# container and `web` share one private Docker network on the same fleet
+# host (docs/launch.md §2.2, item 3); it must not be assumed safe if the two
+# services are ever split across hosts.
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY GlobalCombat.Core/ ./GlobalCombat.Core/
+COPY GlobalCombat.GrpcHost/ ./GlobalCombat.GrpcHost/
+
+WORKDIR /src/GlobalCombat.GrpcHost
+RUN dotnet restore
+RUN dotnet publish -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+# ICU isn't in this base image's minimal locale set; invariant globalization avoids pulling it in.
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+ENV ASPNETCORE_URLS=""
+
+COPY --from=build /app/publish .
+
+EXPOSE 5251
+ENTRYPOINT ["dotnet", "GlobalCombat.GrpcHost.dll"]

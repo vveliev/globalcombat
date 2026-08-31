@@ -1,0 +1,70 @@
+# Production release image for the Phoenix/LiveView app.
+#
+# Replaces the `mix game_engine.resolve_turn` dev-mode spike image (see
+# Dockerfile) with a real multi-stage `mix release` build, per
+# docs/launch.md §2.2. Runs the compiled release's `bin/server`
+# (rel/overlays/bin/server), not `mix phx.server`.
+#
+# Versions pinned to match Dockerfile.dev's `hexpm/elixir` tag so the release
+# is built with the same Erlang/Elixir the rest of the repo already targets.
+ARG ELIXIR_VERSION=1.18.3
+ARG OTP_VERSION=27.3.4
+ARG DEBIAN_VERSION=bookworm-20250811-slim
+
+ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+
+FROM ${BUILDER_IMAGE} AS builder
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends build-essential git ca-certificates \
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+WORKDIR /app
+
+RUN mix local.hex --force && mix local.rebar --force
+
+ENV MIX_ENV="prod"
+
+COPY mix.exs mix.lock ./
+RUN mix deps.get --only $MIX_ENV
+RUN mkdir config
+
+# Compile-time config first so dependency compilation is cache-busted
+# correctly when it changes.
+COPY config/config.exs config/${MIX_ENV}.exs config/
+RUN mix deps.compile
+
+COPY priv priv
+COPY lib lib
+COPY assets assets
+
+RUN mix assets.deploy
+RUN mix compile
+
+# config/runtime.exs is read at boot, not compile time, so it does not need
+# to invalidate the compile step above.
+COPY config/runtime.exs config/
+COPY rel rel
+RUN mix release
+
+FROM ${RUNNER_IMAGE} AS runtime
+
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates \
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+ENV MIX_ENV="prod"
+
+WORKDIR /app
+RUN chown nobody /app
+
+COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/global_combat ./
+
+USER nobody
+
+CMD ["/app/bin/server"]
