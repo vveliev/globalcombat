@@ -209,4 +209,29 @@ defmodule GlobalCombat.Accounts do
   def disable_account(%Account{} = account, admin_account_id) do
     account |> Ecto.Changeset.change(disabled_by: admin_account_id) |> Repo.update()
   end
+
+  @doc """
+  Ports the loser-side half of `GameServer.OnEliminated`'s non-training branch (`update account
+  set games = games + 1 where id = ...`) — fired when a player is eliminated before the game
+  itself ends. `GlobalCombat.Games.Server` is responsible for the `!IsTraining` gate, same as
+  every other function here that mirrors a `db.Execute` from that file.
+  """
+  def record_game_played(account_id) do
+    from(a in Account, where: a.id == ^account_id) |> Repo.update_all(inc: [games: 1])
+    :ok
+  end
+
+  @doc "Ports the winner-side half of `GameServer.OnEnd`'s non-training branch (`update account set wins = wins + 1, games = games + 1 where id = winner.AccountId`)."
+  def record_win(account_id) do
+    from(a in Account, where: a.id == ^account_id) |> Repo.update_all(inc: [wins: 1, games: 1])
+    :ok
+  end
+
+  @doc "Ports `GameServer.OnEnd`'s per-player rating award (`update account set rating = rating + RatingChange`)."
+  def apply_rating_change(account_id, rating_change) do
+    from(a in Account, where: a.id == ^account_id)
+    |> Repo.update_all(inc: [rating: rating_change])
+
+    :ok
+  end
 end

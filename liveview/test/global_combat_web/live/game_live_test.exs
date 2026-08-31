@@ -468,21 +468,61 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute html =~ true_sprite
       refute render(alice_view) =~ true_sprite
 
-      # Same leak, via the alt text (GIF-79): a hidden area's owner name must never
-      # reach a non-owner's markup either, even though the plain-text owner name is a
-      # much easier thing to accidentally source from unfiltered state than the sprite
-      # filename is.
+      # Same leak, via the alt/label text (GIF-79): a hidden area's owner name must
+      # never reach a non-owner's markup either, even though the plain-text owner
+      # name is a much easier thing to accidentally source from unfiltered state
+      # than the sprite filename is. GIF-121: a fogged area no longer reuses the
+      # neutral/unclaimed "owned by unclaimed" wording (and no <img> at all) — it
+      # gets its own distinct "hidden by fog of war" treatment so it can't be
+      # mistaken for a genuinely-unclaimed tile.
       true_owner_name = Enum.find(alice_state.players, &(&1.number == true_owner)).name
       refute html =~ "alt=\"#{hidden_area.tech_name}, owned by #{true_owner_name}\""
-      assert html =~ "alt=\"#{hidden_area.tech_name}, owned by unclaimed\""
+      refute html =~ "alt=\"#{hidden_area.tech_name}, owned by unclaimed\""
+      assert html =~ "aria-label=\"#{hidden_area.tech_name}, hidden by fog of war\""
 
       # Same leak, via the sr-only board table (GIF-81): the hidden area's row must
-      # report "unclaimed" too, never the true owner's name or army count — the
-      # table is built from the same fog-filtered PlayerView data as the sprite/alt
-      # text, so it must fail the exact same way if someone ever wires it to raw
-      # engine state instead.
+      # report "hidden by fog of war", never the true owner's name/army count nor
+      # the "unclaimed" wording a genuinely-unowned area gets — the table is built
+      # from the same fog-filtered PlayerView data as the sprite/alt text, so it
+      # must fail the exact same way if someone ever wires it to raw engine state
+      # instead.
       refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>#{true_owner_name}<\/td>/
-      assert html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>unclaimed<\/td>/
+      refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>unclaimed<\/td>/
+
+      assert html =~
+               ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>hidden by fog of war<\/td>/
+    end
+
+    test "a fogged area's tile is visually distinct from a genuinely-unclaimed one (GIF-121)",
+         %{conn: conn1} do
+      map_name = :original
+      {player_count, hidden_area_number, _true_owner} = scenario_with_a_hidden_area(map_name)
+
+      accounts = for n <- 1..player_count, do: account_fixture(%{"name" => "Player#{n}"})
+      [alice | _] = accounts
+
+      game_id =
+        Games.create_game(%{max_players: player_count, is_fogged: true, map_name: map_name})
+
+      accounts
+      |> Enum.with_index(1)
+      |> Enum.each(fn {account, number} ->
+        assert {:ok, ^number} = Games.join(game_id, account.id, account.name)
+      end)
+
+      :ok = Games.start_game(game_id, alice.id)
+
+      {:playing, alice_state} = Games.player_view(game_id, alice.id)
+      hidden_area = Enum.find(alice_state.areas, &(&1.number == hidden_area_number))
+      refute hidden_area.visible
+
+      {:ok, _alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      # A fogged tile renders no owner_color(_) sprite at all — not even the "0"
+      # neutral/unclaimed one every genuinely-unowned area (and every unowned area
+      # would-be-visible-but-untouched) still uses.
+      neutral_sprite = "#{hidden_area.tech_name}0.gif"
+      refute html =~ neutral_sprite
     end
   end
 

@@ -521,15 +521,14 @@ defmodule GlobalCombatWeb.GameLive do
     ~H"""
     <span style={"position: absolute; left: #{@area.x}px; top: #{@area.y}px; width: #{@area.width}px; height: #{@area.height}px;"}>
       <button
+        :if={@area.visible}
         type="button"
         phx-click="select_area"
         phx-value-area={@area.number}
-        disabled={!@area.visible}
         aria-pressed={@area.number == @selected_area or @area.number == @target_area}
         class={[
-          "block appearance-none border-0 bg-transparent p-0 m-0",
+          "block appearance-none border-0 bg-transparent p-0 m-0 cursor-pointer",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
-          @area.visible && "cursor-pointer",
           @area.number == @selected_area &&
             "outline outline-2 outline-offset-2 outline-focus-ring",
           @area.number == @target_area && "outline outline-2 outline-offset-2 outline-danger"
@@ -542,6 +541,13 @@ defmodule GlobalCombatWeb.GameLive do
           alt={"#{@area.tech_name}, owned by #{owner_name(@players, @area.owner_number) || "unclaimed"}"}
         />
       </button>
+      <span
+        :if={!@area.visible}
+        role="img"
+        aria-label={"#{@area.tech_name}, hidden by fog of war"}
+        class="block h-full w-full"
+        style="background-image: repeating-linear-gradient(45deg, #000 0, #000 6px, #262626 6px, #262626 12px);"
+      ></span>
       <span
         :if={@area.armies}
         class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000] pointer-events-none"
@@ -658,6 +664,17 @@ defmodule GlobalCombatWeb.GameLive do
     end
   end
 
+  # GIF-121: a fog-hidden area is neither "owned by <player>" nor genuinely
+  # "unclaimed" — collapsing both into "unclaimed" (as the sr-only table used
+  # to, matching the board's old identical-sprite bug) would make a fogged
+  # enemy tile indistinguishable from a real unowned one for a screen reader
+  # user in exactly the way the board sprite itself no longer is for a
+  # sighted one.
+  defp area_owner_text(_players, _owner_number, false), do: "hidden by fog of war"
+
+  defp area_owner_text(players, owner_number, true),
+    do: owner_name(players, owner_number) || "unclaimed"
+
   # Non-visual equivalent of the pixel-positioned board (GIF-81, WCAG 1.3.1): the
   # `<div>` above conveys territory/owner/army-count/adjacency purely through
   # image position and color, which is meaningless to a screen reader in DOM
@@ -666,11 +683,13 @@ defmodule GlobalCombatWeb.GameLive do
   # as an ordered, navigable structure instead — visually hidden, never
   # `aria-hidden`, so assistive tech can still read it.
   #
-  # Owner/army text reuses `owner_name/2`'s "unclaimed" fallback verbatim rather
-  # than distinguishing "hidden by fog" from "actually unclaimed": area/1's alt
-  # text makes that same choice (GIF-79), and diverging here would hand a screen
-  # reader user more information than a sighted player looking at the same
-  # neutral-colored sprite ever gets — a fairness leak, not just an inconsistency.
+  # Owner text goes through `area_owner_text/3` (GIF-121) so a fog-hidden area
+  # reports "hidden by fog of war" instead of "unclaimed" — matching area/1's
+  # alt text, which now gives a fog-hidden tile its own distinct visual instead
+  # of reusing the neutral/unclaimed sprite. Keeping this table's wording in
+  # sync means a screen reader user still gets exactly what a sighted player
+  # sees, no more and no less — just via the new distinction instead of the old
+  # collapsed one.
   # Adjacency, unlike owner/armies, is static map topology every viewer already
   # sees rendered on the board regardless of fog, so it's listed in full.
   attr :areas, :list, required: true
@@ -693,7 +712,7 @@ defmodule GlobalCombatWeb.GameLive do
       <tbody>
         <tr :for={area <- @areas}>
           <th scope="row">{area.name}</th>
-          <td>{owner_name(@players, area.owner_number) || "unclaimed"}</td>
+          <td>{area_owner_text(@players, area.owner_number, area.visible)}</td>
           <td>{area.armies || "—"}</td>
           <td>{adjacent_names(area, @area_names)}</td>
         </tr>
