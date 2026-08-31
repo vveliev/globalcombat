@@ -488,7 +488,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # instead.
       refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>#{true_owner_name}<\/td>/
       refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>unclaimed<\/td>/
-      assert html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>hidden by fog of war<\/td>/
+
+      assert html =~
+               ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>hidden by fog of war<\/td>/
     end
 
     test "a fogged area's tile is visually distinct from a genuinely-unclaimed one (GIF-121)",

@@ -521,15 +521,14 @@ defmodule GlobalCombatWeb.GameLive do
     ~H"""
     <span style={"position: absolute; left: #{@area.x}px; top: #{@area.y}px; width: #{@area.width}px; height: #{@area.height}px;"}>
       <button
+        :if={@area.visible}
         type="button"
         phx-click="select_area"
         phx-value-area={@area.number}
-        disabled={!@area.visible}
         aria-pressed={@area.number == @selected_area or @area.number == @target_area}
         class={[
-          "block appearance-none border-0 bg-transparent p-0 m-0",
+          "block appearance-none border-0 bg-transparent p-0 m-0 cursor-pointer",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
-          @area.visible && "cursor-pointer",
           @area.number == @selected_area &&
             "outline outline-2 outline-offset-2 outline-focus-ring",
           @area.number == @target_area && "outline outline-2 outline-offset-2 outline-danger"
@@ -548,8 +547,7 @@ defmodule GlobalCombatWeb.GameLive do
         aria-label={"#{@area.tech_name}, hidden by fog of war"}
         class="block h-full w-full"
         style="background-image: repeating-linear-gradient(45deg, #000 0, #000 6px, #262626 6px, #262626 12px);"
-      >
-      </span>
+      ></span>
       <span
         :if={@area.armies}
         class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000] pointer-events-none"
@@ -673,7 +671,9 @@ defmodule GlobalCombatWeb.GameLive do
   # user in exactly the way the board sprite itself no longer is for a
   # sighted one.
   defp area_owner_text(_players, _owner_number, false), do: "hidden by fog of war"
-  defp area_owner_text(players, owner_number, true), do: owner_name(players, owner_number) || "unclaimed"
+
+  defp area_owner_text(players, owner_number, true),
+    do: owner_name(players, owner_number) || "unclaimed"
 
   # Non-visual equivalent of the pixel-positioned board (GIF-81, WCAG 1.3.1): the
   # `<div>` above conveys territory/owner/army-count/adjacency purely through
