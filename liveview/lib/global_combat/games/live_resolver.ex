@@ -23,13 +23,17 @@ defmodule GlobalCombat.Games.LiveResolver do
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.Wire
   alias GlobalCombat.Games, as: GamesDb
-  alias GlobalCombat.Games.Live, as: GamesLive
   alias GlobalCombat.Games.Server
   alias GlobalCombat.GrpcHost
 
   @impl true
   def resolve_turn(%GamesDb.Game{} = game) do
-    if GamesLive.game_exists?(game.id) do
+    # Server.alive?/1 (a raw Registry check), not Games.Live.game_exists?/1 — the latter now
+    # also does on-demand rehydration (GIF-119), which here would defeat the point of
+    # resolve_offline/1 below: every scheduler tick would spin up (and never tear down) a
+    # Server for every currently-orphaned :active game instead of the deliberately cheap
+    # one-off "decode, run turn, persist, done" this module was written to do for that case.
+    if Server.alive?(game.id) do
       Server.run_scheduled_turn(game.id, game.last_turn_time)
     else
       resolve_offline(game)

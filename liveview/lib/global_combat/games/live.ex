@@ -66,7 +66,11 @@ defmodule GlobalCombat.Games.Live do
     db_game.id
   end
 
-  def game_exists?(game_id), do: Server.alive?(game_id)
+  @doc """
+  Whether `game_id` has a valid game to attach to — either already live, or rehydratable
+  on-demand from `games.serialized` if its `Server` process isn't currently alive (GIF-119).
+  """
+  def game_exists?(game_id), do: GamesSupervisor.ensure_started(game_id) == :ok
 
   @doc "Port of `GameController.Join` + `Game.Join`/`GameServer.PlayerJoined`."
   def join(game_id, account_id, name), do: with_game(game_id, &Server.join(&1, account_id, name))
@@ -98,7 +102,13 @@ defmodule GlobalCombat.Games.Live do
   @doc "Subscribes the calling process to one account's private messages/notifications."
   def subscribe_account(account_id), do: GamePubSub.subscribe_account(account_id)
 
+  # GIF-119: on-demand rehydration, not just a Registry check — a game whose `Server` process
+  # died after boot (crash, deploy without a full node restart, a concurrent dev-server restart)
+  # otherwise stays permanently "not found" even though `games.serialized` is fully valid.
   defp with_game(game_id, fun) do
-    if Server.alive?(game_id), do: fun.(game_id), else: {:error, :not_found}
+    case GamesSupervisor.ensure_started(game_id) do
+      :ok -> fun.(game_id)
+      {:error, :not_found} = error -> error
+    end
   end
 end

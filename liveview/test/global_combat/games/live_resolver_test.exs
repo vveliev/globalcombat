@@ -10,6 +10,7 @@ defmodule GlobalCombat.Games.LiveResolverTest do
   alias GlobalCombat.Games.Live, as: GamesLive
   alias GlobalCombat.Games.LiveResolver
   alias GlobalCombat.Games.Scheduling
+  alias GlobalCombat.Games.Server
   alias GlobalCombat.GrpcHost
 
   describe "resolve_turn/1 — a live GlobalCombat.Games.Server is running for this game" do
@@ -35,7 +36,10 @@ defmodule GlobalCombat.Games.LiveResolverTest do
   describe "resolve_turn/1 — no live process for this game (offline rehydrate + run)" do
     test "rehydrates from games.serialized, runs the turn directly, and persists the result" do
       game = active_game_fixture()
-      refute GamesLive.game_exists?(game.id)
+      # Server.alive?/1, not GamesLive.game_exists?/1 — the latter now rehydrates on demand
+      # (GIF-119), which would defeat this test's "no live process yet" precondition by
+      # starting one as a side effect of merely checking it.
+      refute Server.alive?(game.id)
 
       assert :ok = LiveResolver.resolve_turn(game)
 
