@@ -1,6 +1,8 @@
 defmodule GlobalCombat.Games.ServerTest do
   use GlobalCombat.DataCase, async: true
 
+  import GlobalCombat.AccountsFixtures
+
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.Game.{Area, Player}
@@ -10,6 +12,99 @@ defmodule GlobalCombat.Games.ServerTest do
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.Server
   alias GlobalCombat.GrpcHost
+  alias GlobalCombat.Tourneys
+
+  describe "GIF-116: engine.ended wires into Tourneys.finish_game/2" do
+    test "a tourney game ending through the live Server advances the winner into the next round" do
+      {:ok, tourney} =
+        Tourneys.create_tourney(%{
+          "name" => "GIF-116 Cup #{System.unique_integer([:positive])}",
+          "initial_games" => 2,
+          "game_size" => 2,
+          "winners" => 1,
+          "auto_start" => true
+        })
+
+      {tourney, :started} =
+        Enum.reduce(for(_ <- 1..4, do: account_fixture()), {tourney, nil}, fn account,
+                                                                              {tourney, _} ->
+          {:ok, outcome} = Tourneys.join_tournament(tourney, account.id)
+          {Tourneys.get_tourney!(tourney.id), outcome}
+        end)
+
+      [round_one_game | _] =
+        tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 1))
+
+      [loser, winner] = round_one_game.game.game_players
+
+      end_game_through_server(round_one_game.game_id,
+        winner_account_id: winner.account_id,
+        loser_account_id: loser.account_id
+      )
+
+      # Confirmed live on a real bracket (GIF-116): before this fix, nothing outside tests
+      # ever called Tourneys.finish_game/2, so a finished round-1 game left round 2 sitting at
+      # `:new` with zero seated game_players forever. `run_turn/2`'s `engine.ended` branch now
+      # calls it, so the winner should already be seated once the turn that ends the game
+      # finishes running -- no manual `Tourneys.finish_game/2` call from the test.
+      round_two = tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 2))
+      assert [round_two_game] = round_two
+
+      seated = round_two_game.game.game_players |> Enum.map(& &1.account_id) |> MapSet.new()
+      assert MapSet.member?(seated, winner.account_id)
+      refute MapSet.member?(seated, loser.account_id)
+
+      persisted_game = GamesDb.get_game!(round_one_game.game_id)
+      assert persisted_game.status == :finished
+    end
+  end
+
+  # Rigs a 2-player engine one turn away from ending (the loser already at 0 areas) inside the
+  # `Games.Server` the tourney bracket seeding (GIF-115) already started for `game_id` — a real
+  # fought-out game would exercise the same `run_turn/2` `engine.ended` branch, just via many
+  # more turns of combat RNG this doesn't need to reproduce to prove the bracket-advancement
+  # wiring itself.
+  defp end_game_through_server(game_id, winner_account_id: winner_id, loser_account_id: loser_id) do
+    engine = %Engine{
+      map_name: :original,
+      rng: DotnetRandom.new(1),
+      turn: 3,
+      minimum_armies: 3,
+      areas: %{1 => %Area{number: 1, owner_number: 1, armies: 5}},
+      players: %{
+        1 => %Player{number: 1, account_id: winner_id, name: "winner", areas: 1, armies: 5},
+        2 => %Player{
+          number: 2,
+          account_id: loser_id,
+          name: "loser",
+          areas: 0,
+          armies: 0,
+          done: true
+        }
+      }
+    }
+
+    :sys.replace_state(Server.via(game_id), fn state ->
+      %{
+        state
+        | status: :playing,
+          engine: engine,
+          players: [
+            {1, %{account_id: winner_id, name: "winner"}},
+            {2, %{account_id: loser_id, name: "loser"}}
+          ],
+          turn_started_at: DateTime.utc_now(),
+          db_last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
+      }
+    end)
+
+    :ok = Server.set_done(game_id, winner_id)
+    # Synchronizes on the cast above: a GenServer processes messages from the same sender in
+    # the order they were sent, so this call only returns once `set_done`'s `run_turn/2` (and
+    # therefore the `Tourneys.finish_game/2` call under test) has already completed.
+    assert {:playing, view} = Server.player_view(game_id, winner_id)
+    assert view.turn == 4
+  end
 
   describe "training mode: the Computer opponent takes its turn on its own (GIF-104)" do
     test "the Computer seat is Done the instant its turn starts, never left Thinking forever" do

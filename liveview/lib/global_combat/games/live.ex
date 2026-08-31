@@ -74,6 +74,13 @@ defmodule GlobalCombat.Games.Live do
   @doc "Port of `GameController.Start`."
   def start_game(game_id, account_id), do: with_game(game_id, &Server.start_game(&1, account_id))
 
+  @doc """
+  Starts a game once its seats are full without a designated host — port of `Game.cs`'s `Join`
+  auto-start (`if (Players.Count >= MaxPlayers) Start()`), used by tourney bracket seeding
+  (GIF-115) where no single seat is the "host" authorized to call `start_game/2`.
+  """
+  def force_start(game_id), do: with_game(game_id, &Server.force_start/1)
+
   @doc "Port of `GameController.Send`."
   def send_chat(game_id, account_id, name, text),
     do: with_game(game_id, &Server.send_chat(&1, account_id, name, text))
