@@ -18,8 +18,10 @@ defmodule GlobalCombat.Tourneys do
 
   import Ecto.Query
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Repo
   alias GlobalCombat.Games
+  alias GlobalCombat.Games.Live, as: GamesLive
   alias GlobalCombat.Tourneys.{Bracket, Tourney, TourneyGame, TourneyPlayer}
 
   @doc "Port of `Tourney.CreateTournament`'s DB insert half; validation lives in `Tourney.create_changeset/2`."
@@ -162,46 +164,65 @@ defmodule GlobalCombat.Tourneys do
   creates all of them immediately rather than lazily as the bracket progresses), seeds round 1
   with the shuffled, signed-up player pool, and -- for a recurring tourney -- spins up the next
   copy the way `Start()` calls back into `CreateTournament(this)`.
+
+  Only the DB bookkeeping (tourney status flip, `tourneygame` rows) runs inside a transaction --
+  `seed_round_one/1` (GIF-115) calls into `Games.Server` processes, which are a *different* OS
+  process than this one and need their own DB checkout for `Games.Live.force_start/1`'s
+  `mark_active` write. A process can't check out the sandbox's single connection while this one
+  is sitting inside an open `Repo.transaction` holding it and synchronously blocked waiting on
+  that same GenServer call -- so seeding has to happen after the transaction commits, same as
+  `Tourney.Start`'s original SQL, which never wrapped `Game.Join`/`GameServer.PlayerJoined` in an
+  explicit transaction either.
   """
   def start_tournament(%Tourney{} = tourney) do
     if Tourney.started?(tourney) do
       {:error, :already_started}
     else
-      Repo.transaction(fn ->
-        {:ok, tourney} =
+      {:ok, tourney} =
+        Repo.transaction(fn ->
+          {:ok, tourney} =
+            tourney
+            |> Ecto.Changeset.change(status: :running, start_time: DateTime.utc_now(:second))
+            |> Repo.update()
+
+          rounds = bracket(tourney)
+          flat_rounds = all_rounds(rounds)
+
+          Enum.each(flat_rounds, &create_round_games(tourney, &1, flat_rounds))
+
           tourney
-          |> Ecto.Changeset.change(status: :running, start_time: DateTime.utc_now(:second))
-          |> Repo.update()
+        end)
 
-        rounds = bracket(tourney)
-        flat_rounds = all_rounds(rounds)
+      seed_round_one(tourney)
 
-        Enum.each(flat_rounds, &create_round_games(tourney, &1, flat_rounds))
+      if tourney.recurring do
+        {:ok, _next} = recreate_recurring(tourney)
+      end
 
-        seed_round_one(tourney)
-
-        if tourney.recurring do
-          {:ok, _next} = recreate_recurring(tourney)
-        end
-
-        tourney
-      end)
+      {:ok, tourney}
     end
   end
 
+  # GIF-115: every bracket game must be created through `Games.Live.create_game/1` rather than
+  # the plain DB-only `Games.create_game/1` -- only the `Live` context also starts the
+  # `Games.Server` GenServer a game needs to be joinable/playable at all (`GameLive.mount/2`
+  # gates entry on `Server.alive?/1`). The `TourneyGame`'s `game_id` still points at the same
+  # `games` row either way (`Games.Live.create_game/1` writes that row itself, keyed by the same
+  # id the Server is started against), so the rest of this module's DB-side bookkeeping (finding
+  # a game by id, preloading `game_players`) is unaffected.
   defp create_round_games(tourney, round, flat_rounds) do
     {winner_round, loser_round} = Bracket.advancement_targets(round, flat_rounds)
-    game_attrs = option_game_attrs(tourney)
+    game_attrs = option_game_attrs(tourney, round)
 
     for game_num <- round.start_game..(round.start_game + round.game_count - 1) do
-      {:ok, game} = Games.create_game(game_attrs)
+      game_id = GamesLive.create_game(game_attrs)
 
       {:ok, _tourney_game} =
         %TourneyGame{}
         |> Ecto.Changeset.cast(
           %{
             tourney_id: tourney.id,
-            game_id: game.id,
+            game_id: game_id,
             game_num: game_num,
             round: round.number,
             game_size: round.game_size,
@@ -226,26 +247,40 @@ defmodule GlobalCombat.Tourneys do
 
   # Port of `Tourney.CreateTourneyGame`'s `OptionGame` ruleset copy (`Tourney.cs:76-81`): every
   # bracket game inherits `option_game_id`'s map/fog/non-random/reverse-attack-order/minimum-
-  # armies/turn-length instead of the bare `Games.create_game/1` schema defaults -- mirroring
+  # armies/turn-length instead of `Games.Live.create_game/1`'s schema defaults -- mirroring
   # `OptionGame`'s `GameServer.GetGame(OptionGameId)` lookup, this silently falls back to the
   # defaults (rather than raising) if `option_game_id` doesn't resolve to a real game.
-  defp option_game_attrs(%Tourney{option_game_id: option_game_id}) do
+  # `max_players` always comes from the round's own `game_size`, not `option_game_id` (a bracket
+  # slot is never bigger than the round it belongs to), so `Games.Server`'s own seat limit
+  # actually matches the size this module fills it to.
+  defp option_game_attrs(%Tourney{option_game_id: option_game_id}, round) do
+    base = %{max_players: round.game_size}
+
     case option_game_id && Games.get_game(option_game_id) do
       nil ->
-        %{}
+        base
 
       option_game ->
-        Map.take(option_game, [
-          :map_name,
-          :is_fogged,
-          :is_non_random,
-          :reverse_attack_order,
-          :minimum_armies,
-          :turn_length
-        ])
+        Map.merge(base, %{
+          map_name: option_game.map_name,
+          is_fogged: option_game.is_fogged,
+          is_non_random: option_game.is_non_random,
+          reverse_attack_order: option_game.reverse_attack_order,
+          minimum_armies: option_game.minimum_armies,
+          turn_length_minutes: option_game.turn_length
+        })
     end
   end
 
+  # GIF-115: seating a player has to reach both the `game_players` row (the DB-side roster the
+  # bracket page (`tourney_html.ex`) and this module's own `Games.player_count/1` checks read)
+  # *and* the running `Games.Server` (the only thing that makes the seat actually playable) --
+  # `players/1` above already hands us full `Account` structs, so no extra lookup is needed for
+  # the name `Games.Live.join/3` wants. Once a slot fills, `Games.Live.force_start/1` (not
+  # `Games.mark_active/1`) is what actually flips the GenServer into `:playing` -- it updates the
+  # DB status itself as a side effect, matching `Game.cs`'s `Join` -> `if (Players.Count >=
+  # MaxPlayers) Start()` auto-start (there's no single "host" seat in a bracket game to gate a
+  # manual `Games.Live.start_game/2` call the way `GameLive`'s lobby does).
   defp seed_round_one(tourney) do
     shuffled = tourney |> players() |> Enum.shuffle()
 
@@ -260,8 +295,15 @@ defmodule GlobalCombat.Tourneys do
     round_one_games
     |> Enum.reduce(shuffled, fn tourney_game, remaining_players ->
       {seats, rest} = Enum.split(remaining_players, tourney_game.game_size)
-      Enum.each(seats, &Games.join(tourney_game.game, &1.id))
-      if length(seats) >= tourney_game.game_size, do: Games.mark_active(tourney_game.game)
+
+      Enum.each(seats, fn account ->
+        {:ok, _} = Games.join(tourney_game.game, account.id)
+        {:ok, _} = GamesLive.join(tourney_game.game.id, account.id, account.name)
+      end)
+
+      if length(seats) >= tourney_game.game_size,
+        do: :ok = GamesLive.force_start(tourney_game.game.id)
+
       rest
     end)
   end
@@ -338,8 +380,11 @@ defmodule GlobalCombat.Tourneys do
       %TourneyGame{} = tourney_game ->
         {:ok, _} = Games.join(tourney_game.game, account_id)
 
+        account = Accounts.get_account_including_disabled(account_id)
+        {:ok, _} = GamesLive.join(tourney_game.game.id, account_id, account.name)
+
         if Games.player_count(tourney_game.game) >= tourney_game.game_size do
-          Games.mark_active(tourney_game.game)
+          :ok = GamesLive.force_start(tourney_game.game.id)
         end
 
         {:ok, tourney_game}

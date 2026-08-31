@@ -35,6 +35,7 @@ defmodule GlobalCombat.Games.Server do
   alias GlobalCombat.Games.PlayerView
   alias GlobalCombat.Games.PubSub, as: GamePubSub
   alias GlobalCombat.GrpcHost
+  alias GlobalCombat.Tourneys
 
   @registry GlobalCombat.Games.Registry
   @max_messages 150
@@ -99,6 +100,15 @@ defmodule GlobalCombat.Games.Server do
   @doc "Starts the game (host/player 1 only, matching `GameController.Start`'s `player.Number == 1` check)."
   def start_game(game_id, account_id) do
     GenServer.call(via(game_id), {:start_game, account_id})
+  end
+
+  @doc """
+  Starts the game once it has enough seats, without checking who's calling — mirrors `Game.cs`'s
+  `Join`-driven auto-start (`if (Players.Count >= MaxPlayers) Start()`), for callers like tourney
+  bracket seeding (GIF-115) where no single seat is a "host" to authorize `start_game/2`'s check.
+  """
+  def force_start(game_id) do
+    GenServer.call(via(game_id), :force_start)
   end
 
   @doc "Port of `GameController.Send` + `Game.SendForumMessage` — broadcasts to everyone on the board."
@@ -261,26 +271,25 @@ defmodule GlobalCombat.Games.Server do
   def handle_call({:start_game, account_id}, _from, %{status: :lobby} = state) do
     with 1 <- find_player_number(state, account_id),
          true <- length(state.players) >= 2 do
-      engine = state |> new_engine() |> run_ai_turns()
-      {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
-
-      state = %{
-        state
-        | status: :playing,
-          engine: engine,
-          turn_started_at: DateTime.utc_now(),
-          db_last_turn_time: db_game.last_turn_time
-      }
-
-      persist_snapshot(state)
-      GamePubSub.broadcast_reload(state.game_id)
-      {:reply, :ok, state}
+      {:reply, :ok, do_start(state)}
     else
       _ -> {:reply, {:error, :cannot_start}, state}
     end
   end
 
   def handle_call({:start_game, _account_id}, _from, state) do
+    {:reply, {:error, :already_started}, state}
+  end
+
+  def handle_call(:force_start, _from, %{status: :lobby} = state) do
+    if length(state.players) >= 2 do
+      {:reply, :ok, do_start(state)}
+    else
+      {:reply, {:error, :not_enough_players}, state}
+    end
+  end
+
+  def handle_call(:force_start, _from, state) do
     {:reply, {:error, :already_started}, state}
   end
 
@@ -338,6 +347,25 @@ defmodule GlobalCombat.Games.Server do
   def handle_cast({:force_turn, _account_id}, state), do: {:noreply, state}
 
   # --- internals -----------------------------------------------------------
+
+  # Shared by {:start_game, account_id} (host-authorized) and :force_start (unconditional,
+  # GIF-115) — everything past "who's allowed to start this" is identical.
+  defp do_start(state) do
+    engine = state |> new_engine() |> run_ai_turns()
+    {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
+
+    state = %{
+      state
+      | status: :playing,
+        engine: engine,
+        turn_started_at: DateTime.utc_now(),
+        db_last_turn_time: db_game.last_turn_time
+    }
+
+    persist_snapshot(state)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
+  end
 
   defp find_player_number(state, account_id) do
     case Enum.find(state.players, fn {_n, p} -> p.account_id == account_id end) do
@@ -478,7 +506,19 @@ defmodule GlobalCombat.Games.Server do
       end
 
     persist_snapshot(state)
-    if engine.ended, do: GamesDb.finish_game(state.game_id)
+
+    if engine.ended do
+      GamesDb.finish_game(state.game_id)
+
+      # GIF-116: wires the seam `Tourneys.finish_game/2`'s moduledoc documents but nothing
+      # ever called outside tests -- mirrors `Web/Models/GameServer.cs`'s `Game.OnEnd` calling
+      # into `Tourney.PlayerFinishedCheck`/`TourneyFinishedCheck`. Unconditional: `finish_game/2`
+      # already no-ops (via `record_player_result/3`'s `Repo.get_by(TourneyGame, ...)` lookup)
+      # for a game_id that isn't part of any tourney, so a plain lobby/training game costs one
+      # harmless extra query rather than needing this call gated on a tourney_id this schema
+      # doesn't have.
+      Tourneys.finish_game(state.game_id, tourney_results(engine))
+    end
 
     for {number, account_id} <- notifiable_accounts(state) do
       GamePubSub.broadcast_notification(
@@ -512,5 +552,12 @@ defmodule GlobalCombat.Games.Server do
   defp player_turn_summary(engine, number) do
     player = Engine.player!(engine, number)
     "#{player.armies} armies, #{player.areas} areas."
+  end
+
+  # `Tourneys.finish_game/2`'s `results` shape: `[{account_id, place}]`. Every player has a
+  # nonzero `place` by the time `engine.ended` is true (`Engine.eliminate_player/2` assigns it
+  # on the way out, `Engine.end_game/1` backfills the last survivor's place as 1).
+  defp tourney_results(engine) do
+    Enum.map(Engine.players_in_order(engine), fn p -> {p.account_id, p.place} end)
   end
 end
