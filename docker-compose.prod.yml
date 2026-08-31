@@ -1,0 +1,93 @@
+# Production stack for the Global Combat relaunch (docs/launch.md).
+#
+# This is the shape docs/launch.md §2.1-2.3 describes, not a finished
+# deployment: it still needs, from whoever provisions vveliev's fleet host
+# (§2.1, out of any agent's authority) —
+#
+#   - a `.env` file (not committed) populated from 1Password per the table in
+#     docs/launch.md §2.3
+#   - a real port block reserved in the fleet's registry/PORTS.md (do not
+#     reuse dev's 11400 block — see docker-compose.yml's header)
+#   - attachment to whatever reverse proxy the fleet already terminates TLS
+#     with; `PROXY_NETWORK` below is a placeholder name for that network,
+#     not a new proxy this file invents
+#
+# Migrations run as a one-shot step before `web` starts:
+#   docker compose -f docker-compose.prod.yml run --rm migrate
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  mysql:
+    image: mysql:8.0
+    # Same driver constraint as dev (MyXQL requires mysql_native_password) —
+    # not a security posture. Unlike dev, this does NOT set
+    # MYSQL_ALLOW_EMPTY_PASSWORD; MYSQL_ROOT_PASSWORD/MYSQL_PASSWORD come from
+    # the fleet's injected .env (docs/launch.md §2.3).
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-global_combat_prod}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks: [gc-internal]
+
+  grpc-host:
+    build:
+      context: .
+      dockerfile: GlobalCombat.GrpcHost/Dockerfile.prod
+    restart: unless-stopped
+    networks: [gc-internal]
+
+  migrate:
+    build:
+      context: ./liveview
+      dockerfile: Dockerfile.prod
+    entrypoint: ["/app/bin/migrate"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [gc-internal]
+
+  web:
+    build:
+      context: ./liveview
+      dockerfile: Dockerfile.prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
+      PHX_HOST: ${PHX_HOST:?PHX_HOST is required}
+      PHX_SERVER: "true"
+      PORT: "4000"
+      GRPC_HOST: grpc-host
+      GRPC_PORT: "5251"
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      grpc-host:
+        condition: service_started
+    restart: unless-stopped
+    networks: [gc-internal, gc-proxy]
+
+volumes:
+  mysql-data:
+
+networks:
+  gc-internal: {}
+  # External network owned by the fleet's reverse proxy (docs/launch.md §2.1).
+  # Rename to match whatever that proxy actually calls it — this file does
+  # not create it (`external: true`), matching the plan's decision not to
+  # invent a new reverse-proxy convention.
+  gc-proxy:
+    external: true
+    name: ${PROXY_NETWORK:?PROXY_NETWORK is required — name of the fleet's existing reverse-proxy network}

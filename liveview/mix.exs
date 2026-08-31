@@ -12,7 +12,21 @@ defmodule GlobalCombat.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
-      test_coverage: [tool: ExCoveralls]
+      test_coverage: [tool: ExCoveralls],
+      releases: releases()
+    ]
+  end
+
+  # docs/launch.md §2.2: the production release artifact `mix phx.gen.release`
+  # would otherwise generate. `runtime.exs` already raises on boot without
+  # DATABASE_URL/SECRET_KEY_BASE, so no extra release-time config is needed
+  # beyond naming the release and including the migration/server overlays.
+  defp releases do
+    [
+      global_combat: [
+        include_executables_for: [:unix],
+        applications: [runtime_tools: :permanent]
+      ]
     ]
   end
 
