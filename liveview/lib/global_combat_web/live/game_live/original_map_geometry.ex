@@ -5,13 +5,15 @@ defmodule GlobalCombatWeb.GameLive.OriginalMapGeometry do
   `world_map/original_map_defs.html.heex` (the territory outlines, sea lanes and
   region borders as static SVG `<defs>`). Do not edit either by hand.
 
-  Everything is traced from the legacy `priv/static/maps/original/<tech>0.gif`
-  silhouettes placed at their `MapInfo.render_info/2` offsets, so the shapes and the
+  Everything is traced from the legacy ASP.NET project's `Web/wwwroot/maps/original/
+  <tech>0.gif` silhouettes (the LiveView app no longer ships those sprites) placed at
+  their `MapInfo.render_info/2` offsets, so the shapes and the
   800x480 coordinate space are exactly the sprite board's; only the rendering changes
   (vector fills styled by CSS instead of nine pre-colored GIFs per territory). Sea
-  lanes come from `MapInfo` adjacency — any two linked areas whose silhouettes do not
-  touch get a lane between their closest coast points (Alaska <-> Pevek wraps off
-  the board edges). Region borders are the traced union of each region's areas.
+  lanes come from `MapInfo` adjacency — any two linked areas whose silhouettes are
+  more than a few pixels apart get a lane between their closest coast points (Alaska
+  <-> Pevek wraps off the board edges). Region borders are the traced union of each
+  region's areas.
 
   A label anchor is the approximate pole of inaccessibility (last pixels to survive
   repeated erosion), so army counts land inside the widest part of a territory —

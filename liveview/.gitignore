@@ -36,5 +36,6 @@ npm-debug.log
 /assets/node_modules/
 
 
-# Python venv for scripts/trace_original_map.py (see OriginalMapGeometry @moduledoc)
+# Python venv for scripts/trace_original_map.py, the generator behind
+# GameLive.WorldMap (see OriginalMapGeometry @moduledoc)
 .venv/

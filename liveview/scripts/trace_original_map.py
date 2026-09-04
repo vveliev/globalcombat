@@ -3,7 +3,9 @@
 Usage (from liveview/): python3 -m venv .venv && .venv/bin/pip install pillow numpy
                         .venv/bin/python scripts/trace_original_map.py . && mix format
 
-Reads `<tech>0.gif` (black silhouette on transparency) for each of the 42 areas,
+Reads `<tech>0.gif` (black silhouette on transparency) for each of the 42 areas from the
+legacy ASP.NET project's `Web/wwwroot/maps/original/` (the LiveView app no longer ships those
+sprites — this script is the only consumer left),
 places it on the 800x480 board at the coordinates from MapInfo, and emits:
   - one SVG path per area (all islands, holes preserved, smoothed)
   - a label point per area (approximate pole of inaccessibility)
@@ -28,7 +30,7 @@ links = {int(n): [int(x) for x in l.split(',')] for n, _, _, l in topo}
 region_of = {int(n): int(r) for n, _, r, _ in topo}
 
 def mask_for(tech, x, y, w, h):
-    im = Image.open(f"{ROOT}/priv/static/maps/original/{tech}0.gif").convert("RGBA")
+    im = Image.open(f"{ROOT}/../Web/wwwroot/maps/original/{tech}0.gif").convert("RGBA")
     a = np.array(im)[:, :, 3] > 0
     if a.shape != (h, w):
         raise SystemExit(f"{tech}: gif {a.shape} != render {(h, w)}")
@@ -40,17 +42,17 @@ def mask_for(tech, x, y, w, h):
 def loops_from_mask(m):
     """Return list of closed loops (lists of (x,y) pixel-corner points), clockwise
     for outer boundaries, counter-clockwise for holes."""
-    P = np.pad(m, 1)
+    padded = np.pad(m, 1)
     edges = {}  # start -> list of ends
-    ys, xs = np.nonzero(P)
+    ys, xs = np.nonzero(padded)
     def add(a, b):
         edges.setdefault(a, []).append(b)
     for r, c in zip(ys, xs):
         x, y = c - 1, r - 1
-        if not P[r-1, c]: add((x, y), (x+1, y))       # top: left->right
-        if not P[r, c+1]: add((x+1, y), (x+1, y+1))   # right: top->bottom
-        if not P[r+1, c]: add((x+1, y+1), (x, y+1))   # bottom: right->left
-        if not P[r, c-1]: add((x, y+1), (x, y))       # left: bottom->top
+        if not padded[r-1, c]: add((x, y), (x+1, y))       # top: left->right
+        if not padded[r, c+1]: add((x+1, y), (x+1, y+1))   # right: top->bottom
+        if not padded[r+1, c]: add((x+1, y+1), (x, y+1))   # bottom: right->left
+        if not padded[r, c-1]: add((x, y+1), (x, y))       # left: bottom->top
     loops = []
     while edges:
         start = next(iter(edges))
@@ -143,17 +145,17 @@ def pole(m):
     last = cur
     while cur.any():
         last = cur
-        p = np.pad(cur, 1)
-        cur = p[1:-1,1:-1] & p[:-2,1:-1] & p[2:,1:-1] & p[1:-1,:-2] & p[1:-1,2:]
+        padded = np.pad(cur, 1)
+        cur = padded[1:-1,1:-1] & padded[:-2,1:-1] & padded[2:,1:-1] & padded[1:-1,:-2] & padded[1:-1,2:]
     ys, xs = np.nonzero(last)
     return (round(float(xs.mean()) + 0.5, 1), round(float(ys.mean()) + 0.5, 1))
 
 def dilate(m, r=1):
-    p = np.pad(m, r)
+    padded = np.pad(m, r)
     out = np.zeros_like(m)
     for dy in range(-r, r+1):
         for dx in range(-r, r+1):
-            out |= p[r+dy:r+dy+H, r+dx:r+dx+W]
+            out |= padded[r+dy:r+dy+H, r+dx:r+dx+W]
     return out
 
 def boundary_pts(m):
@@ -170,11 +172,14 @@ for n, tech, x, y, w, h in render:
     labels[n] = pole(m)
     print(f"{n:2d} {tech:12s} px={int(m.sum()):5d} pathlen={len(paths[n]):5d} label={labels[n]}", file=sys.stderr)
 
-# sea lanes
+# sea lanes. Silhouettes that share a land border in the artwork can still sit a few
+# pixels apart (anti-aliased coastlines), which would draw a 3-unit stub nobody can see
+# under the dash pattern; anything closer than MIN_LANE is treated as touching.
+MIN_LANE = 9
 lanes = []
 seen = set()
-for a, ls in links.items():
-    for b in ls:
+for a, neighbours in links.items():
+    for b in neighbours:
         key = tuple(sorted((a, b)))
         if key in seen: continue
         seen.add(key)
@@ -183,6 +188,8 @@ for a, ls in links.items():
         A, B = boundary_pts(masks[a]), boundary_pts(masks[b])
         d = np.hypot(A[:, None, 0] - B[None, :, 0], A[:, None, 1] - B[None, :, 1])
         i, j = np.unravel_index(np.argmin(d), d.shape)
+        if d[i, j] < MIN_LANE:
+            continue  # coastlines touch, bar a pixel of anti-aliasing
         if d[i, j] > 300:  # world wrap (Alaska <-> Pevek)
             la, lb = labels[a], labels[b]
             # each half runs from its own area's nearest edge point out to the board edge
@@ -198,11 +205,11 @@ for a, ls in links.items():
 print(f"sea lanes: {len(lanes)}", file=sys.stderr)
 
 regions = {}
-for r in sorted(set(region_of.values())):
-    u = np.zeros((H, W), bool)
-    for n, rr in region_of.items():
-        if rr == r: u |= masks[n]
-    regions[r] = trace(dilate(u, 1), min_area=20, eps=0.9, smooth=2)
+for region in sorted(set(region_of.values())):
+    union = np.zeros((H, W), bool)
+    for n, area_region in region_of.items():
+        if area_region == region: union |= masks[n]
+    regions[region] = trace(dilate(union, 1), min_area=20, eps=0.9, smooth=2)
 
 
 # ---------- emit the Elixir label module + the static HEEx <defs> ----------
@@ -217,13 +224,15 @@ lines.append("  `scripts/trace_original_map.py` together with its sibling")
 lines.append("  `world_map/original_map_defs.html.heex` (the territory outlines, sea lanes and")
 lines.append("  region borders as static SVG `<defs>`). Do not edit either by hand.")
 lines.append("")
-lines.append("  Everything is traced from the legacy `priv/static/maps/original/<tech>0.gif`")
-lines.append("  silhouettes placed at their `MapInfo.render_info/2` offsets, so the shapes and the")
+lines.append("  Everything is traced from the legacy ASP.NET project's `Web/wwwroot/maps/original/")
+lines.append("  <tech>0.gif` silhouettes (the LiveView app no longer ships those sprites) placed at")
+lines.append("  their `MapInfo.render_info/2` offsets, so the shapes and the")
 lines.append("  800x480 coordinate space are exactly the sprite board's; only the rendering changes")
 lines.append("  (vector fills styled by CSS instead of nine pre-colored GIFs per territory). Sea")
-lines.append("  lanes come from `MapInfo` adjacency — any two linked areas whose silhouettes do not")
-lines.append("  touch get a lane between their closest coast points (Alaska <-> Pevek wraps off")
-lines.append("  the board edges). Region borders are the traced union of each region's areas.")
+lines.append("  lanes come from `MapInfo` adjacency — any two linked areas whose silhouettes are")
+lines.append("  more than a few pixels apart get a lane between their closest coast points (Alaska")
+lines.append("  <-> Pevek wraps off the board edges). Region borders are the traced union of each")
+lines.append("  region's areas.")
 lines.append("")
 lines.append("  A label anchor is the approximate pole of inaccessibility (last pixels to survive")
 lines.append("  repeated erosion), so army counts land inside the widest part of a territory —")
@@ -269,9 +278,9 @@ h.append("  </pattern>")
 for n, tech, *_ in render:
     h.append(f'  <path id="gc-area-{int(n)}" data-tech-name="{tech}" d="{paths[int(n)]}" />')
 h.append('  <g id="gc-sea-lanes">')
-for l in lanes:
-    for (x1, y1), (x2, y2) in l["segments"]:
-        h.append(f'    <line data-lane="{l["from"]}-{l["to"]}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" />')
+for lane in lanes:
+    for (x1, y1), (x2, y2) in lane["segments"]:
+        h.append(f'    <line data-lane="{lane["from"]}-{lane["to"]}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" />')
 h.append("  </g>")
 h.append('  <g id="gc-region-outlines">')
 for r, p in regions.items():

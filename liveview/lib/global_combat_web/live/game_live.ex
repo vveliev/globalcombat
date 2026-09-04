@@ -487,7 +487,7 @@ defmodule GlobalCombatWeb.GameLive do
   defp board(assigns) do
     ~H"""
     <div class="flex flex-col gap-[var(--space-4)]">
-      <div :if={@view.map_name == :original} class="w-full max-w-[60rem]">
+      <div :if={WorldMap.supports?(@view.map_name)} class="w-full max-w-[60rem]">
         <WorldMap.world_map
           areas={@view.areas}
           players={@view.players}
@@ -496,7 +496,7 @@ defmodule GlobalCombatWeb.GameLive do
         />
       </div>
       <div
-        :if={@view.map_name != :original}
+        :if={!WorldMap.supports?(@view.map_name)}
         class="relative"
         style="width: 800px; height: 480px;"
       >
@@ -504,7 +504,7 @@ defmodule GlobalCombatWeb.GameLive do
           :for={area <- @view.areas}
           area={area}
           map_name={@view.map_name}
-          players={@view.players}
+          owner_names={WorldMap.owner_names(@view.players)}
           selected_area={@selected_area}
           target_area={@target_area}
         />
@@ -536,9 +536,9 @@ defmodule GlobalCombatWeb.GameLive do
 
   attr :area, :map, required: true
   attr :map_name, :atom, required: true
-  attr :players, :list, required: true
-  attr :selected_area, :any, required: true
-  attr :target_area, :any, required: true
+  attr :owner_names, :map, required: true
+  attr :selected_area, :integer, default: nil
+  attr :target_area, :integer, default: nil
 
   defp area(assigns) do
     ~H"""
@@ -558,10 +558,10 @@ defmodule GlobalCombatWeb.GameLive do
         ]}
       >
         <img
-          src={"/maps/#{@map_name}/#{@area.tech_name}#{owner_color(@area.owner_number)}.gif"}
+          src={"/maps/#{@map_name}/#{@area.tech_name}#{WorldMap.owner_slot(@area.owner_number)}.gif"}
           width={@area.width}
           height={@area.height}
-          alt={"#{@area.tech_name}, owned by #{owner_name(@players, @area.owner_number) || "unclaimed"}"}
+          alt={"#{@area.tech_name}, #{WorldMap.owner_phrase(@area, @owner_names)}"}
         />
       </button>
       <span
@@ -669,35 +669,12 @@ defmodule GlobalCombatWeb.GameLive do
     """
   end
 
-  # White text alone doesn't meet WCAG 1.4.3 against every owner_color/1
+  # White text alone doesn't meet WCAG 1.4.3 against every owner-slot
   # background — Player.GetColor()'s #FFE45F (owner 3) measures 1.27:1 and
   # #D45D00 (owner 4) measures 3.91:1 against white, both below the 4.5:1
   # (normal) / 3:1 (large) thresholds. The black outline above guarantees
   # legibility independent of tile color, including future map/color
   # additions (GIF-83).
-  defp owner_color(nil), do: 0
-  defp owner_color(number), do: rem(number, 9)
-
-  defp owner_name(_players, nil), do: nil
-
-  defp owner_name(players, owner_number) do
-    case Enum.find(players, &(&1.number == owner_number)) do
-      %{name: name} -> name
-      nil -> nil
-    end
-  end
-
-  # GIF-121: a fog-hidden area is neither "owned by <player>" nor genuinely
-  # "unclaimed" — collapsing both into "unclaimed" (as the sr-only table used
-  # to, matching the board's old identical-sprite bug) would make a fogged
-  # enemy tile indistinguishable from a real unowned one for a screen reader
-  # user in exactly the way the board sprite itself no longer is for a
-  # sighted one.
-  defp area_owner_text(_players, _owner_number, false), do: "hidden by fog of war"
-
-  defp area_owner_text(players, owner_number, true),
-    do: owner_name(players, owner_number) || "unclaimed"
-
   # Non-visual equivalent of the pixel-positioned board (GIF-81, WCAG 1.3.1): the
   # `<div>` above conveys territory/owner/army-count/adjacency purely through
   # image position and color, which is meaningless to a screen reader in DOM
@@ -706,20 +683,21 @@ defmodule GlobalCombatWeb.GameLive do
   # as an ordered, navigable structure instead — visually hidden, never
   # `aria-hidden`, so assistive tech can still read it.
   #
-  # Owner text goes through `area_owner_text/3` (GIF-121) so a fog-hidden area
-  # reports "hidden by fog of war" instead of "unclaimed" — matching area/1's
-  # alt text, which now gives a fog-hidden tile its own distinct visual instead
-  # of reusing the neutral/unclaimed sprite. Keeping this table's wording in
-  # sync means a screen reader user still gets exactly what a sighted player
-  # sees, no more and no less — just via the new distinction instead of the old
-  # collapsed one.
+  # Owner text goes through `WorldMap.owner_text/2` (GIF-121) — the same function
+  # that words the vector board's territory labels — so a fog-hidden area reports
+  # "hidden by fog of war" instead of "unclaimed" here exactly as it does there,
+  # and the two can never drift apart. A screen reader user still gets exactly
+  # what a sighted player sees, no more and no less.
   # Adjacency, unlike owner/armies, is static map topology every viewer already
   # sees rendered on the board regardless of fog, so it's listed in full.
   attr :areas, :list, required: true
   attr :players, :list, required: true
 
   defp board_table(assigns) do
-    assigns = assign(assigns, :area_names, Map.new(assigns.areas, &{&1.number, &1.name}))
+    assigns =
+      assigns
+      |> assign(:area_names, Map.new(assigns.areas, &{&1.number, &1.name}))
+      |> assign(:owner_names, WorldMap.owner_names(assigns.players))
 
     ~H"""
     <table class="sr-only">
@@ -735,7 +713,7 @@ defmodule GlobalCombatWeb.GameLive do
       <tbody>
         <tr :for={area <- @areas}>
           <th scope="row">{area.name}</th>
-          <td>{area_owner_text(@players, area.owner_number, area.visible)}</td>
+          <td>{WorldMap.owner_text(area, @owner_names)}</td>
           <td>{area.armies || "—"}</td>
           <td>{adjacent_names(area, @area_names)}</td>
         </tr>
@@ -764,9 +742,9 @@ defmodule GlobalCombatWeb.GameLive do
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class="flex items-center gap-[var(--space-2)]">
           <span
-            :if={@map_name == :original}
-            class="world-map-swatch"
-            data-owner={rem(p.number, 9)}
+            :if={WorldMap.supports?(@map_name)}
+            class="world-map-swatch world-map-owner"
+            data-owner={WorldMap.owner_slot(p.number)}
             aria-hidden="true"
           />
           <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>

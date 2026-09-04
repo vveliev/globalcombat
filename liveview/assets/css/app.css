@@ -170,10 +170,11 @@
    eight players plus "unclaimed"); the design-boutique semantic vocabulary
    deliberately has none (see BarChart's moduledoc), so these app-level
    `--map-*` tokens alias primitives directly, in the legacy Player.GetColor()
-   order (blue, green, yellow, orange, purple, grey, red, brown). Everything
-   else on the board reads semantic tokens. Army-count legibility on every
-   owner colour comes from the dark stroke under the count (GIF-83), not from
-   the fill, so the palette can change without a contrast re-audit. */
+   order (blue, green, yellow, orange, purple, grey, red, brown) — the decision
+   and its constraints are recorded in docs/adr/0003-map-owner-palette.md.
+   Everything else on the board reads semantic tokens. Army-count legibility on
+   every owner colour comes from the dark stroke under the count (GIF-83), not
+   from the fill, so the palette can change without a contrast re-audit. */
 :root {
   --map-sea: var(--gray-1);
   --map-fog-a: var(--stone-3);
@@ -189,6 +190,11 @@
   --map-owner-8: var(--orange-7);
 }
 
+/* design-boutique themes are named "<brand>-<mode>" (root.html.heex sets
+   e.g. "industry-dark"), so the mode is matched by suffix. Note the Tailwind
+   `dark` custom variant further up still matches the bare `[data-theme=dark]`
+   and therefore never fires against these names — a pre-existing mismatch
+   for the generated Mishka components, left alone here as out of scope. */
 [data-theme$="-dark"] {
   --map-sea: var(--gray-8);
   --map-fog-a: var(--stone-7);
@@ -196,13 +202,29 @@
   --map-owner-0: var(--stone-5);
 }
 
+/* One owner-slot ladder shared by everything coloured by owner (territory
+   fill, player-list legend dot): the slot sets `--map-owner-fill`, which the
+   specific element then paints with. */
+.world-map-owner[data-owner="1"] { --map-owner-fill: var(--map-owner-1); }
+.world-map-owner[data-owner="2"] { --map-owner-fill: var(--map-owner-2); }
+.world-map-owner[data-owner="3"] { --map-owner-fill: var(--map-owner-3); }
+.world-map-owner[data-owner="4"] { --map-owner-fill: var(--map-owner-4); }
+.world-map-owner[data-owner="5"] { --map-owner-fill: var(--map-owner-5); }
+.world-map-owner[data-owner="6"] { --map-owner-fill: var(--map-owner-6); }
+.world-map-owner[data-owner="7"] { --map-owner-fill: var(--map-owner-7); }
+.world-map-owner[data-owner="8"] { --map-owner-fill: var(--map-owner-8); }
+
+/* The board scales with its column but never below 40rem: army counts are
+   SVG user units and shrink with it, and 40rem keeps them at ~80% of their
+   full size on the narrowest layout; the GameLayout board slot scrolls. */
 .world-map {
   --map-ink: var(--color-text);
+  min-width: 40rem;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-panel, 0.625rem);
+  border-radius: var(--radius-panel);
   overflow: hidden;
   background: var(--map-sea);
-  box-shadow: var(--shadow-md, none);
+  box-shadow: var(--shadow-md);
 }
 
 .world-map svg {
@@ -248,7 +270,7 @@
 }
 
 .world-map-area {
-  fill: var(--map-owner-0);
+  fill: var(--map-owner-fill, var(--map-owner-0));
   stroke: var(--map-ink);
   stroke-opacity: 0.45;
   stroke-width: 0.8;
@@ -257,15 +279,6 @@
     fill 0.3s ease,
     filter 0.15s ease;
 }
-
-.world-map-territory[data-owner="1"] .world-map-area { fill: var(--map-owner-1); }
-.world-map-territory[data-owner="2"] .world-map-area { fill: var(--map-owner-2); }
-.world-map-territory[data-owner="3"] .world-map-area { fill: var(--map-owner-3); }
-.world-map-territory[data-owner="4"] .world-map-area { fill: var(--map-owner-4); }
-.world-map-territory[data-owner="5"] .world-map-area { fill: var(--map-owner-5); }
-.world-map-territory[data-owner="6"] .world-map-area { fill: var(--map-owner-6); }
-.world-map-territory[data-owner="7"] .world-map-area { fill: var(--map-owner-7); }
-.world-map-territory[data-owner="8"] .world-map-area { fill: var(--map-owner-8); }
 
 .world-map-territory[data-fog] .world-map-area {
   fill: url(#gc-fog);
@@ -312,13 +325,11 @@
    outline the sprite board used (WCAG 1.4.3, GIF-83). */
 .world-map-count {
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   fill: var(--white);
   stroke: var(--black);
   stroke-width: 2.5px;
-  stroke-linejoin: round;
-  paint-order: stroke;
   pointer-events: none;
   user-select: none;
 }
@@ -330,18 +341,9 @@
   height: 0.75rem;
   border-radius: 9999px;
   border: 1px solid var(--color-border);
-  background: var(--map-owner-0);
+  background: var(--map-owner-fill, var(--map-owner-0));
   flex: none;
 }
-
-.world-map-swatch[data-owner="1"] { background: var(--map-owner-1); }
-.world-map-swatch[data-owner="2"] { background: var(--map-owner-2); }
-.world-map-swatch[data-owner="3"] { background: var(--map-owner-3); }
-.world-map-swatch[data-owner="4"] { background: var(--map-owner-4); }
-.world-map-swatch[data-owner="5"] { background: var(--map-owner-5); }
-.world-map-swatch[data-owner="6"] { background: var(--map-owner-6); }
-.world-map-swatch[data-owner="7"] { background: var(--map-owner-7); }
-.world-map-swatch[data-owner="8"] { background: var(--map-owner-8); }
 
 @media (prefers-reduced-motion: reduce) {
   .world-map-area {
