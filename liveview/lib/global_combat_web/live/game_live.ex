@@ -66,8 +66,18 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp refresh_view(socket) do
     account_id = socket.assigns.current_account && socket.assigns.current_account.id
-    {status, view} = Games.player_view(socket.assigns.game_id, account_id)
-    assign(socket, status: status, view: view)
+
+    case Games.player_view(socket.assigns.game_id, account_id) do
+      {:error, :not_found} ->
+        # The lobby was deleted out from under this view — the last seat quit (port of
+        # `GameServer.KillGame`), so there is nothing left to render; send everyone home.
+        socket
+        |> put_flash(:info, "That game is no longer open.")
+        |> push_navigate(to: ~p"/")
+
+      {status, view} ->
+        assign(socket, status: status, view: view)
+    end
   end
 
   # --- realtime events (GlobalCombat.Games.PubSub) ------------------------
@@ -176,14 +186,10 @@ defmodule GlobalCombatWeb.GameLive do
     case require_account(socket) do
       {:ok, account} ->
         case Games.quit(socket.assigns.game_id, account.id) do
+          # A lobby emptied by this quit is deleted server-side, so refresh_view/1 itself
+          # navigates home; a mid-play quit just re-renders the board as eliminated.
           :ok ->
-            socket = refresh_view(socket)
-
-            if socket.assigns.status == :lobby and socket.assigns.view.players == [] do
-              {:noreply, push_navigate(socket, to: ~p"/")}
-            else
-              {:noreply, socket}
-            end
+            {:noreply, refresh_view(socket)}
 
           {:error, _reason} ->
             {:noreply, socket}
@@ -369,7 +375,7 @@ defmodule GlobalCombatWeb.GameLive do
     <.site_chrome current_account={@current_account}>
       <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
         <:status>
-          {status_line(assigns)}
+          <span id="game-status">{status_line(assigns)}</span>
         </:status>
 
         <:board>
@@ -442,9 +448,9 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp lobby(assigns) do
     ~H"""
-    <div class="flex flex-col gap-[var(--space-4)]">
+    <div id="lobby" class="flex flex-col gap-[var(--space-4)]">
       <h1 class="text-lg font-semibold">Game {@game_id}</h1>
-      <ul class="flex flex-col gap-[var(--space-2)]">
+      <ul id="lobby-players" class="flex flex-col gap-[var(--space-2)]">
         <li :for={p <- @view.players}>Player {p.number}: {p.name}</li>
       </ul>
       <div class="flex gap-[var(--space-3)]">
@@ -486,6 +492,7 @@ defmodule GlobalCombatWeb.GameLive do
   # `area/1` below, exactly as the legacy `Index.cshtml` did.
   defp board(assigns) do
     ~H"""
+    <.game_over :if={@view.ended} view={@view} />
     <div class="flex flex-col gap-[var(--space-4)]">
       <div :if={WorldMap.supports?(@view.map_name)} class="w-full max-w-[60rem]">
         <WorldMap.world_map
@@ -521,7 +528,7 @@ defmodule GlobalCombatWeb.GameLive do
       </div>
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
-    <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
+    <div :if={@view.viewer_number && !@view.ended} id="turn-controls" class="mt-[var(--space-4)]">
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
@@ -530,6 +537,55 @@ defmodule GlobalCombatWeb.GameLive do
       </Button.button>
     </div>
     """
+  end
+
+  # GIF-122: once `engine.ended` the board used to look exactly like a live turn — "Waiting on
+  # other players… [Force Turn]" with the outcome only visible as a small "place 1" next to a
+  # name in the roster. This is the explicit end-of-game state: a winner banner up top, the
+  # final standings, and the in-progress controls (End Turn / Force Turn / Quit) gone.
+  attr :view, :map, required: true
+
+  defp game_over(assigns) do
+    winner = Enum.find(assigns.view.players, &(&1.place == 1))
+    standings = assigns.view.players |> Enum.filter(&(&1.place > 0)) |> Enum.sort_by(& &1.place)
+
+    assigns =
+      assign(assigns,
+        winner: winner,
+        standings: standings,
+        outcome: viewer_outcome(assigns.view, winner)
+      )
+
+    ~H"""
+    <section
+      id="game-over"
+      role="status"
+      aria-live="polite"
+      class="mb-[var(--space-4)] rounded border border-divider p-[var(--space-4)] flex flex-col gap-[var(--space-2)]"
+    >
+      <h2 id="game-over-heading" class="text-lg font-semibold">
+        Game Over<span :if={@winner}> — {@winner.name} wins</span>
+      </h2>
+      <p :if={@outcome} id="game-over-outcome" class="text-text-muted">{@outcome}</p>
+      <ol
+        :if={@standings != []}
+        id="game-over-standings"
+        class="flex flex-wrap gap-[var(--space-3)] text-sm"
+      >
+        <li :for={p <- @standings}>{p.place}. {p.name}</li>
+      </ol>
+      <a id="game-over-home" href={~p"/"} class="hover:underline font-semibold">Back to Home</a>
+    </section>
+    """
+  end
+
+  # The viewer's own line under the banner; `nil` for a spectator.
+  defp viewer_outcome(view, winner) do
+    cond do
+      winner && winner.number == view.viewer_number -> "You win!"
+      me = my_player(view) -> "You finished in place #{me.place}."
+      true -> nil
+    end
   end
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
@@ -601,7 +657,7 @@ defmodule GlobalCombatWeb.GameLive do
     ~H"""
     <Card.card class="min-w-[16rem]">
       <:header>{order_panel_title(@mode, @target)}</:header>
-      <form phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
+      <form id="order-form" phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
         <Input.input
           id="order-amount"
           name="amount"

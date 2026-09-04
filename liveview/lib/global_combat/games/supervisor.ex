@@ -38,8 +38,8 @@ defmodule GlobalCombat.Games.Supervisor do
   time a player reaches it, instead of being permanently "not found" despite valid DB state.
 
   Returns `:ok` once a live process backs `game_id` (whether it was already alive or just
-  started), or `{:error, :not_found}` if there's nothing valid to rehydrate — no such row, a row
-  that's not `:active`, or an `:active` row with no `serialized` snapshot yet.
+  started), or `{:error, :not_found}` if there's nothing valid to rehydrate — no such row, a
+  `:finished` row, or a `:new`/`:active` row with no `serialized` snapshot yet.
   """
   def ensure_started(game_id) do
     if Server.alive?(game_id) do
@@ -49,8 +49,11 @@ defmodule GlobalCombat.Games.Supervisor do
     end
   end
 
-  defp start_if_rehydratable(%{status: :active, serialized: serialized} = game)
-       when not is_nil(serialized) do
+  # A `:new` row with a snapshot is a persisted lobby (`GlobalCombat.Games.Server` writes one on
+  # every roster change) and rehydrates the same way — `Server.init/1` branches on the
+  # snapshot's own `Started` flag, so this path doesn't need to know which it is.
+  defp start_if_rehydratable(%{status: status, serialized: serialized} = game)
+       when status in [:active, :new] and not is_nil(serialized) do
     case start_child(game) do
       {:ok, _pid} ->
         :ok

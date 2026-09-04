@@ -115,21 +115,17 @@ if config_env() == :prod do
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
 
-  # ## Configuring the mailer
+  # ## Mailer (docs/launch.md §2.3)
   #
-  # In production you need to configure the mailer to use a different adapter.
-  # Here is an example configuration for Mailgun:
-  #
-  #     config :global_combat, GlobalCombat.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
-  #
-  # Most non-SMTP adapters require an API client. Swoosh supports Req, Hackney,
-  # and Finch out-of-the-box. This configuration is typically done at
-  # compile-time in your config/prod.exs:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Req
-  #
-  # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
+  # Password reset and account notifications (`GlobalCombat.Accounts.Notifier`) go out through
+  # Mailgun when its credentials are present. `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` come from
+  # 1Password via the fleet's compose env, like `DATABASE_URL`/`SECRET_KEY_BASE` above;
+  # `MAILER_FROM` is the bare sender address (defaults to no-reply@ the Mailgun domain).
+  # Without a key the app boots on a log-only adapter and says so — see
+  # `GlobalCombat.MailerConfig` for why that is not `Swoosh.Adapters.Local` in prod.
+  # `config :swoosh, api_client: Swoosh.ApiClient.Req` is already set in config/prod.exs.
+  mailer = GlobalCombat.MailerConfig.from_env(System.get_env())
+  if mailer.warning, do: IO.warn(mailer.warning)
+  config :global_combat, GlobalCombat.Mailer, mailer.mailer
+  config :global_combat, :mailer_from, mailer.from
 end

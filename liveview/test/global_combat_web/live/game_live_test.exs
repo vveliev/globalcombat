@@ -11,6 +11,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
   use GlobalCombatWeb.ConnCase, async: true
 
   import GlobalCombat.AccountsFixtures
+  import GlobalCombat.GamesTestHelpers
 
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.PubSub, as: GamePubSub
@@ -65,6 +66,49 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
     assert wait_for(alice_view, "Turn 2") =~ "Turn 2"
     assert wait_for(bob_view, "Turn 2") =~ "Turn 2"
+  end
+
+  describe "end of game (GIF-122)" do
+    test "a finished game shows a Game Over banner naming the winner and drops the in-progress controls",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view, bob_view: bob_view} =
+        start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, "#turn-controls button", "End Turn")
+      assert has_element?(alice_view, "#turn-controls button", "Force Turn")
+      refute has_element?(alice_view, "#game-over")
+
+      # Bob quitting mid-play eliminates him, which ends a two-player game with Alice in place 1.
+      # quit/2 is a call, and the :reload broadcast is sent before it replies, so syncing each
+      # LiveView's mailbox is enough — no polling.
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      assert has_element?(alice_view, "#game-over-heading", "Game Over — Alice wins")
+      assert has_element?(alice_view, "#game-over-outcome", "You win!")
+      assert has_element?(alice_view, "#game-over-standings li", "1. Alice")
+      assert has_element?(alice_view, "#game-over-standings li", "2. Bob")
+      assert has_element?(alice_view, "#game-over-home")
+      refute has_element?(alice_view, "#turn-controls")
+      refute has_element?(alice_view, "button", "End Turn")
+      refute has_element?(alice_view, "button", "Force Turn")
+
+      assert has_element?(bob_view, "#game-over-outcome", "You finished in place 2.")
+      refute has_element?(bob_view, "button", "Force Turn")
+    end
+
+    test "a spectator sees the banner without a personal outcome line", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{game_id: game_id, bob: bob} = start_two_player_game(conn1, conn2)
+      :ok = Games.quit(game_id, bob.id)
+
+      {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+      assert has_element?(spectator, "#game-over-heading", "Game Over — Alice wins")
+      refute has_element?(spectator, "#game-over-outcome")
+    end
   end
 
   test "the lobby renders a just-joined player without crashing (GIF-94 regression)", %{
@@ -683,6 +727,27 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       render_click(view, "quit")
       assert_redirect(view, "/")
+    end
+
+    test "a spectator of a lobby whose last player quits is sent home too, not crashed", %{
+      conn: conn
+    } do
+      alice = account_fixture(%{"name" => "Alice"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+      assert has_element?(spectator, "#lobby-players li", "Player 1: Alice")
+
+      {:ok, alice_view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+      render_click(alice_view, "quit")
+      assert_redirect(alice_view, "/")
+
+      # The lobby row is gone (port of KillGame); the spectator's :reload finds no game and is
+      # navigated home instead of hitting a dead process.
+      assert_redirect(spectator, "/")
+      assert GlobalCombat.Games.get_game(game_id) == nil
     end
 
     test "a player quitting mid-play is eliminated live, and can no longer quit again", %{
