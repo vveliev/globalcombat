@@ -487,31 +487,17 @@ defmodule GlobalCombatWeb.GameLive do
     """
   end
 
-  # The `:original` world map is a responsive SVG (`WorldMap`); `:elements` still
-  # composites its per-owner GIF sprites at fixed 800x480 pixel offsets via
-  # `area/1` below, exactly as the legacy `Index.cshtml` did.
+  # Every map is a responsive SVG (`WorldMap`) — the legacy per-owner GIF
+  # sprites `Index.cshtml` composited at fixed pixel offsets are gone.
   defp board(assigns) do
     ~H"""
     <.game_over :if={@view.ended} view={@view} />
     <div class="flex flex-col gap-[var(--space-4)]">
-      <div :if={WorldMap.supports?(@view.map_name)} class="w-full max-w-[60rem]">
+      <div class="w-full max-w-[60rem]">
         <WorldMap.world_map
+          map_name={@view.map_name}
           areas={@view.areas}
           players={@view.players}
-          selected_area={@selected_area}
-          target_area={@target_area}
-        />
-      </div>
-      <div
-        :if={!WorldMap.supports?(@view.map_name)}
-        class="relative"
-        style="width: 800px; height: 480px;"
-      >
-        <.area
-          :for={area <- @view.areas}
-          area={area}
-          map_name={@view.map_name}
-          owner_names={WorldMap.owner_names(@view.players)}
           selected_area={@selected_area}
           target_area={@target_area}
         />
@@ -589,53 +575,6 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
-
-  attr :area, :map, required: true
-  attr :map_name, :atom, required: true
-  attr :owner_names, :map, required: true
-  attr :selected_area, :integer, default: nil
-  attr :target_area, :integer, default: nil
-
-  defp area(assigns) do
-    ~H"""
-    <span style={"position: absolute; left: #{@area.x}px; top: #{@area.y}px; width: #{@area.width}px; height: #{@area.height}px;"}>
-      <button
-        :if={@area.visible}
-        type="button"
-        phx-click="select_area"
-        phx-value-area={@area.number}
-        aria-pressed={@area.number == @selected_area or @area.number == @target_area}
-        class={[
-          "block appearance-none border-0 bg-transparent p-0 m-0 cursor-pointer",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
-          @area.number == @selected_area &&
-            "outline outline-2 outline-offset-2 outline-focus-ring",
-          @area.number == @target_area && "outline outline-2 outline-offset-2 outline-danger"
-        ]}
-      >
-        <img
-          src={"/maps/#{@map_name}/#{@area.tech_name}#{WorldMap.owner_slot(@area.owner_number)}.gif"}
-          width={@area.width}
-          height={@area.height}
-          alt={"#{@area.tech_name}, #{WorldMap.owner_phrase(@area, @owner_names)}"}
-        />
-      </button>
-      <span
-        :if={!@area.visible}
-        role="img"
-        aria-label={"#{@area.tech_name}, hidden by fog of war"}
-        class="block h-full w-full"
-        style="background-image: repeating-linear-gradient(45deg, #000 0, #000 6px, #262626 6px, #262626 12px);"
-      ></span>
-      <span
-        :if={@area.armies}
-        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white font-bold [text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000] pointer-events-none"
-      >
-        {@area.armies}
-      </span>
-    </span>
-    """
-  end
 
   # GIF-111's order-composition panel — LiveView equivalent of `Main.js`'s
   # `EntryForm`/`ActionMessage`/`AmountInput`/`ActionSubmit`. `:assign` (no target
@@ -790,7 +729,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   attr :map_name, :atom,
     default: nil,
-    doc: "the game's map, once known — the world map's player colours get a legend dot"
+    doc: "the game's map, once known — in play each player's board colour gets a legend dot"
 
   defp player_list(assigns) do
     ~H"""
@@ -798,7 +737,7 @@ defmodule GlobalCombatWeb.GameLive do
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class="flex items-center gap-[var(--space-2)]">
           <span
-            :if={WorldMap.supports?(@map_name)}
+            :if={@map_name}
             class="world-map-swatch world-map-owner"
             data-owner={WorldMap.owner_slot(p.number)}
             aria-hidden="true"

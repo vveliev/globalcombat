@@ -603,6 +603,34 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  describe "elements map board" do
+    test "an :elements game renders the same SVG board with per-element textures instead of sprites",
+         %{conn: conn1} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 2, map_name: :elements})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      {:ok, alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      # Same WorldMap component, keyed by map: the board announces itself as the
+      # elements map, uses the elements defs (its own cropped viewBox), and every
+      # element territory carries a data-element the CSS textures hang off. Fire
+      # Corner (area 1) is fire; Smoke Bridge (area 5) belongs to no element.
+      assert has_element?(alice_view, ~s(.world-map[data-map="elements"]))
+      assert has_element?(alice_view, ~s(g#territory-1[data-element="fire"]))
+      assert has_element?(alice_view, ~s(g#territory-1 use.world-map-texture))
+      refute has_element?(alice_view, ~s(g#territory-5[data-element]))
+      assert has_element?(alice_view, ~s(g#territory-38[data-element="earth"]))
+
+      # No sprite <img> survives for either map.
+      refute html =~ ~r/<img[^>]*src="\/maps\//
+    end
+  end
+
   describe "Invite/Quit/Kick (GIF-114)" do
     test "a seated player inviting an existing account by name lands it on the invitee's pending invites",
          %{conn: conn} do

@@ -48,9 +48,11 @@ elsewhere in the system.
 - Contrast is not the palette's job: army counts sit on a dark stroke under a light
   fill (`paint-order: stroke`, GIF-83), so any owner colour stays legible and the
   palette can change without a contrast re-audit. Territory fills are not text.
-- The `dark` Tailwind custom variant in `app.css` still matches the bare
-  `[data-theme=dark]`, which the `<brand>-<mode>` theme names never satisfy; the map
-  tokens use the suffix match instead. Fixing the variant would switch on dark styles
-  in the generated Mishka components for the first time and is left as separate work.
+- The `dark` Tailwind custom variant in `app.css` used to match the bare
+  `[data-theme=dark]`, which the `<brand>-<mode>` theme names never satisfy; it now
+  matches the same `-dark` suffix the map tokens do. The only `dark:` utilities in the
+  codebase sit in the generated Mishka `modal`/`native_select` colour branches
+  (`primary`/`success`/...) that the boutique wrappers never select (they keep the
+  `natural` default), so nothing changed visibly — but the variant is no longer a trap.
 - If the boutique vocabulary ever gains a categorical/chart palette, the `--map-owner-N`
   aliases should be re-pointed at it and this ADR superseded.
