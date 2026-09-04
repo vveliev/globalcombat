@@ -106,7 +106,10 @@
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
 
 /* Use the data attribute for dark mode  */
-@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+/* design-boutique themes are named "<brand>-<mode>" (root.html.heex sets e.g.
+   "industry-dark"), so the mode is matched by suffix — a bare [data-theme=dark]
+   would never fire. */
+@custom-variant dark (&:where([data-theme$="-dark"], [data-theme$="-dark"] *));
 
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
@@ -165,7 +168,7 @@
   font-size: inherit;
 }
 
-/* World map board (GameLive.WorldMap) — the :original map's SVG territories.
+/* Map board (GameLive.WorldMap) — every map's SVG territories.
    Owner fills are the one place this app needs a categorical palette (up to
    eight players plus "unclaimed"); the design-boutique semantic vocabulary
    deliberately has none (see BarChart's moduledoc), so these app-level
@@ -190,11 +193,6 @@
   --map-owner-8: var(--orange-7);
 }
 
-/* design-boutique themes are named "<brand>-<mode>" (root.html.heex sets
-   e.g. "industry-dark"), so the mode is matched by suffix. Note the Tailwind
-   `dark` custom variant further up still matches the bare `[data-theme=dark]`
-   and therefore never fires against these names — a pre-existing mismatch
-   for the generated Mishka components, left alone here as out of scope. */
 [data-theme$="-dark"] {
   --map-sea: var(--gray-8);
   --map-fog-a: var(--stone-7);
@@ -232,6 +230,12 @@
   color: var(--map-ink);
 }
 
+/* The elements board is nearly square; at the world map's full width it would
+   run taller than most viewports. */
+.world-map[data-map="elements"] {
+  max-width: 44rem;
+}
+
 .world-map-sea {
   fill: var(--map-sea);
 }
@@ -240,7 +244,9 @@
   fill: url(#gc-sea-hatch);
 }
 
-.world-map-lanes {
+/* Links between territories that don't touch: sea lanes on the world map, the
+   arrow routes between corners on elements. */
+.world-map-links {
   fill: none;
   stroke: var(--map-ink);
   stroke-opacity: 0.5;
@@ -283,6 +289,23 @@
 .world-map-territory[data-fog] .world-map-area {
   fill: url(#gc-fog);
   stroke-opacity: 0.25;
+}
+
+/* Elements map: a per-element texture over the owner fill (patterns in
+   elements_map_defs.html.heex draw with currentColor = the board ink). */
+.world-map-texture {
+  color: var(--map-ink);
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.world-map-territory[data-element="fire"] .world-map-texture { fill: url(#gc-tex-fire); }
+.world-map-territory[data-element="water"] .world-map-texture { fill: url(#gc-tex-water); }
+.world-map-territory[data-element="wind"] .world-map-texture { fill: url(#gc-tex-wind); }
+.world-map-territory[data-element="earth"] .world-map-texture { fill: url(#gc-tex-earth); }
+
+.world-map-territory:hover .world-map-texture {
+  opacity: 0.4;
 }
 
 .world-map-territory:hover .world-map-area {
