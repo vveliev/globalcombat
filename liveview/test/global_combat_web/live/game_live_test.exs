@@ -161,7 +161,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
   end
 
-  test "each territory's img carries alt text naming the area and its owner (WCAG 1.1.1, GIF-79)",
+  test "each territory carries an accessible name giving the area, its owner and its armies (WCAG 1.1.1, GIF-79)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
 
@@ -174,7 +174,11 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
     html = render(alice_view)
 
-    assert html =~ "alt=\"#{owned_by_alice.tech_name}, owned by Alice\""
+    # The SVG board's territory is a role="button" group (SVG has no <button>),
+    # so the name lives in aria-label rather than an <img alt>; it uses the
+    # display name ("South Africa"), not the sprite tech_name ("southAfrica").
+    assert html =~
+             ~r/<g[^>]*id="territory-#{owned_by_alice.number}"[^>]*role="button"[^>]*aria-label="#{Regex.escape(owned_by_alice.name)}, owned by Alice, \d+ (army|armies)"/
   end
 
   test "the status strip and chat log are wired as polite live regions (WCAG 4.1.3, GIF-80)",
@@ -241,25 +245,26 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ neighbor_name
   end
 
-  test "army-count overlays carry a dark outline independent of the owner_color tile (WCAG 1.4.3, GIF-83)",
+  test "army-count overlays carry a dark outline independent of the owner colour (WCAG 1.4.3, GIF-83)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
 
     html = render(alice_view)
 
-    # text-white alone measures 1.27:1 against owner_color 3 (#FFE45F) and
-    # 3.91:1 against owner_color 4 (#D45D00) -- both below WCAG thresholds.
-    # The outline is background-color-independent by construction, so any
-    # rendered army-count span having it is sufficient evidence (no need to
-    # force a specific owner_color onto a territory here).
-    #
-    # `pointer-events-none` (GIF-111) keeps this overlay from stealing clicks
-    # meant for the territory's `select_area` button underneath it -- without
-    # it, clicking the army-count digits (often dead center of the territory)
-    # would silently do nothing.
-    assert html =~
-             ~r/class="absolute top-1\/2 left-1\/2 -translate-x-1\/2 -translate-y-1\/2 text-white font-bold \[text-shadow:-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000,1px_1px_0_#000\] pointer-events-none"/
+    # A light number alone fails contrast on the yellow and orange owner fills.
+    # On the SVG board the outline is `.world-map-count`'s dark stroke painted
+    # under the glyphs (`paint-order: stroke`), which is background-independent
+    # by construction — so any rendered count carrying that class, plus the
+    # stylesheet actually defining the rule, is sufficient evidence. The counts
+    # live in a `pointer-events: none` layer above the territories (GIF-111), so
+    # clicking the digits still selects the territory underneath.
+    assert html =~ ~r/<text[^>]*class="world-map-count"/
+
+    css = File.read!("assets/css/app.css")
+    assert css =~ ~r/\.world-map-count \{[^}]*paint-order: stroke;[^}]*\}/s
+    assert css =~ ~r/\.world-map-count \{[^}]*stroke: var\(--black\);[^}]*\}/s
+    assert css =~ ~r/\.world-map-count \{[^}]*pointer-events: none;[^}]*\}/s
   end
 
   test "the board shows a Region Bonuses panel listing every continent's control bonus (GIF-103)",
@@ -297,6 +302,30 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert html =~ "Assign new armies or select a target area"
       assert html =~ ~r/<input[^>]*name="amount"[^>]*value="25"/
+    end
+
+    test "selecting an area marks its territory pressed and draws the highlight outline above the board",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      html = render_click(alice_view, "select_area", %{"area" => "1"})
+
+      # The SVG board's territory is a role="button" <g>; its selected state is
+      # both announced (aria-pressed) and drawn as a second <use> of the same
+      # outline in the highlights layer, painted above every neighbour so the
+      # selected coastline is never half-covered by the territory drawn after it.
+      assert html =~ ~r/<g[^>]*id="territory-1"[^>]*aria-pressed="true"/
+
+      assert html =~
+               ~r/<use[^>]*href="#gc-area-1"[^>]*class="world-map-highlight world-map-highlight--selected"/
+
+      html = render_click(alice_view, "select_area", %{"area" => "2"})
+
+      assert html =~ ~r/<g[^>]*id="territory-2"[^>]*aria-pressed="true"/
+
+      assert html =~
+               ~r/<use[^>]*href="#gc-area-2"[^>]*class="world-map-highlight world-map-highlight--target"/
     end
 
     test "clicking an enemy territory first does nothing (no panel, matching .NET hiding the click for a non-owner)",
@@ -460,25 +489,29 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       {:ok, alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
 
-      # The true owner's color-suffixed sprite for this area must never appear anywhere
-      # in Alice's rendered markup, on first render or after a reload — this is
+      # The true owner's colour slot for this area must never appear anywhere in
+      # Alice's rendered markup, on first render or after a reload — this is
       # GameLive's whole reason for going through GlobalCombat.Games.PlayerView instead
-      # of assigning canonical state.
-      true_sprite = "#{hidden_area.tech_name}#{rem(true_owner, 9)}.gif"
-      refute html =~ true_sprite
-      refute render(alice_view) =~ true_sprite
+      # of assigning canonical state. On the SVG board the owner reaches the markup
+      # only as the territory's `data-owner` slot (the CSS fill hangs off it), so a
+      # fogged territory must carry no `data-owner` at all.
+      territory = ~r/<g[^>]*id="territory-#{hidden_area_number}"[^>]*>/
+      assert [territory_tag] = Regex.run(territory, html)
+      refute territory_tag =~ "data-owner="
+      assert territory_tag =~ "data-fog"
+      assert [territory_tag_after_reload] = Regex.run(territory, render(alice_view))
+      refute territory_tag_after_reload =~ "data-owner="
 
-      # Same leak, via the alt/label text (GIF-79): a hidden area's owner name must
+      # Same leak, via the accessible name (GIF-79): a hidden area's owner name must
       # never reach a non-owner's markup either, even though the plain-text owner
       # name is a much easier thing to accidentally source from unfiltered state
-      # than the sprite filename is. GIF-121: a fogged area no longer reuses the
-      # neutral/unclaimed "owned by unclaimed" wording (and no <img> at all) — it
-      # gets its own distinct "hidden by fog of war" treatment so it can't be
-      # mistaken for a genuinely-unclaimed tile.
+      # than a colour slot is. GIF-121: a fogged area no longer reuses the
+      # neutral/unclaimed "unclaimed" wording — it gets its own distinct "hidden by
+      # fog of war" treatment so it can't be mistaken for a genuinely-unclaimed tile.
       true_owner_name = Enum.find(alice_state.players, &(&1.number == true_owner)).name
-      refute html =~ "alt=\"#{hidden_area.tech_name}, owned by #{true_owner_name}\""
-      refute html =~ "alt=\"#{hidden_area.tech_name}, owned by unclaimed\""
-      assert html =~ "aria-label=\"#{hidden_area.tech_name}, hidden by fog of war\""
+      refute html =~ "aria-label=\"#{hidden_area.name}, owned by #{true_owner_name}"
+      refute html =~ "aria-label=\"#{hidden_area.name}, unclaimed"
+      assert html =~ "aria-label=\"#{hidden_area.name}, hidden by fog of war\""
 
       # Same leak, via the sr-only board table (GIF-81): the hidden area's row must
       # report "hidden by fog of war", never the true owner's name/army count nor
@@ -518,11 +551,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       {:ok, _alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
 
-      # A fogged tile renders no owner_color(_) sprite at all — not even the "0"
-      # neutral/unclaimed one every genuinely-unowned area (and every unowned area
-      # would-be-visible-but-untouched) still uses.
-      neutral_sprite = "#{hidden_area.tech_name}0.gif"
-      refute html =~ neutral_sprite
+      # A fogged territory renders no owner colour slot at all — not even the "0"
+      # neutral/unclaimed one every genuinely-unowned (visible) area uses — and is
+      # instead marked `data-fog`, which the stylesheet turns into the hatch fill.
+      assert [territory_tag] =
+               Regex.run(~r/<g[^>]*id="territory-#{hidden_area_number}"[^>]*>/, html)
+
+      refute territory_tag =~ ~s(data-owner="0")
+      assert territory_tag =~ "data-fog"
     end
   end
 

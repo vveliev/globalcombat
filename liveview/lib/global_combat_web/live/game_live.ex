@@ -30,6 +30,7 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.Components.Boutique.Input
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
   alias GlobalCombatWeb.Components.Boutique.StatusPill
+  alias GlobalCombatWeb.GameLive.WorldMap
 
   @impl true
   def mount(%{"id" => id_param}, _session, socket) do
@@ -382,7 +383,12 @@ defmodule GlobalCombatWeb.GameLive do
         </:board>
 
         <:players>
-          <.player_list players={@view.players} viewer_number={@view.viewer_number} status={@status} />
+          <.player_list
+            players={@view.players}
+            viewer_number={@view.viewer_number}
+            status={@status}
+            map_name={Map.get(@view, :map_name)}
+          />
           <.chat
             messages={Map.get(@view, :messages, [])}
             chat_text={@chat_text}
@@ -475,10 +481,25 @@ defmodule GlobalCombatWeb.GameLive do
     """
   end
 
+  # The `:original` world map is a responsive SVG (`WorldMap`); `:elements` still
+  # composites its per-owner GIF sprites at fixed 800x480 pixel offsets via
+  # `area/1` below, exactly as the legacy `Index.cshtml` did.
   defp board(assigns) do
     ~H"""
-    <div class="flex flex-wrap items-start gap-[var(--space-4)]">
-      <div class="relative" style="width: 800px; height: 480px;">
+    <div class="flex flex-col gap-[var(--space-4)]">
+      <div :if={@view.map_name == :original} class="w-full max-w-[60rem]">
+        <WorldMap.world_map
+          areas={@view.areas}
+          players={@view.players}
+          selected_area={@selected_area}
+          target_area={@target_area}
+        />
+      </div>
+      <div
+        :if={@view.map_name != :original}
+        class="relative"
+        style="width: 800px; height: 480px;"
+      >
         <.area
           :for={area <- @view.areas}
           area={area}
@@ -488,14 +509,16 @@ defmodule GlobalCombatWeb.GameLive do
           target_area={@target_area}
         />
       </div>
-      <.region_bonuses map_name={@view.map_name} />
-      <.order_panel
-        :if={@selected_area}
-        view={@view}
-        selected_area={@selected_area}
-        target_area={@target_area}
-        order_amount={@order_amount}
-      />
+      <div class="flex flex-wrap items-start gap-[var(--space-4)]">
+        <.region_bonuses map_name={@view.map_name} />
+        <.order_panel
+          :if={@selected_area}
+          view={@view}
+          selected_area={@selected_area}
+          target_area={@target_area}
+          order_amount={@order_amount}
+        />
+      </div>
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
     <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
@@ -731,11 +754,23 @@ defmodule GlobalCombatWeb.GameLive do
   attr :viewer_number, :any, required: true
   attr :status, :atom, required: true
 
+  attr :map_name, :atom,
+    default: nil,
+    doc: "the game's map, once known — the world map's player colours get a legend dot"
+
   defp player_list(assigns) do
     ~H"""
     <ul aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
-        <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
+        <span class="flex items-center gap-[var(--space-2)]">
+          <span
+            :if={@map_name == :original}
+            class="world-map-swatch"
+            data-owner={rem(p.number, 9)}
+            aria-hidden="true"
+          />
+          <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
+        </span>
         <span class="flex items-center gap-[var(--space-2)]">
           <span :if={!p.eliminated && p.armies} class="text-text-muted">
             {p.armies} ({p.areas})
