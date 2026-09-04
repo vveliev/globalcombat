@@ -13,6 +13,11 @@
 # default 172.16/12 pool entirely — that pool hands out /16s in allocation
 # order, so an unpinned project can silently take a range we depend on.
 
+# Pinned so every checkout (main, worktrees, CI) shares one compose project: the
+# 10.114.0.0/24 subnet below can only exist once per Docker host, so a second
+# project name from a different directory fails with "Pool overlaps with other one".
+name: globalcombat
+
 services:
   mysql:
     image: mysql:8.0
