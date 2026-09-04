@@ -244,6 +244,38 @@ defmodule GlobalCombat.Games.Server do
   # comparison would notice, never a production player.
   defp rehydrated_state(opts, serialized) do
     wire = GrpcHost.Game.decode(serialized)
+
+    if Wire.started?(wire) do
+      rehydrated_playing_state(opts, wire)
+    else
+      rehydrated_lobby_state(opts, wire)
+    end
+  end
+
+  # A lobby that was persisted on its last roster change (`persist_lobby/1`) comes back as a
+  # `:lobby` with the same seats, pending invites and ruleset — so a dev-server restart or a
+  # deploy no longer strands every open game as "Game not found" / "0/ players" on Home.
+  defp rehydrated_lobby_state(opts, wire) do
+    lobby = Wire.from_wire_lobby(wire)
+
+    %__MODULE__{
+      game_id: Keyword.fetch!(opts, :game_id),
+      map_name: lobby.map_name,
+      is_fogged: lobby.is_fogged,
+      is_training: lobby.is_training,
+      is_non_random: lobby.is_non_random,
+      reverse_attack_order: lobby.reverse_attack_order,
+      minimum_armies: lobby.minimum_armies,
+      max_players: lobby.max_players,
+      turn_length_minutes: Keyword.fetch!(opts, :turn_length_minutes),
+      is_private: lobby.is_private,
+      status: :lobby,
+      players: lobby.players,
+      invites: lobby.invites
+    }
+  end
+
+  defp rehydrated_playing_state(opts, wire) do
     rng = DotnetRandom.new(:erlang.unique_integer())
 
     %{engine: engine, is_fogged: is_fogged, max_players: max_players} =
@@ -331,9 +363,16 @@ defmodule GlobalCombat.Games.Server do
       true ->
         number = length(state.players) + 1
         players = state.players ++ [{number, %{account_id: account_id, name: name}}]
+        # Only touch the invite row when this seat actually had one: an unconditional
+        # `DELETE ... WHERE` for a row that doesn't exist takes an InnoDB gap lock on the
+        # `(account_id, game_id)` index, which deadlocks against the seat insert below under
+        # concurrent transactions (seen as MyXQL 1213 across async tests).
+        invited? = Enum.any?(state.invites, &(&1.account_id == account_id))
         invites = Enum.reject(state.invites, &(&1.account_id == account_id))
-        GamesDb.clear_invite(state.game_id, account_id)
+        if invited?, do: GamesDb.clear_invite(state.game_id, account_id)
+        :ok = GamesDb.seat(state.game_id, account_id)
         state = %{state | players: players, invites: invites}
+        persist_lobby(state)
         GamePubSub.broadcast_reload(state.game_id)
         {:reply, {:ok, number}, state}
     end
@@ -363,8 +402,20 @@ defmodule GlobalCombat.Games.Server do
       number ->
         players = renumber_players(Enum.reject(state.players, fn {n, _p} -> n == number end))
         state = %{state | players: players}
-        GamePubSub.broadcast_reload(state.game_id)
-        {:reply, :ok, state}
+        GamesDb.unseat(state.game_id, account_id)
+
+        if players == [] do
+          # Port of `GameServer.PlayerUnjoined`'s `if (game.Players.Count <= 0) KillGame(...)`:
+          # an emptied lobby is deleted outright rather than left as a joinable-looking row.
+          # `:normal` keeps the `:transient` child from being restarted by the supervisor.
+          GamesDb.delete_game(state.game_id)
+          GamePubSub.broadcast_reload(state.game_id)
+          {:stop, :normal, :ok, state}
+        else
+          persist_lobby(state)
+          GamePubSub.broadcast_reload(state.game_id)
+          {:reply, :ok, state}
+        end
     end
   end
 
@@ -391,10 +442,14 @@ defmodule GlobalCombat.Games.Server do
         {:reply, {:error, :not_found}, state}
 
       true ->
+        {^player_number, kicked} = Enum.find(state.players, fn {n, _p} -> n == player_number end)
+
         players =
           renumber_players(Enum.reject(state.players, fn {n, _p} -> n == player_number end))
 
         state = %{state | players: players}
+        GamesDb.unseat(state.game_id, kicked.account_id)
+        persist_lobby(state)
         GamePubSub.broadcast_reload(state.game_id)
         {:reply, :ok, state}
     end
@@ -598,6 +653,7 @@ defmodule GlobalCombat.Games.Server do
             {:ok, _} = GamesDb.invite(state.game_id, invitee.id)
             invites = state.invites ++ [%{account_id: invitee.id, name: invitee.name}]
             state = %{state | invites: invites}
+            persist_lobby(state)
 
             GamePubSub.broadcast_notification(
               invitee.id,
@@ -866,6 +922,31 @@ defmodule GlobalCombat.Games.Server do
   end
 
   defp find_winner(engine), do: Engine.players_in_order(engine) |> Enum.find(&(&1.place == 1))
+
+  # Lobby counterpart of `persist_snapshot/1`: written on every roster/invite change so the
+  # `:new` row can be rehydrated by `GlobalCombat.Games.Supervisor.ensure_started/1` after this
+  # process dies — the original called `SaveGame` from `PlayerJoined`/`PlayerInvited` for the
+  # same reason. Also what makes `GlobalCombat.Games.GameSummary` render a real "n/m players"
+  # on Home instead of "0/ players" for a lobby.
+  defp persist_lobby(%{status: :lobby} = state) do
+    wire =
+      Wire.to_wire_lobby(
+        game_id: state.game_id,
+        map_name: state.map_name,
+        turn_length_minutes: state.turn_length_minutes,
+        max_players: state.max_players,
+        is_fogged: state.is_fogged,
+        is_non_random: state.is_non_random,
+        reverse_attack_order: state.reverse_attack_order,
+        minimum_armies: state.minimum_armies,
+        is_private: state.is_private,
+        is_training: state.is_training,
+        players: state.players,
+        invites: state.invites
+      )
+
+    GamesDb.persist_serialized(state.game_id, GrpcHost.Game.encode(wire))
+  end
 
   defp persist_snapshot(state) do
     wire =

@@ -349,14 +349,25 @@ defmodule GlobalCombat.Games.LiveTest do
       assert view.turn == 2
     end
 
-    test "a game with no Server and no persisted state (never started) still reports not found" do
+    test "a game with no Server and no persisted state (created, never joined) still reports not found" do
+      # A lobby is snapshotted on its first join (see LobbyPersistenceTest), so the only row with
+      # nothing to rehydrate from is one nobody ever joined.
       game_id = Games.create_game(%{max_players: 3})
-      Games.join(game_id, 101, "Alice")
 
       kill_server!(game_id)
 
       refute Games.game_exists?(game_id)
       assert {:error, :not_found} = Games.player_view(game_id, 101)
+    end
+
+    test "a joined-but-unstarted lobby rehydrates as a lobby, not as not found" do
+      game_id = Games.create_game(%{max_players: 3})
+      Games.join(game_id, 101, "Alice")
+
+      kill_server!(game_id)
+
+      assert Games.game_exists?(game_id)
+      assert {:lobby, %{players: [%{name: "Alice"}]}} = Games.player_view(game_id, 101)
     end
 
     test "a game id with no games row at all reports not found" do

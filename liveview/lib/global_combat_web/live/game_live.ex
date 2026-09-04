@@ -65,8 +65,18 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp refresh_view(socket) do
     account_id = socket.assigns.current_account && socket.assigns.current_account.id
-    {status, view} = Games.player_view(socket.assigns.game_id, account_id)
-    assign(socket, status: status, view: view)
+
+    case Games.player_view(socket.assigns.game_id, account_id) do
+      {:error, :not_found} ->
+        # The lobby was deleted out from under this view — the last seat quit (port of
+        # `GameServer.KillGame`), so there is nothing left to render; send everyone home.
+        socket
+        |> put_flash(:info, "That game is no longer open.")
+        |> push_navigate(to: ~p"/")
+
+      {status, view} ->
+        assign(socket, status: status, view: view)
+    end
   end
 
   # --- realtime events (GlobalCombat.Games.PubSub) ------------------------
@@ -175,14 +185,10 @@ defmodule GlobalCombatWeb.GameLive do
     case require_account(socket) do
       {:ok, account} ->
         case Games.quit(socket.assigns.game_id, account.id) do
+          # A lobby emptied by this quit is deleted server-side, so refresh_view/1 itself
+          # navigates home; a mid-play quit just re-renders the board as eliminated.
           :ok ->
-            socket = refresh_view(socket)
-
-            if socket.assigns.status == :lobby and socket.assigns.view.players == [] do
-              {:noreply, push_navigate(socket, to: ~p"/")}
-            else
-              {:noreply, socket}
-            end
+            {:noreply, refresh_view(socket)}
 
           {:error, _reason} ->
             {:noreply, socket}
