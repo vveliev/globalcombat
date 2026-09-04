@@ -25,7 +25,7 @@ builder.WebHost.ConfigureKestrel(options =>
     });
 });
 
-builder.Services.AddCodeFirstGrpc();
+builder.Services.AddCodeFirstGrpc(options => options.Interceptors.Add<LoggingInterceptor>());
 
 var app = builder.Build();
 
