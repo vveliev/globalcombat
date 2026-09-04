@@ -67,6 +67,49 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2") =~ "Turn 2"
   end
 
+  describe "end of game (GIF-122)" do
+    test "a finished game shows a Game Over banner naming the winner and drops the in-progress controls",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view, bob_view: bob_view} =
+        start_two_player_game(conn1, conn2)
+
+      html = render(alice_view)
+      assert html =~ "End Turn"
+      assert html =~ "Force Turn"
+      refute html =~ "Game Over"
+
+      # Bob quitting mid-play eliminates him, which ends a two-player game with Alice in place 1.
+      :ok = Games.quit(game_id, bob.id)
+
+      html = wait_for(alice_view, "Game Over")
+      assert html =~ "Game Over — Alice wins"
+      assert html =~ "You win!"
+      assert html =~ ~s(data-role="game-over")
+      assert html =~ "1. Alice"
+      assert html =~ "2. Bob"
+      refute html =~ "End Turn"
+      refute html =~ "Force Turn"
+      refute html =~ "Waiting on other players"
+
+      bob_html = wait_for(bob_view, "Game Over")
+      assert bob_html =~ "You finished in place 2."
+      refute bob_html =~ "Force Turn"
+    end
+
+    test "a spectator sees the banner without a personal outcome line", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{game_id: game_id, bob: bob} = start_two_player_game(conn1, conn2)
+      :ok = Games.quit(game_id, bob.id)
+
+      {:ok, _view, html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+      assert html =~ "Game Over — Alice wins"
+      refute html =~ "You win!"
+      refute html =~ "You finished in place"
+    end
+  end
+
   test "the lobby renders a just-joined player without crashing (GIF-94 regression)", %{
     conn: conn
   } do

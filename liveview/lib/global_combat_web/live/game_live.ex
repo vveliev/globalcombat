@@ -483,6 +483,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp board(assigns) do
     ~H"""
+    <.game_over :if={@view.ended} view={@view} />
     <div class="flex flex-wrap items-start gap-[var(--space-4)]">
       <div class="relative" style="width: 800px; height: 480px;">
         <.area
@@ -504,7 +505,7 @@ defmodule GlobalCombatWeb.GameLive do
       />
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
-    <div :if={@view.viewer_number} class="mt-[var(--space-4)]">
+    <div :if={@view.viewer_number && !@view.ended} class="mt-[var(--space-4)]">
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
@@ -513,6 +514,46 @@ defmodule GlobalCombatWeb.GameLive do
       </Button.button>
     </div>
     """
+  end
+
+  # GIF-122: once `engine.ended` the board used to look exactly like a live turn — "Waiting on
+  # other players… [Force Turn]" with the outcome only visible as a small "place 1" next to a
+  # name in the roster. This is the explicit end-of-game state: a winner banner up top, the
+  # final standings, and the in-progress controls (End Turn / Force Turn / Quit) gone.
+  attr :view, :map, required: true
+
+  defp game_over(assigns) do
+    winner = Enum.find(assigns.view.players, &(&1.place == 1))
+    standings = assigns.view.players |> Enum.filter(&(&1.place > 0)) |> Enum.sort_by(& &1.place)
+    assigns = assign(assigns, winner: winner, standings: standings)
+
+    ~H"""
+    <section
+      role="status"
+      aria-live="polite"
+      data-role="game-over"
+      class="mb-[var(--space-4)] rounded border border-divider p-[var(--space-4)] flex flex-col gap-[var(--space-2)]"
+    >
+      <h2 class="text-lg font-semibold">
+        Game Over{if @winner, do: " — #{@winner.name} wins", else: ""}
+      </h2>
+      <p :if={@view.viewer_number} class="text-text-muted">
+        {viewer_outcome(@view, @winner)}
+      </p>
+      <ol :if={@standings != []} class="flex flex-wrap gap-[var(--space-3)] text-sm">
+        <li :for={p <- @standings}>{p.place}. {p.name}</li>
+      </ol>
+      <a href={~p"/"} class="hover:underline font-semibold">Back to Home</a>
+    </section>
+    """
+  end
+
+  defp viewer_outcome(view, winner) do
+    cond do
+      winner && winner.number == view.viewer_number -> "You win!"
+      me = my_player(view) -> "You finished in place #{me.place}."
+      true -> ""
+    end
   end
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
