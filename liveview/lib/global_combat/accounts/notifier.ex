@@ -9,7 +9,7 @@ defmodule GlobalCombat.Accounts.Notifier do
     email =
       new()
       |> to(to)
-      |> from({"Global Combat", "noreply@globalcombat.com"})
+      |> from(sender())
       |> subject(subject)
       |> text_body(body)
 
@@ -64,6 +64,16 @@ defmodule GlobalCombat.Accounts.Notifier do
       https://globalcombat.com/Player-Info-#{id}
       """,
       reply_to: email
+    )
+  end
+
+  # `MAILER_FROM` (config/runtime.exs, docs/launch.md §2.3) when a production mailer is
+  # configured; the legacy `AccountController.cs` address otherwise.
+  defp sender do
+    Application.get_env(
+      :global_combat,
+      :mailer_from,
+      {"Global Combat", "noreply@globalcombat.com"}
     )
   end
 end

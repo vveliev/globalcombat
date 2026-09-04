@@ -115,21 +115,37 @@ if config_env() == :prod do
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
 
-  # ## Configuring the mailer
+  # ## Mailer (docs/launch.md §2.3)
   #
-  # In production you need to configure the mailer to use a different adapter.
-  # Here is an example configuration for Mailgun:
+  # Password reset and account notifications (`GlobalCombat.Accounts.Notifier`) go out through
+  # Mailgun when its credentials are present. `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` come from
+  # 1Password via the fleet's compose env, like `DATABASE_URL`/`SECRET_KEY_BASE` above.
+  # `MAILER_FROM` is the bare sender address (defaults to no-reply@ the Mailgun domain).
   #
-  #     config :global_combat, GlobalCombat.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
-  #
-  # Most non-SMTP adapters require an API client. Swoosh supports Req, Hackney,
-  # and Finch out-of-the-box. This configuration is typically done at
-  # compile-time in your config/prod.exs:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Req
-  #
-  # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
+  # Without a key the app still boots, but with the in-memory Local adapter, so mail is
+  # silently dropped in production — hence the loud warning rather than a hard failure: a
+  # first deploy shouldn't be blocked on mail, but nobody should discover this from a player
+  # who never got their reset link. `config :swoosh, api_client: Swoosh.ApiClient.Req` is
+  # already set in config/prod.exs.
+  case System.get_env("MAILGUN_API_KEY") do
+    nil ->
+      IO.warn(
+        "MAILGUN_API_KEY is not set: GlobalCombat.Mailer is using Swoosh.Adapters.Local, so " <>
+          "password-reset and notification email will NOT be delivered (docs/launch.md §2.3)."
+      )
+
+    api_key ->
+      domain =
+        System.get_env("MAILGUN_DOMAIN") ||
+          raise "MAILGUN_DOMAIN is required when MAILGUN_API_KEY is set (docs/launch.md §2.3)"
+
+      config :global_combat, GlobalCombat.Mailer,
+        adapter: Swoosh.Adapters.Mailgun,
+        api_key: api_key,
+        domain: domain
+
+      config :global_combat,
+             :mailer_from,
+             {"Global Combat", System.get_env("MAILER_FROM", "no-reply@#{domain}")}
+  end
 end
