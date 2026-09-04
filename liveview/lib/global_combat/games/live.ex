@@ -13,11 +13,10 @@ defmodule GlobalCombat.Games.Live do
   `GlobalCombat.Games.TurnScheduler` claim and this in-memory process refer to the same game —
   see `GlobalCombat.Games.LiveResolver`'s moduledoc for the other half (the scheduler handing a
   claimed turn back to whichever of "the live process" or "persisted state" actually has it).
-  `game_players` rows still aren't written here (the roster lives entirely on the `Server`
-  process, mirrored into `games.serialized` only once play starts) — a lobby only shows up in
-  `GlobalCombat.Games.list_new_games/0` once it exists as a row at all; it won't yet show up in
-  `GlobalCombat.Games.list_player_games/2` for anyone who joined it, since that reads
-  `game_players`. Tracked as a known gap, not silently "fixed" by this ticket.
+  The `Server` also mirrors its lobby roster into `games.serialized` (`Started: false`) and
+  `game_players` on every join/quit/kick/invite, so a lobby survives the process dying (it
+  rehydrates on demand like a started game does) and shows up in both
+  `GlobalCombat.Games.list_new_games/0` and `list_player_games/2` from the first seat onward.
   """
 
   alias GlobalCombat.Games, as: GamesDb
@@ -149,8 +148,21 @@ defmodule GlobalCombat.Games.Live do
   # otherwise stays permanently "not found" even though `games.serialized` is fully valid.
   defp with_game(game_id, fun) do
     case GamesSupervisor.ensure_started(game_id) do
-      :ok -> fun.(game_id)
-      {:error, :not_found} = error -> error
+      :ok ->
+        try do
+          fun.(game_id)
+        catch
+          # The Server can be mid-shutdown between `ensure_started/1`'s Registry check and the
+          # call landing — the last seat just quit and the lobby was deleted (`Server`'s
+          # `{:stop, :normal, ...}`), so there is genuinely no game to reach any more. Seen as
+          # `:noproc` once the name is gone, or as the exit reason itself (`:normal`, or
+          # `:shutdown` under a supervisor stop) while the call was still in flight.
+          :exit, {reason, {GenServer, :call, _}} when reason in [:noproc, :normal, :shutdown] ->
+            {:error, :not_found}
+        end
+
+      {:error, :not_found} = error ->
+        error
     end
   end
 end

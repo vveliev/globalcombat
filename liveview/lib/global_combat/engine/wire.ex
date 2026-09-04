@@ -166,6 +166,90 @@ defmodule GlobalCombat.Engine.Wire do
     }
   end
 
+  @doc """
+  Snapshot of a not-yet-started lobby as a wire `GlobalCombat.GrpcHost.Game` with `Started:
+  false` — what `GlobalCombat.Games.Server` persists on every roster change so a lobby survives
+  its process dying (a dev-server restart, a deploy, a crash) exactly the way a started game
+  already does through `to_wire_game/2`. Mirrors `GameServer.PlayerJoined`/`PlayerInvited` in
+  the original, which called `SaveGame` (the same blob) before the game ever started.
+
+  Takes any map with the lobby fields below — in practice the `%GlobalCombat.Games.Server{}`
+  state itself, so the two never drift. `players` is the server's roster shape,
+  `[{number, %{account_id: _, name: _}}]`; `invites` is `[%{account_id: _, name: _}]`. Areas are
+  empty: they are dealt by `Games.Server.new_engine/1` at start, never before.
+  """
+  def to_wire_lobby(
+        %{
+          game_id: game_id,
+          map_name: map_name,
+          turn_length_minutes: turn_length_minutes,
+          max_players: max_players,
+          is_fogged: is_fogged,
+          is_non_random: is_non_random,
+          reverse_attack_order: reverse_attack_order,
+          minimum_armies: minimum_armies,
+          is_private: is_private,
+          is_training: is_training,
+          players: players,
+          invites: invites
+        } = _lobby
+      ) do
+    %GrpcHost.Game{
+      Id: game_id,
+      GameName: "",
+      MapName: to_wire_map_name(map_name),
+      TurnLength: turn_length_minutes,
+      MaxPlayers: max_players,
+      IsFogged: is_fogged,
+      IsNonRandom: is_non_random,
+      ReverseAttackOrder: reverse_attack_order,
+      MinimumArmies: minimum_armies,
+      Turn: 1,
+      Started: false,
+      Ended: false,
+      Areas: [],
+      Players:
+        Enum.map(players, fn {number, p} ->
+          %GrpcHost.Player{Number: number, AccountId: p.account_id, Name: p.name}
+        end),
+      IsPrivate: is_private,
+      IsTraining: is_training,
+      Invites:
+        Enum.map(invites, fn i -> %GrpcHost.Invite{AccountId: i.account_id, Name: i.name} end),
+      TourneyId: 0
+    }
+  end
+
+  @doc "Whether a persisted wire game has been started — `false` means `from_wire_lobby/1` applies, `true` means `from_wire_snapshot/2` does."
+  def started?(%GrpcHost.Game{} = wire), do: f(wire, :Started)
+
+  @doc """
+  Reverse of `to_wire_lobby/1`: the lobby-state fields `GlobalCombat.Games.Server` needs to
+  come back up as a `:lobby` with the same roster, pending invites and ruleset — keyed exactly
+  like the `%Games.Server{}` fields so the server can `struct/2` them straight in.
+  """
+  def from_wire_lobby(%GrpcHost.Game{} = wire) do
+    %{
+      map_name: from_wire_map_name(f(wire, :MapName)),
+      is_fogged: f(wire, :IsFogged),
+      is_training: f(wire, :IsTraining),
+      is_non_random: f(wire, :IsNonRandom),
+      reverse_attack_order: f(wire, :ReverseAttackOrder),
+      minimum_armies: f(wire, :MinimumArmies),
+      max_players: f(wire, :MaxPlayers),
+      is_private: f(wire, :IsPrivate),
+      players:
+        wire
+        |> f(:Players)
+        |> Enum.sort_by(&f(&1, :Number))
+        |> Enum.map(fn p ->
+          {f(p, :Number), %{account_id: f(p, :AccountId), name: f(p, :Name)}}
+        end),
+      invites:
+        Enum.map(f(wire, :Invites), fn i -> %{account_id: f(i, :AccountId), name: f(i, :Name)} end)
+    }
+  end
+
   @doc "Builds wire `Order` structs from a `GlobalCombat.Engine.Game`'s currently-queued area commands, matching how `GameEngineService.Think` derives its `Orders` — used to diff the Elixir port's own AI decisions against the oracle's."
   def to_wire_orders(game) do
     game

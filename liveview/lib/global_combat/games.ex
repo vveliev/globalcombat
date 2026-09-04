@@ -15,6 +15,7 @@ defmodule GlobalCombat.Games do
 
   import Ecto.Query
 
+  alias GlobalCombat.Accounts.Account
   alias GlobalCombat.Games.{Game, GamePlayer, GameSummary}
   alias GlobalCombat.Repo
 
@@ -136,11 +137,74 @@ defmodule GlobalCombat.Games do
     Repo.aggregate(from(gp in GamePlayer, where: gp.game_id == ^game.id), :count)
   end
 
-  @doc "Ports `GameServer.GetNewGames()` — open, public games, most recent first."
+  @doc """
+  Ports `GameServer.GetNewGames()` — open, public games, most recent first.
+
+  Rows with no `serialized` snapshot are excluded: a lobby is persisted on its first join
+  (`GlobalCombat.Games.Server`), so a `:new` row still at `nil` is either mid-creation or an
+  orphan from before lobbies were persisted at all — nothing can rehydrate it, so listing it
+  would advertise a game that 404s on click and renders as "0/ players".
+  """
   def list_new_games do
-    from(g in Game, where: g.status == :new and g.private == false, order_by: [desc: g.id])
+    from(g in Game,
+      where: g.status == :new and g.private == false and not is_nil(g.serialized),
+      order_by: [desc: g.id]
+    )
     |> Repo.all()
     |> Enum.map(&GameSummary.from_row/1)
+  end
+
+  @doc """
+  Port of `GameServer.KillGame` — removes a game row (and, via `on_delete: :delete_all`, its
+  `game_players` seats/invites). `GlobalCombat.Games.Server` calls this when the last seat
+  leaves a lobby, matching `GameServer.PlayerUnjoined`'s `if (game.Players.Count <= 0)
+  KillGame(game.Id)`, so abandoned lobbies don't pile up in `list_new_games/0` forever.
+  """
+  def delete_game(game_id) do
+    from(g in Game, where: g.id == ^game_id) |> Repo.delete_all()
+    :ok
+  end
+
+  @doc """
+  Records an accepted seat (`game_players.is_invite = false`) by game id — the persistence half
+  of `GameServer.PlayerJoined` for a live `GlobalCombat.Games.Server` lobby, so
+  `list_player_games/2` ("Your Current Games" on Home/PlayerInfo) sees a game the moment an
+  account joins it rather than never.
+
+  Always `:ok`: this table is a listing mirror of the roster `GlobalCombat.Games.Server` holds
+  (the authoritative copy, also snapshotted into `games.serialized`), so a row that can't be
+  written is not a reason to refuse the seat. Concretely, a repeat insert hits the
+  `(account_id, game_id)` unique index (already seated), and the Training Mode "Computer" seat
+  (account 1) has no `account` row on a database without the System account — same for the
+  synthetic ids `Games.Server`'s own tests join with.
+  """
+  def seat(game_id, account_id) do
+    # The existence check is deliberate, not just an optimisation: letting the insert fail its
+    # FK check makes InnoDB take a gap lock on `account`'s primary key where the missing id
+    # would sit — for an id past the last row that is the supremum gap, which blocks every
+    # concurrent account insert and deadlocks (MyXQL 1213) under parallel transactions.
+    if Repo.exists?(from(a in Account, where: a.id == ^account_id)) do
+      %GamePlayer{game_id: game_id, account_id: account_id, is_invite: false}
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.unique_constraint([:account_id, :game_id])
+      |> Repo.insert()
+      |> case do
+        {:ok, _} -> :ok
+        {:error, %Ecto.Changeset{}} -> :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  @doc "Port of `GameServer.PlayerUnjoined`'s row delete — drops an account's accepted seat in a lobby (quit/kick)."
+  def unseat(game_id, account_id) do
+    from(gp in GamePlayer,
+      where: gp.game_id == ^game_id and gp.account_id == ^account_id and gp.is_invite == false
+    )
+    |> Repo.delete_all()
+
+    :ok
   end
 
   @doc """
