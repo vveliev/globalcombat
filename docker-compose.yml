@@ -16,6 +16,9 @@
 # Pinned so every checkout (main, worktrees, CI) shares one compose project: the
 # 10.114.0.0/24 subnet below can only exist once per Docker host, so a second
 # project name from a different directory fails with "Pool overlaps with other one".
+# The flip side: only one checkout's stack can be up at a time — `docker compose up`
+# from another clone/worktree recreates these same containers against its own
+# bind mounts (same DB volume, same ports) instead of starting a second stack.
 name: globalcombat
 
 services:

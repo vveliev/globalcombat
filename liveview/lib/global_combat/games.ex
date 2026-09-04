@@ -184,12 +184,8 @@ defmodule GlobalCombat.Games do
     # would sit — for an id past the last row that is the supremum gap, which blocks every
     # concurrent account insert and deadlocks (MyXQL 1213) under parallel transactions.
     if Repo.exists?(from(a in Account, where: a.id == ^account_id)) do
-      %GamePlayer{}
-      |> Ecto.Changeset.cast(%{game_id: game_id, account_id: account_id, is_invite: false}, [
-        :game_id,
-        :account_id,
-        :is_invite
-      ])
+      %GamePlayer{game_id: game_id, account_id: account_id, is_invite: false}
+      |> Ecto.Changeset.change()
       |> Ecto.Changeset.unique_constraint([:account_id, :game_id])
       |> Repo.insert()
       |> case do

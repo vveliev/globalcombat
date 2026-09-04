@@ -154,8 +154,11 @@ defmodule GlobalCombat.Games.Live do
         catch
           # The Server can be mid-shutdown between `ensure_started/1`'s Registry check and the
           # call landing — the last seat just quit and the lobby was deleted (`Server`'s
-          # `{:stop, :normal, ...}`), so there is genuinely no game to reach any more.
-          :exit, {:noproc, {GenServer, :call, _}} -> {:error, :not_found}
+          # `{:stop, :normal, ...}`), so there is genuinely no game to reach any more. Seen as
+          # `:noproc` once the name is gone, or as the exit reason itself (`:normal`, or
+          # `:shutdown` under a supervisor stop) while the call was still in flight.
+          :exit, {reason, {GenServer, :call, _}} when reason in [:noproc, :normal, :shutdown] ->
+            {:error, :not_found}
         end
 
       {:error, :not_found} = error ->

@@ -173,35 +173,49 @@ defmodule GlobalCombat.Engine.Wire do
   already does through `to_wire_game/2`. Mirrors `GameServer.PlayerJoined`/`PlayerInvited` in
   the original, which called `SaveGame` (the same blob) before the game ever started.
 
-  `players` is the server's roster shape, `[{number, %{account_id: _, name: _}}]`; `invites` is
-  `[%{account_id: _, name: _}]`. Areas are empty: they are dealt by `Games.Server.new_engine/1`
-  at start, never before.
+  Takes any map with the lobby fields below — in practice the `%GlobalCombat.Games.Server{}`
+  state itself, so the two never drift. `players` is the server's roster shape,
+  `[{number, %{account_id: _, name: _}}]`; `invites` is `[%{account_id: _, name: _}]`. Areas are
+  empty: they are dealt by `Games.Server.new_engine/1` at start, never before.
   """
-  def to_wire_lobby(opts) do
+  def to_wire_lobby(
+        %{
+          game_id: game_id,
+          map_name: map_name,
+          turn_length_minutes: turn_length_minutes,
+          max_players: max_players,
+          is_fogged: is_fogged,
+          is_non_random: is_non_random,
+          reverse_attack_order: reverse_attack_order,
+          minimum_armies: minimum_armies,
+          is_private: is_private,
+          is_training: is_training,
+          players: players,
+          invites: invites
+        } = _lobby
+      ) do
     %GrpcHost.Game{
-      Id: Keyword.fetch!(opts, :game_id),
+      Id: game_id,
       GameName: "",
-      MapName: to_wire_map_name(Keyword.fetch!(opts, :map_name)),
-      TurnLength: Keyword.fetch!(opts, :turn_length_minutes),
-      MaxPlayers: Keyword.fetch!(opts, :max_players),
-      IsFogged: Keyword.fetch!(opts, :is_fogged),
-      IsNonRandom: Keyword.fetch!(opts, :is_non_random),
-      ReverseAttackOrder: Keyword.fetch!(opts, :reverse_attack_order),
-      MinimumArmies: Keyword.fetch!(opts, :minimum_armies),
+      MapName: to_wire_map_name(map_name),
+      TurnLength: turn_length_minutes,
+      MaxPlayers: max_players,
+      IsFogged: is_fogged,
+      IsNonRandom: is_non_random,
+      ReverseAttackOrder: reverse_attack_order,
+      MinimumArmies: minimum_armies,
       Turn: 1,
       Started: false,
       Ended: false,
       Areas: [],
       Players:
-        Enum.map(Keyword.fetch!(opts, :players), fn {number, p} ->
+        Enum.map(players, fn {number, p} ->
           %GrpcHost.Player{Number: number, AccountId: p.account_id, Name: p.name}
         end),
-      IsPrivate: Keyword.fetch!(opts, :is_private),
-      IsTraining: Keyword.fetch!(opts, :is_training),
+      IsPrivate: is_private,
+      IsTraining: is_training,
       Invites:
-        Enum.map(Keyword.get(opts, :invites, []), fn i ->
-          %GrpcHost.Invite{AccountId: i.account_id, Name: i.name}
-        end),
+        Enum.map(invites, fn i -> %GrpcHost.Invite{AccountId: i.account_id, Name: i.name} end),
       TourneyId: 0
     }
   end
@@ -211,7 +225,8 @@ defmodule GlobalCombat.Engine.Wire do
 
   @doc """
   Reverse of `to_wire_lobby/1`: the lobby-state fields `GlobalCombat.Games.Server` needs to
-  come back up as a `:lobby` with the same roster, pending invites and ruleset.
+  come back up as a `:lobby` with the same roster, pending invites and ruleset — keyed exactly
+  like the `%Games.Server{}` fields so the server can `struct/2` them straight in.
   """
   def from_wire_lobby(%GrpcHost.Game{} = wire) do
     %{

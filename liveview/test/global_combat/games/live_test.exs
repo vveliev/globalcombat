@@ -4,12 +4,11 @@ defmodule GlobalCombat.Games.LiveTest do
   use GlobalCombat.DataCase, async: true
 
   import GlobalCombat.AccountsFixtures
+  import GlobalCombat.GamesTestHelpers
 
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.PubSub, as: GamePubSub
-  alias GlobalCombat.Games.Registry, as: GamesRegistry
-  alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
 
   setup do
     game_id = Games.create_game(%{max_players: 3})
@@ -373,23 +372,6 @@ defmodule GlobalCombat.Games.LiveTest do
     test "a game id with no games row at all reports not found" do
       refute Games.game_exists?(-1)
       assert {:error, :not_found} = Games.player_view(-1, 101)
-    end
-  end
-
-  defp kill_server!(game_id) do
-    [{pid, _}] = Registry.lookup(GamesRegistry, game_id)
-    ref = Process.monitor(pid)
-    :ok = DynamicSupervisor.terminate_child(GamesSupervisor, pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
-    # Registry's own de-registration runs off a *separate* monitor on `pid` than the one
-    # above, so our :DOWN landing first doesn't guarantee its ETS entry is gone yet — without
-    # this, ensure_started/1 can still see the dead pid via Server.alive?/1 and skip rehydrating.
-    wait_until_deregistered(game_id)
-  end
-
-  defp wait_until_deregistered(game_id) do
-    unless Registry.lookup(GamesRegistry, game_id) == [] do
-      wait_until_deregistered(game_id)
     end
   end
 

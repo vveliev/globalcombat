@@ -256,23 +256,15 @@ defmodule GlobalCombat.Games.Server do
   # `:lobby` with the same seats, pending invites and ruleset — so a dev-server restart or a
   # deploy no longer strands every open game as "Game not found" / "0/ players" on Home.
   defp rehydrated_lobby_state(opts, wire) do
-    lobby = Wire.from_wire_lobby(wire)
-
-    %__MODULE__{
+    # `Wire.from_wire_lobby/1`'s keys are this struct's field names by design.
+    wire
+    |> Wire.from_wire_lobby()
+    |> Map.merge(%{
       game_id: Keyword.fetch!(opts, :game_id),
-      map_name: lobby.map_name,
-      is_fogged: lobby.is_fogged,
-      is_training: lobby.is_training,
-      is_non_random: lobby.is_non_random,
-      reverse_attack_order: lobby.reverse_attack_order,
-      minimum_armies: lobby.minimum_armies,
-      max_players: lobby.max_players,
       turn_length_minutes: Keyword.fetch!(opts, :turn_length_minutes),
-      is_private: lobby.is_private,
-      status: :lobby,
-      players: lobby.players,
-      invites: lobby.invites
-    }
+      status: :lobby
+    })
+    |> then(&struct!(__MODULE__, &1))
   end
 
   defp rehydrated_playing_state(opts, wire) do
@@ -371,9 +363,7 @@ defmodule GlobalCombat.Games.Server do
         invites = Enum.reject(state.invites, &(&1.account_id == account_id))
         if invited?, do: GamesDb.clear_invite(state.game_id, account_id)
         :ok = GamesDb.seat(state.game_id, account_id)
-        state = %{state | players: players, invites: invites}
-        persist_lobby(state)
-        GamePubSub.broadcast_reload(state.game_id)
+        state = commit_lobby(%{state | players: players, invites: invites})
         {:reply, {:ok, number}, state}
     end
   end
@@ -412,9 +402,7 @@ defmodule GlobalCombat.Games.Server do
           GamePubSub.broadcast_reload(state.game_id)
           {:stop, :normal, :ok, state}
         else
-          persist_lobby(state)
-          GamePubSub.broadcast_reload(state.game_id)
-          {:reply, :ok, state}
+          {:reply, :ok, commit_lobby(state)}
         end
     end
   end
@@ -447,11 +435,8 @@ defmodule GlobalCombat.Games.Server do
         players =
           renumber_players(Enum.reject(state.players, fn {n, _p} -> n == player_number end))
 
-        state = %{state | players: players}
         GamesDb.unseat(state.game_id, kicked.account_id)
-        persist_lobby(state)
-        GamePubSub.broadcast_reload(state.game_id)
-        {:reply, :ok, state}
+        {:reply, :ok, commit_lobby(%{state | players: players})}
     end
   end
 
@@ -652,8 +637,7 @@ defmodule GlobalCombat.Games.Server do
           true ->
             {:ok, _} = GamesDb.invite(state.game_id, invitee.id)
             invites = state.invites ++ [%{account_id: invitee.id, name: invitee.name}]
-            state = %{state | invites: invites}
-            persist_lobby(state)
+            state = commit_lobby(%{state | invites: invites})
 
             GamePubSub.broadcast_notification(
               invitee.id,
@@ -662,7 +646,6 @@ defmodule GlobalCombat.Games.Server do
               "/Game-#{state.game_id}/"
             )
 
-            GamePubSub.broadcast_reload(state.game_id)
             {:reply, {:ok, invitee}, state}
         end
     end
@@ -929,23 +912,15 @@ defmodule GlobalCombat.Games.Server do
   # same reason. Also what makes `GlobalCombat.Games.GameSummary` render a real "n/m players"
   # on Home instead of "0/ players" for a lobby.
   defp persist_lobby(%{status: :lobby} = state) do
-    wire =
-      Wire.to_wire_lobby(
-        game_id: state.game_id,
-        map_name: state.map_name,
-        turn_length_minutes: state.turn_length_minutes,
-        max_players: state.max_players,
-        is_fogged: state.is_fogged,
-        is_non_random: state.is_non_random,
-        reverse_attack_order: state.reverse_attack_order,
-        minimum_armies: state.minimum_armies,
-        is_private: state.is_private,
-        is_training: state.is_training,
-        players: state.players,
-        invites: state.invites
-      )
+    GamesDb.persist_serialized(state.game_id, GrpcHost.Game.encode(Wire.to_wire_lobby(state)))
+  end
 
-    GamesDb.persist_serialized(state.game_id, GrpcHost.Game.encode(wire))
+  # The common tail of every lobby mutation (join/quit/kick/invite): snapshot the new roster
+  # and tell every subscriber — the lobby analogue of `apply_order/2` for the board.
+  defp commit_lobby(%{status: :lobby} = state) do
+    persist_lobby(state)
+    GamePubSub.broadcast_reload(state.game_id)
+    state
   end
 
   defp persist_snapshot(state) do

@@ -11,11 +11,11 @@ defmodule GlobalCombat.Games.LobbyPersistenceTest do
   use GlobalCombat.DataCase, async: true
 
   import GlobalCombat.AccountsFixtures
+  import GlobalCombat.GamesTestHelpers
 
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.Registry, as: GamesRegistry
-  alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
 
   # Unique fixture names on purpose: `account.name` is unique, and two async test modules
   # inserting the same name at once deadlock on that index under MySQL (a real 1213 seen when
@@ -129,21 +129,6 @@ defmodule GlobalCombat.Games.LobbyPersistenceTest do
       kill_server!(game_id)
       assert {:lobby, %{players: [%{name: remaining}]}} = Games.player_view(game_id, alice.id)
       assert remaining == alice.name
-    end
-  end
-
-  defp kill_server!(game_id) do
-    [{pid, _}] = Registry.lookup(GamesRegistry, game_id)
-    ref = Process.monitor(pid)
-    :ok = DynamicSupervisor.terminate_child(GamesSupervisor, pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
-    wait_until_deregistered(game_id)
-  end
-
-  defp wait_until_deregistered(game_id) do
-    unless Registry.lookup(GamesRegistry, game_id) == [] do
-      Process.sleep(5)
-      wait_until_deregistered(game_id)
     end
   end
 end

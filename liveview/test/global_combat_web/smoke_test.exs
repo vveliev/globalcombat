@@ -13,6 +13,8 @@ defmodule GlobalCombatWeb.SmokeTest do
 
   use GlobalCombatWeb.ConnCase, async: true
 
+  import GlobalCombat.GamesTestHelpers
+
   alias GlobalCombat.Accounts
   alias GlobalCombat.Games.Live, as: Games
 
@@ -52,35 +54,40 @@ defmodule GlobalCombatWeb.SmokeTest do
     game_id = String.to_integer(id)
 
     # --- lobby: the creator is seated with the Computer opponent ---------------------------
-    {:ok, game_view, html} = live(conn, ~p"/Game-#{game_id}")
-    assert html =~ "Waiting for players"
-    assert html =~ "2/2 joined"
-    assert html =~ name
-    assert html =~ "Computer"
+    {:ok, game_view, _html} = live(conn, ~p"/Game-#{game_id}")
+    assert has_element?(game_view, "#game-status", "Waiting for players")
+    assert has_element?(game_view, "#game-status", "2/2 joined")
+    assert has_element?(game_view, "#lobby-players li", "Player 1: #{name}")
+    assert has_element?(game_view, "#lobby-players li", "Player 2: Computer")
 
     # --- start: turn 1, the human is Thinking and the Computer has already moved -----------
     render_click(game_view, "start")
-    html = wait_for(game_view, "Turn 1")
-    assert html =~ "In progress"
-    assert html =~ "Region Bonuses"
+    sync_game(game_id, game_view)
+    assert has_element?(game_view, "#game-status", "Turn 1")
+    assert has_element?(game_view, "#game-status", "In progress")
+    assert has_element?(game_view, "#game-board", "Region Bonuses")
+    assert has_element?(game_view, "#turn-controls button", "End Turn")
 
     # --- queue an attack by clicking an owned territory, then an adjacent enemy one -------
     {:playing, view} = Games.player_view(game_id, account.id)
     {source, target} = attackable_pair(view)
 
     render_click(game_view, "select_area", %{"area" => to_string(source.number)})
-    assert render(game_view) =~ "Assign new armies or select a target area"
+    assert has_element?(game_view, "#order-form")
+    assert has_element?(game_view, "#game-board", "Assign new armies or select a target area")
 
     render_click(game_view, "select_area", %{"area" => to_string(target.number)})
-    assert render(game_view) =~ "Attack #{target.name} with how many armies?"
+    assert has_element?(game_view, "#game-board", "Attack #{target.name} with how many armies?")
 
-    render_submit(game_view, "submit_order", %{"amount" => to_string(source.armies - 1)})
+    game_view
+    |> form("#order-form", %{"amount" => to_string(source.armies - 1)})
+    |> render_submit()
 
     # --- end turn: with the Computer already Done, the turn resolves right away ------------
     render_click(game_view, "done")
-    html = wait_for(game_view, "Turn 2")
-    assert html =~ "Turn 2"
-    refute html =~ "Game Over"
+    sync_game(game_id, game_view)
+    assert has_element?(game_view, "#game-status", "Turn 2")
+    refute has_element?(game_view, "#game-over")
 
     # The attack actually resolved: the source territory spent its armies.
     {:playing, after_view} = Games.player_view(game_id, account.id)
@@ -105,19 +112,5 @@ defmodule GlobalCombatWeb.SmokeTest do
 
       target && {source, target}
     end) || flunk("no owned territory with an adjacent enemy on turn 1")
-  end
-
-  defp wait_for(view, text, attempts \\ 200)
-  defp wait_for(_view, text, 0), do: flunk("gave up waiting for #{inspect(text)} to render")
-
-  defp wait_for(view, text, attempts) do
-    html = render(view)
-
-    if html =~ text do
-      html
-    else
-      Process.sleep(10)
-      wait_for(view, text, attempts - 1)
-    end
   end
 end

@@ -35,6 +35,11 @@ Create a game with **Training Mode** checked to play against the Computer oppone
 without a second person. Ports are pinned to the `11400` block (`11400` web, `11410`
 gRPC engine, `11434` MySQL, loopback only) -- see the header of `docker-compose.yml`.
 
+One stack at a time: the compose project name and subnet are fixed, so the stack is
+shared by every checkout of this repo on the machine. Running `make dev` from a second
+clone or worktree re-points the running containers at that checkout's files (same
+database, same ports) rather than starting a second copy.
+
 Run the test suite inside the web container:
 
 ```bash
