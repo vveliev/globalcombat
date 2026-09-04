@@ -38,8 +38,9 @@ defmodule GlobalCombat.Games.Supervisor do
   time a player reaches it, instead of being permanently "not found" despite valid DB state.
 
   Returns `:ok` once a live process backs `game_id` (whether it was already alive or just
-  started), or `{:error, :not_found}` if there's nothing valid to rehydrate — no such row, a
-  `:finished` row, or a `:new`/`:active` row with no `serialized` snapshot yet.
+  started), or `{:error, :not_found}` if there's nothing valid to rehydrate — no such row, or a
+  row with no `serialized` snapshot yet (a lobby nobody joined, or the narrow crash window
+  between `mark_active/1` and the first `persist_snapshot`).
   """
   def ensure_started(game_id) do
     if Server.alive?(game_id) do
@@ -49,11 +50,16 @@ defmodule GlobalCombat.Games.Supervisor do
     end
   end
 
-  # A `:new` row with a snapshot is a persisted lobby (`GlobalCombat.Games.Server` writes one on
-  # every roster change) and rehydrates the same way — `Server.init/1` branches on the
-  # snapshot's own `Started` flag, so this path doesn't need to know which it is.
+  # Every status rehydrates from its snapshot; `Server.init/1` branches on the snapshot's own
+  # `Started` flag, so this path doesn't need to know which it is:
+  #   - `:new` — a persisted lobby (`GlobalCombat.Games.Server` writes one on every roster change).
+  #   - `:active` — a game mid-play (GIF-119).
+  #   - `:finished` — GIF-124: the final snapshot is just as valid and complete; rehydrating it
+  #     brings back a read-only `Server` that can render the final board/winner. It never gets
+  #     another turn claimed against it: `Scheduling.list_due/1` only ever selects `:active` rows,
+  #     so its boot-time-reconstructed `:playing` in-memory status can't be handed a scheduled turn.
   defp start_if_rehydratable(%{status: status, serialized: serialized} = game)
-       when status in [:active, :new] and not is_nil(serialized) do
+       when status in [:active, :new, :finished] and not is_nil(serialized) do
     case start_child(game) do
       {:ok, _pid} ->
         :ok
