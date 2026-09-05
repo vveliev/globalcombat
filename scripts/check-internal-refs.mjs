@@ -13,25 +13,35 @@
  * INTERNAL_REFS_WORDLIST, and are optional.
  *
  * Usage:
- *   node scripts/check-internal-refs.mjs --staged     # pre-commit
- *   node scripts/check-internal-refs.mjs --range A..B # CI / pre-push
- *   node scripts/check-internal-refs.mjs --message F  # commit-msg hook
+ *   node scripts/check-internal-refs.mjs --range A..B [--base-fallback REF] [--branch NAME]
+ *   node scripts/check-internal-refs.mjs --text ENVVAR        # PR title/body
+ *   node scripts/check-internal-refs.mjs --branch NAME        # a branch name alone
+ *
+ * --range scans the lines A..B ADDS (never whole files: a change that merely
+ * touches a file carrying a legacy reference publishes nothing new), plus the
+ * full commit messages and author identities of A..B. When A is missing or
+ * unreachable (a brand-new branch, or the first push after a history rewrite)
+ * the range is re-based on the merge-base of B with --base-fallback, or on B's
+ * root commit if that is unavailable too.
  */
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 
-const PATTERNS = [
+const ZERO_SHA = /^0{40}$/;
+// git's well-known empty tree: diffing against it yields every line of B as
+// added, which is what "publishing a whole new history" means.
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+export const PATTERNS = [
   {
     id: "tracker-id",
     re: /\b[A-Z]{2,5}-\d{1,5}\b/g,
     why: "internal tracker id",
-    // Conventional-commit scopes and CVEs are not tracker ids.
-    // Standards, licences and wire constants share the shape but are not tracker ids.
-    // Standards, licences, wire constants, this repo's own ADR numbering -- and placeholder prefixes used as
-    // test fixtures. PROJ- in particular is upstream's own fixture convention;
-    // flagging it would fail their tests as if they were our leak.
-    ignore: /^(UTF|ISO|RFC|CVE|SHA|HTTP|API|SDK|ACP|UI|CI|BSD|GPL|LGPL|MPL|AGPL|EPL|CC|MIT|ECMA|RGB|AES|SHA1|SHA256|PROJ|TEST|EXAMPLE|FOO|BAR|ISSUE|CHAT|ADR)-/,
+    // Same shape, not tracker ids: standards, licences, protocols and model
+    // names, this repo's own ADR numbering, and placeholder prefixes used as
+    // test fixtures (PROJ- is upstream's fixture convention).
+    ignore: /^(UTF|ISO|RFC|CVE|SHA|HTTP|API|SDK|ACP|UI|CI|BSD|GPL|LGPL|MPL|AGPL|EPL|CC|MIT|ECMA|RGB|AES|TLS|SSL|GPT|DNS|SMTP|OTP|ADR|PROJ|TEST|FOO|BAR|ISSUE|CHAT)-/,
   },
   {
     id: "agent-trailer",
@@ -39,8 +49,10 @@ const PATTERNS = [
     why: "internal agent identity in a commit trailer",
   },
   {
+    // Any depth of subdomain counts: an address under a sub-host of an internal
+    // domain is as internal as one directly under it.
     id: "internal-email",
-    re: /\b[\w.+-]+@(?!users\.noreply\.github\.com\b)[\w-]+\.(?:dev|internal|local|lan)\b/g,
+    re: /\b[\w.+-]+@(?:[\w-]+\.)+(?:dev|internal|local|lan)\b/g,
     why: "internal email domain",
   },
   {
@@ -50,7 +62,7 @@ const PATTERNS = [
   },
   {
     id: "instance-uuid",
-    re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g,
+    re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
     why: "instance/company/agent UUID",
   },
 ];
@@ -75,89 +87,152 @@ if (wordlistPath && existsSync(wordlistPath)) {
 const SKIP = [/(^|\/)package-lock\.json$/, /(^|\/)(dist|coverage|node_modules)(\/|$)/];
 const skipped = (f) => SKIP.some((r) => r.test(f));
 
-function git(args) {
-  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+function git(args, { allowFail = false } = {}) {
+  try {
+    return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (err) {
+    if (allowFail) return null;
+    console.error(`internal-refs: git ${args.join(" ")} failed: ${(err.stderr || err.message || "").toString().trim()}`);
+    process.exit(2);
+  }
 }
 
+const commitExists = (rev) => git(["cat-file", "-e", `${rev}^{commit}`], { allowFail: true }) !== null;
+
 /**
- * @param exclude pattern ids to skip for this text. A branch name derived from
- *   an issue id is metadata that reveals nothing -- the UUID rule exists to
- *   catch instance/company/agent ids leaking into published *content*, and
- *   applying it to a branch name would forbid the safest template available.
+ * Every finding is `{ where, match, why, id }`; `where` already carries the
+ * line ("path:line" for content, "commit messages:line" for text).
+ * @param exclude pattern ids to skip. A branch name derived from an issue id is
+ *   metadata that reveals nothing -- the UUID rule exists to catch instance/
+ *   company/agent ids leaking into published *content*, and applying it to a
+ *   branch name would forbid the safest template available.
  */
-function scan(text, label, findings, exclude = []) {
+export function scan(text, label, findings, { exclude = [], line = null } = {}) {
   for (const p of PATTERNS) {
     if (exclude.includes(p.id)) continue;
     p.re.lastIndex = 0;
     for (const m of text.matchAll(p.re)) {
       if (p.ignore && p.ignore.test(m[0])) continue;
-      const line = text.slice(0, m.index).split("\n").length;
-      findings.push({ label, line, match: m[0].split("\n")[0].slice(0, 90), why: p.why, id: p.id });
+      const at = line ?? text.slice(0, m.index).split("\n").length;
+      findings.push({ where: `${label}:${at}`, match: m[0].split("\n")[0].slice(0, 90), why: p.why, id: p.id });
     }
   }
 }
 
-const mode = process.argv[2];
-const arg = process.argv[3];
-const findings = [];
-
-if (mode === "--text") {
-  // Reads from an env var, never argv: PR titles and bodies are attacker-
-  // controlled text and must not be interpolated into a shell command.
-  scan(process.env[arg ?? "SCAN_TEXT"] ?? "", "pull request title/body", findings);
-} else if (mode === "--message") {
-  scan(readFileSync(arg, "utf8"), "commit message", findings);
-} else if (mode === "--staged") {
-  for (const f of git(["diff", "--cached", "--name-only", "--diff-filter=ACM"]).split("\n").filter(Boolean)) {
-    if (skipped(f)) continue;
-    scan(git(["show", `:${f}`]), f, findings);
+/**
+ * Resolves "A..B" to `{ from, to }` where `from` actually exists: a missing,
+ * all-zero or unreachable A (new branch; first push after a history rewrite)
+ * becomes the merge-base of B with `fallback`. With no usable fallback either,
+ * `from` is null: the whole of B is being published, so every line (diffed
+ * against the empty tree) and every commit is scanned — a plain `root..B`
+ * would silently exclude the root commit itself.
+ */
+export function resolveRange(range, fallback) {
+  const [a, b = "HEAD"] = range.split("..");
+  const to = git(["rev-parse", "--verify", `${b}^{commit}`]).trim();
+  if (a && !ZERO_SHA.test(a) && commitExists(a)) return { from: a, to };
+  if (fallback && commitExists(fallback)) {
+    const mb = git(["merge-base", fallback, to], { allowFail: true });
+    if (mb) return { from: mb.trim(), to };
   }
-} else if (mode === "--range") {
-  // Scan ADDED LINES, not whole files. A change that merely touches a file
-  // carrying a legacy reference publishes nothing new, and failing it would
-  // make the gate block almost every edit -- which is how a gate gets
-  // switched off. `git diff -U0` gives exactly the lines this range adds.
-  let currentFile = null;
+  return { from: null, to };
+}
+
+/** Added lines of `{from, to}`, as { file, line, text } — renames included, headers parsed by shape. */
+export function addedLines({ from, to }) {
+  const out = [];
+  // Explicit prefixes: the default `+++ b/` header depends on the user's
+  // diff.noprefix / diff.mnemonicPrefix settings, and a mis-parsed header
+  // would make the whole scan silently "clean".
+  const diff = git([
+    "diff", "-U0", "--diff-filter=ACMR", "--src-prefix=a/", "--dst-prefix=b/", from ?? EMPTY_TREE, to,
+  ]);
+  let file = null;
   let lineNo = 0;
-  for (const raw of git(["diff", "-U0", "--diff-filter=ACM", arg]).split("\n")) {
-    if (raw.startsWith("+++ b/")) {
-      currentFile = raw.slice(6);
+  let afterMinusHeader = false;
+  for (const raw of diff.split("\n")) {
+    if (raw.startsWith("diff --git ")) {
+      file = null;
+      afterMinusHeader = false;
       continue;
     }
+    if (raw.startsWith("--- ")) {
+      afterMinusHeader = true;
+      continue;
+    }
+    // Only a `+++ b/` that directly follows the `--- ` line is a header: an
+    // ADDED line whose content starts with "++" (C's `++i;`, a diff quoted in
+    // markdown) is "+++i;" and must be scanned, not swallowed.
+    if (afterMinusHeader && raw.startsWith("+++ b/")) {
+      file = raw.slice(6);
+      afterMinusHeader = false;
+      continue;
+    }
+    afterMinusHeader = false;
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(raw);
     if (hunk) {
       lineNo = Number(hunk[1]);
       continue;
     }
-    if (!raw.startsWith("+") || raw.startsWith("+++")) continue;
-    if (currentFile && !skipped(currentFile)) {
-      scan(raw.slice(1), `${currentFile}:${lineNo}`, findings);
-    }
+    if (!raw.startsWith("+")) continue;
+    if (file && !skipped(file)) out.push({ file, line: lineNo, text: raw.slice(1) });
     lineNo++;
   }
-  scan(git(["log", "--format=%B%n%an <%ae>", arg]), "commit messages", findings);
-  scan(git(["rev-parse", "--abbrev-ref", "HEAD"]), "branch name", findings, ["instance-uuid"]);
-} else {
-  console.error("usage: check-internal-refs.mjs --staged | --range A..B | --message FILE | --text ENVVAR");
-  process.exit(2);
+  return out;
 }
 
-if (findings.length === 0) {
-  console.log("internal-refs: clean");
-  process.exit(0);
+export function scanRange(range, { fallback, branch } = {}) {
+  const findings = [];
+  const resolved = resolveRange(range, fallback);
+  for (const { file, line, text } of addedLines(resolved)) scan(text, file, findings, { line });
+  const logRange = resolved.from ? `${resolved.from}..${resolved.to}` : resolved.to;
+  scan(git(["log", "--format=%B%n%an <%ae>", logRange]), "commit messages", findings);
+  if (branch) scan(branch, "branch name", findings, { exclude: ["instance-uuid"], line: 1 });
+  return { findings, resolved };
 }
 
-console.error(`\n  Refusing to publish ${findings.length} internal reference(s) to a public repository.\n`);
-const byFile = new Map();
-for (const f of findings) {
-  if (!byFile.has(f.label)) byFile.set(f.label, []);
-  byFile.get(f.label).push(f);
+function report(findings) {
+  if (findings.length === 0) {
+    console.log("internal-refs: clean");
+    return 0;
+  }
+  console.error(`\n  Refusing to publish ${findings.length} internal reference(s) to a public repository.\n`);
+  for (const f of findings.slice(0, 40)) console.error(`  ${f.where}  ${f.match}   (${f.why})`);
+  if (findings.length > 40) console.error(`  …and ${findings.length - 40} more`);
+  console.error("\n  Rewrite the reference, or set INTERNAL_REFS_ALLOW=1 for a reviewed exception.\n");
+  return process.env.INTERNAL_REFS_ALLOW === "1" ? 0 : 1;
 }
-for (const [label, list] of byFile) {
-  console.error(`  ${label}`);
-  for (const f of list.slice(0, 8)) console.error(`    ${String(f.line).padStart(5)}  ${f.match}   (${f.why})`);
-  if (list.length > 8) console.error(`    …and ${list.length - 8} more`);
-  console.error("");
+
+function main(argv) {
+  const args = [...argv];
+  const opt = (name) => {
+    const i = args.indexOf(name);
+    if (i === -1) return undefined;
+    const v = args[i + 1];
+    args.splice(i, 2);
+    return v;
+  };
+  const range = opt("--range");
+  const fallback = opt("--base-fallback");
+  const branch = opt("--branch");
+  const textVar = opt("--text");
+  const findings = [];
+
+  if (range) {
+    findings.push(...scanRange(range, { fallback, branch }).findings);
+  } else if (textVar) {
+    // Reads from an env var, never argv: PR titles and bodies are attacker-
+    // controlled text and must not be interpolated into a shell command.
+    scan(process.env[textVar] ?? "", `$${textVar}`, findings);
+  } else if (branch) {
+    scan(branch, "branch name", findings, { exclude: ["instance-uuid"], line: 1 });
+  } else {
+    console.error("usage: check-internal-refs.mjs --range A..B [--base-fallback REF] [--branch NAME] | --text ENVVAR | --branch NAME");
+    return 2;
+  }
+  return report(findings);
 }
-console.error("  Rewrite the reference, or set INTERNAL_REFS_ALLOW=1 for a reviewed exception.\n");
-process.exit(process.env.INTERNAL_REFS_ALLOW === "1" ? 0 : 1);
+
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  process.exit(main(process.argv.slice(2)));
+}
