@@ -1,0 +1,9 @@
+#!/bin/sh
+# Block a push that would publish internal references. Install with:
+#   git config core.hooksPath .githooks
+#
+# Local hooks are advisory — they are per-clone and bypassable with
+# --no-verify. The CI job is the gate that actually holds; this exists so the
+# failure arrives in two seconds instead of after a round trip.
+exec node "$(git rev-parse --show-toplevel)/scripts/check-internal-refs.mjs" \
+  --range "$(git merge-base HEAD "@{upstream}" 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)..HEAD"

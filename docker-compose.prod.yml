@@ -4,7 +4,7 @@
 # deployment: it still needs, from whoever provisions vveliev's fleet host
 # (§2.1, out of any agent's authority) —
 #
-#   - a `.env` file (not committed) populated from 1Password per the table in
+#   - a `.env` file (not committed) populated from the secrets manager per the table in
 #     docs/launch.md §2.3
 #   - a real port block reserved in the fleet's registry/PORTS.md (do not
 #     reuse dev's 11400 block — see docker-compose.yml's header)
