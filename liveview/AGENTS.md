@@ -1,5 +1,20 @@
 This is a web application written using the Phoenix web framework.
 
+## This repository is public
+
+It is a fork of a public repo, so nothing here can be made private. Everything you push —
+file content, commit messages, branch names, PR titles and bodies — is published. CI runs
+`scripts/check-internal-refs.mjs` on every push and PR and refuses:
+
+- internal tracker ids (a few capital letters, a dash, a number) — describe the change instead of citing the ticket
+- agent identities in `Co-authored-by` trailers, and any email on a non-public domain
+- internal host paths and instance/company/agent UUIDs
+- terms from a private wordlist the maintainer keeps outside the tree (`INTERNAL_REFS_WORDLIST`)
+
+Install the matching pre-push hook locally with `git config core.hooksPath .githooks` so the
+failure arrives before the round trip. Names of private infrastructure repos and the secrets
+manager stay out of docs too — say "the fleet's port registry" or "the secrets manager".
+
 ## Project guidelines
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues

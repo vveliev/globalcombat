@@ -40,6 +40,10 @@ shared by every checkout of this repo on the machine. Running `make dev` from a 
 clone or worktree re-points the running containers at that checkout's files (same
 database, same ports) rather than starting a second copy.
 
+This repository is public. CI refuses pushes and PRs that add internal tracker ids,
+non-public email addresses, or internal host paths (see `scripts/check-internal-refs.mjs`);
+enable the same check locally with `git config core.hooksPath .githooks`.
+
 Run the test suite inside the web container:
 
 ```bash
