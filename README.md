@@ -42,7 +42,9 @@ database, same ports) rather than starting a second copy.
 
 This repository is public. CI refuses pushes and PRs that add internal tracker ids,
 non-public email addresses, or internal host paths (see `scripts/check-internal-refs.mjs`);
-enable the same check locally with `git config core.hooksPath .githooks`.
+enable the same check locally with `git config core.hooksPath .githooks`. Keep private
+infrastructure out of docs too: say "the fleet's port registry" or "the secrets manager"
+rather than naming the repo or the product.
 
 Run the test suite inside the web container:
 

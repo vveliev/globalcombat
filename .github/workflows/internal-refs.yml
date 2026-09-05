@@ -14,6 +14,9 @@ name: internal-refs
 
 on:
   pull_request:
+    # `edited` is not in the default set, and a title or body rewritten after
+    # opening is published just the same.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -23,6 +26,15 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    # Everything event-derived enters through env, never through ${{ }} inside
+    # `run`: PR title/body are attacker-controlled, and even owner-controlled
+    # values like a branch name are legal shell metacharacters.
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -31,32 +43,24 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
-      # PR titles and bodies reach the public repo without ever touching git
-      # content, so the commit scan cannot see them. Agents open PRs with `gh`,
-      # which makes this the gap that mattered most to close.
-      #
-      # The text is passed through `env`, never interpolated into `run`: a PR
-      # body is attacker-controlled, and `${{ ... }}` inside a shell script is
-      # a command-injection sink.
+
+      - name: Self-test the scanner
+        run: node --test scripts/check-internal-refs.test.mjs
+
       - name: Scan pull request title and body
         if: github.event_name == 'pull_request'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           node scripts/check-internal-refs.mjs --text PR_TITLE
           node scripts/check-internal-refs.mjs --text PR_BODY
 
-      - name: Scan changed content for internal references
+      # A brand-new branch reports an all-zero base, and the first push after a
+      # history rewrite reports a base that no longer exists; the scanner then
+      # re-bases on the merge-base with the default branch, so what a push ADDS
+      # is the thing being scanned — never the whole history.
+      - name: Scan changed content, commit messages, and branch name
         run: |
-          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
-          # A newly pushed branch reports an all-zero "before". Scanning from
-          # the root commit would then re-flag every pre-existing reference and
-          # fail on day one, so fall back to the merge-base with the default
-          # branch: what this branch ADDS is the thing being published.
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            git fetch --no-tags origin "${{ github.event.repository.default_branch }}" || true
-            BASE="$(git merge-base HEAD FETCH_HEAD 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)"
-          fi
-          echo "scanning $BASE..HEAD"
-          node scripts/check-internal-refs.mjs --range "$BASE..HEAD"
+          git fetch --no-tags --quiet origin "$DEFAULT_BRANCH" || true
+          node scripts/check-internal-refs.mjs \
+            --range "$BASE_SHA..HEAD" \
+            --base-fallback "origin/$DEFAULT_BRANCH" \
+            --branch "$BRANCH_NAME"
