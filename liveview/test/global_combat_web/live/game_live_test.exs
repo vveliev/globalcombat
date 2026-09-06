@@ -88,7 +88,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       sync_game(game_id, bob_view)
 
       assert has_element?(alice_view, "#game-over-heading", "Game Over — Alice wins")
-      assert has_element?(alice_view, "#game-over-outcome", "You win!")
+      assert has_element?(alice_view, "#game-over-outcome", "You won.")
       assert has_element?(alice_view, "#game-over-standings li", "1. Alice")
       assert has_element?(alice_view, "#game-over-standings li", "2. Bob")
       assert has_element?(alice_view, "#game-over-home")
@@ -96,8 +96,41 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "button", "End Turn")
       refute has_element?(alice_view, "button", "Force Turn")
 
-      assert has_element?(bob_view, "#game-over-outcome", "You finished in place 2.")
+      # No green "Ended"/"Done" success signal for the loser, and the winner is
+      # named through the finished roster's rank marker, not the elimination "place N" path.
+      assert render(alice_view) =~ "Victory"
+      refute render(alice_view) =~ "Defeat"
+      assert render(bob_view) =~ "Defeat"
+
+      assert has_element?(bob_view, "#game-over-outcome", "You placed 2nd of 2.")
       refute has_element?(bob_view, "button", "Force Turn")
+    end
+
+    test "the finished roster shows rank, totals and score instead of the elimination path",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+
+      html = render(alice_view)
+
+      # The winner is named through the roster's ordinal rank, not "place 1" — the
+      # elimination-branch label that used to hide the winner's own totals.
+      assert html =~ "1st"
+      assert html =~ "2nd"
+      refute html =~ "place 1"
+      refute html =~ "place 2"
+
+      # Totals stay visible for every player once the game ends, including the winner
+      # (previously hidden behind the eliminated-player branch), and the final score
+      # (`Engine.Game.end_game/1`'s `gen_score`) now reaches the UI.
+      assert html =~ "Score"
+      refute html =~ "Thinking"
+      refute has_element?(alice_view, "li span", "Done")
     end
 
     test "a spectator sees the banner without a personal outcome line", %{conn: conn1} do
@@ -788,7 +821,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       render_click(bob_view, "quit")
 
-      assert wait_for(alice_view, "place") =~ "place"
+      assert wait_for(alice_view, "Game Over") =~ "Game Over"
       assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
     end
   end
