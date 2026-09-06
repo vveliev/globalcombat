@@ -38,7 +38,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Card do
       <.dynamic_tag
         :if={@header != []}
         tag_name={@heading_level}
-        class="px-[var(--space-5)] py-[var(--space-4)] border-b border-border font-semibold"
+        class="px-[var(--space-5)] py-[var(--space-4)] border-b border-border font-heading font-[var(--font-heading-weight)]"
       >
         {render_slot(@header)}
       </.dynamic_tag>

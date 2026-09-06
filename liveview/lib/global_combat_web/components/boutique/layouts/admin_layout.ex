@@ -24,7 +24,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout do
     <div
       id={@id}
       class={[
-        "grid min-h-screen bg-background text-text font-sans",
+        "grid min-h-screen bg-background text-text font-body text-[length:var(--font-body-size)] leading-[var(--font-body-leading)]",
         "grid-cols-1 grid-rows-[var(--size-topbar)_auto_minmax(0,1fr)]",
         "[grid-template-areas:'topbar'_'sidebar'_'content']",
         "lg:grid-cols-[var(--size-sidebar)_minmax(0,1fr)] lg:grid-rows-[var(--size-topbar)_minmax(0,1fr)]",

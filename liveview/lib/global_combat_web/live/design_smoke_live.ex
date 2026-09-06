@@ -30,7 +30,9 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
     ~H"""
     <GameLayout.game_layout class="min-h-screen">
       <:status>
-        <span class="font-semibold">Turn {@turn}</span>
+        <span class="font-heading font-[var(--font-heading-weight)] text-[length:var(--heading-3)] tabular-nums">
+          Turn {@turn}
+        </span>
         <StatusPill.status_pill tone="active">Resolving</StatusPill.status_pill>
         <span class="text-text-muted">Simultaneous turns · 5 minute limit</span>
       </:status>
