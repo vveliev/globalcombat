@@ -259,8 +259,9 @@ defmodule GlobalCombat.Engine.GameTest do
     end
 
     test "run_turn/1 still returns only the resolved state, unaffected by resolve_turn/1's event log" do
-      # Two still-standing players (not one) — a single-player game would hit `end_game/1`'s
-      # `alive_players <= 1` path here, which this test isn't exercising.
+      # Two still-standing players (not one) — a single-player game would hit
+      # `resolve_reinforcements_and_eliminations/1`'s `alive_players <= 1` end-game path here,
+      # which this test isn't exercising.
       game = %Game{
         map_name: :original,
         rng: DotnetRandom.new(1),
