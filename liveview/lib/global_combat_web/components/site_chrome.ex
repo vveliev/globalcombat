@@ -39,37 +39,28 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         </a>
       </:topbar>
       <:sidebar>
-        <!-- Below `lg:` this nav used to render at full height (7 links, ~273px)
+        <%!-- Below `lg:` this nav used to render at full height (7 links, ~273px)
         between the topbar and the page content, pushing the game board down a
-        full screen's worth on phone/tablet. A `<details>` disclosure
-        collapses it to a single "Menu" row by default on narrow screens;
-        `group-open:flex` reveals it once tapped. At `lg:` the summary toggle
-        hides and `lg:flex` forces the nav visible regardless of the `open`
-        attribute, so nothing changes for the desktop persistent sidebar. -->
-        <details class="group">
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-[var(--space-2)] text-sm font-semibold lg:hidden [&::-webkit-details-marker]:hidden">
+        full screen's worth on phone/tablet. A single `<nav>` toggled with
+        `hidden lg:flex`/`<details>` can't serve both breakpoints: a closed
+        `<details>` hides its content at the UA level (Chromium >=131 via
+        `::details-content { content-visibility: hidden }`, older engines via
+        an unrendered slot) regardless of an author `display` override, so
+        `lg:flex` on the nested `<nav>` never actually shows it again past
+        `lg:` — reproduced with `checkVisibility() === false` despite a
+        computed `display:flex` at 1280px. Two separate markup branches next
+        to each other avoids fighting that: a plain nav shown `hidden lg:flex`
+        for `lg:` and above, and a `<details>` disclosure shown only
+        `lg:hidden` below it, each with its own copy of the links. --%>
+        <nav class="hidden lg:flex lg:flex-col lg:gap-[var(--space-2)] text-sm">
+          {sidebar_links(assigns)}
+        </nav>
+        <details class="group lg:hidden">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-[var(--space-2)] text-sm font-semibold [&::-webkit-details-marker]:hidden">
             Menu <.icon name="hero-chevron-down" class="size-4 group-open:rotate-180" />
           </summary>
-          <nav class="mt-[var(--space-2)] hidden flex-col gap-[var(--space-2)] text-sm group-open:flex lg:mt-0 lg:flex">
-            <a href="/" class="hover:underline">Home</a>
-            <a href={~p"/Game-Manual"} class="hover:underline">Game Manual</a>
-            <hr class="border-border my-[var(--space-2)]" />
-            <%= if @current_account do %>
-              <a href={~p"/Create-Game"} class="hover:underline">New Game</a>
-              <a href={~p"/Messages"} class="hover:underline">Messages</a>
-              <a href={~p"/account/settings"} class="hover:underline">Settings</a>
-              <hr class="border-border my-[var(--space-2)]" />
-              <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
-              <hr class="border-border my-[var(--space-2)]" />
-              <form method="post" action={~p"/account/log-off"}>
-                <input type="hidden" name="_method" value="delete" />
-                <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-                <button type="submit" class="hover:underline text-left cursor-pointer">Log Off</button>
-              </form>
-            <% else %>
-              <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
-              <a href={~p"/account/register"} class="hover:underline">New Account</a>
-            <% end %>
+          <nav class="mt-[var(--space-2)] hidden flex-col gap-[var(--space-2)] text-sm group-open:flex">
+            {sidebar_links(assigns)}
           </nav>
         </details>
       </:sidebar>
@@ -82,6 +73,32 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
       <source src={~p"/Sounds/chime.ogg"} type="audio/ogg" />
       <source src={~p"/Sounds/chime.mp3"} type="audio/mp3" />
     </audio>
+    """
+  end
+
+  attr :current_account, :any, required: true
+
+  defp sidebar_links(assigns) do
+    ~H"""
+    <a href="/" class="hover:underline">Home</a>
+    <a href={~p"/Game-Manual"} class="hover:underline">Game Manual</a>
+    <hr class="border-border my-[var(--space-2)]" />
+    <%= if @current_account do %>
+      <a href={~p"/Create-Game"} class="hover:underline">New Game</a>
+      <a href={~p"/Messages"} class="hover:underline">Messages</a>
+      <a href={~p"/account/settings"} class="hover:underline">Settings</a>
+      <hr class="border-border my-[var(--space-2)]" />
+      <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
+      <hr class="border-border my-[var(--space-2)]" />
+      <form method="post" action={~p"/account/log-off"}>
+        <input type="hidden" name="_method" value="delete" />
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <button type="submit" class="hover:underline text-left cursor-pointer">Log Off</button>
+      </form>
+    <% else %>
+      <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
+      <a href={~p"/account/register"} class="hover:underline">New Account</a>
+    <% end %>
     """
   end
 end
