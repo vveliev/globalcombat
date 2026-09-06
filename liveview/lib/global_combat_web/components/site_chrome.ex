@@ -18,6 +18,13 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   GIF-86). `sr-only` because the design has no visual slot for a page title (`Card`'s own
   `:header` already carries the visible section titles) and this port isn't the place to
   add one.
+
+  `current_path` marks the matching sidebar link `aria-current="page"`. It is rendered
+  server-side rather than patched in by a script because this chrome sits inside LiveViews
+  as well as controller pages: a client-side attribute would not survive LiveView's first
+  patch after the socket joins, and would never re-run on live navigation. Controller
+  pages get the assign from `GlobalCombatWeb.Plugs.CurrentPath`; LiveViews get it from the
+  `handle_params` hook `GlobalCombatWeb.UserAuth.on_mount/4` attaches.
   """
 
   use Phoenix.Component
@@ -26,8 +33,11 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   import Phoenix.Controller, only: [get_csrf_token: 0]
   import GlobalCombatWeb.CoreComponents, only: [icon: 1]
 
+  alias GlobalCombatWeb.Layouts
+
   attr :current_account, :any, default: nil
   attr :page_title, :string, default: nil
+  attr :current_path, :string, default: nil, doc: "request path, for the active sidebar link"
   slot :inner_block, required: true
 
   def site_chrome(assigns) do
@@ -37,6 +47,9 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         <a href="/" class="flex items-center gap-[var(--space-2)] font-semibold text-text">
           GLOBAL COMBAT
         </a>
+        <div class="ml-auto">
+          <Layouts.theme_toggle />
+        </div>
       </:topbar>
       <:sidebar>
         <%!-- Below `lg:` this nav used to render at full height (7 links, ~273px)
@@ -77,28 +90,52 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   end
 
   attr :current_account, :any, required: true
+  attr :current_path, :string, required: true
 
   defp sidebar_links(assigns) do
     ~H"""
-    <a href="/" class="hover:underline">Home</a>
-    <a href={~p"/Game-Manual"} class="hover:underline">Game Manual</a>
+    <.nav_link href="/" current_path={@current_path}>Home</.nav_link>
+    <.nav_link href={~p"/Game-Manual"} current_path={@current_path}>Game Manual</.nav_link>
     <hr class="border-border my-[var(--space-2)]" />
     <%= if @current_account do %>
-      <a href={~p"/Create-Game"} class="hover:underline">New Game</a>
-      <a href={~p"/Messages"} class="hover:underline">Messages</a>
-      <a href={~p"/account/settings"} class="hover:underline">Settings</a>
+      <.nav_link href={~p"/Create-Game"} current_path={@current_path}>New Game</.nav_link>
+      <.nav_link href={~p"/Messages"} current_path={@current_path}>Messages</.nav_link>
+      <.nav_link href={~p"/account/settings"} current_path={@current_path}>Settings</.nav_link>
       <hr class="border-border my-[var(--space-2)]" />
-      <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
+      <.nav_link href={~p"/account/contact"} current_path={@current_path}>Contact Us</.nav_link>
       <hr class="border-border my-[var(--space-2)]" />
       <form method="post" action={~p"/account/log-off"}>
         <input type="hidden" name="_method" value="delete" />
         <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-        <button type="submit" class="hover:underline text-left cursor-pointer">Log Off</button>
+        <button type="submit" class={nav_link_class()}>Log Off</button>
       </form>
     <% else %>
-      <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
-      <a href={~p"/account/register"} class="hover:underline">New Account</a>
+      <.nav_link href={~p"/account/log-on"} current_path={@current_path}>Log On</.nav_link>
+      <.nav_link href={~p"/account/register"} current_path={@current_path}>New Account</.nav_link>
     <% end %>
     """
+  end
+
+  attr :href, :string, required: true
+  attr :current_path, :string, required: true
+  slot :inner_block, required: true
+
+  defp nav_link(assigns) do
+    ~H"""
+    <a href={@href} aria-current={@current_path == @href && "page"} class={nav_link_class()}>
+      {render_slot(@inner_block)}
+    </a>
+    """
+  end
+
+  # Shared by every sidebar `<a>` and the "Log Off" `<button>` (semantically a
+  # form submit, styled as a nav item) so the two element kinds can never
+  # drift apart, and so `aria-current="page"` has a visual hook to land on.
+  defp nav_link_class do
+    [
+      "rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-1)] text-left cursor-pointer",
+      "hover:bg-surface-muted hover:underline",
+      "aria-[current=page]:bg-surface-muted aria-[current=page]:font-semibold aria-[current=page]:text-text"
+    ]
   end
 end

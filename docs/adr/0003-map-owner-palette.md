@@ -56,3 +56,21 @@ elsewhere in the system.
   `natural` default), so nothing changed visibly — but the variant is no longer a trap.
 - If the boutique vocabulary ever gains a categorical/chart palette, the `--map-owner-N`
   aliases should be re-pointed at it and this ADR superseded.
+
+## Amendment (2026-09-05): dark-mode owner contrast
+
+The "contrast is not the palette's job" consequence above is about army-count *text*
+legibility, which the stroke-under-fill treatment noted above does guarantee regardless of
+fill colour. It says nothing about a territory being visually distinguishable from the
+sea it sits in — that's a fill-vs-fill contrast, and a 2026-09-05 design critique of the
+Game Over screen found two owner slots fail it against dark mode's
+`--map-sea` (`--gray-8`, deliberately much darker than light mode's pale sea):
+`--map-owner-6` (`--gray-6`, ~2.7:1) and `--map-owner-8` (`--orange-7`, ~1.7:1), both
+under the 3:1 WCAG 1.4.11 floor for non-text UI. `--map-owner-3` (`--yellow-3`) was
+audited alongside them and clears 3:1 comfortably in both themes.
+
+`[data-theme$="-dark"]` now re-aliases owner 6 to `--gray-4` (two steps lighter than
+`--gray-6`) and owner 8 to `--orange-3` (four steps lighter than `--orange-7`), chosen
+to land in the same ~4-7:1 band the rest of the palette already gets against
+`--gray-8`, while keeping owner 8 far enough from owner 4's unchanged `--orange-5` on
+the same orange ramp that the two stay easy to tell apart. Light mode is untouched.

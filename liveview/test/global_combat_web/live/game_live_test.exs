@@ -90,8 +90,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#game-over", "Game Over · Turn")
       assert has_element?(alice_view, "#game-over-heading", "Victory")
       assert has_element?(alice_view, "#game-over-outcome", "You won.")
-      assert has_element?(alice_view, "#game-over-standings li", "1. Alice")
-      assert has_element?(alice_view, "#game-over-standings li", "2. Bob")
+      # Placing order is part of the claim, so assert position, not just membership.
+      assert has_element?(alice_view, "#game-over-standings li:nth-child(1)", "1. Alice")
+      assert has_element?(alice_view, "#game-over-standings li:nth-child(2)", "2. Bob")
       assert has_element?(alice_view, "#game-over-play-again", "Play again")
       assert has_element?(alice_view, "#game-over-home", "Back to Home")
       refute has_element?(alice_view, "#game-board", "Region Bonuses")
@@ -201,6 +202,19 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ "Log Off"
     # the board itself must still be present, nested inside that chrome.
     assert html =~ ~r/id="game-board"/
+  end
+
+  test "the page has one sr-only h1 for the game and the lobby heading is an h2 under it", %{
+    conn: conn
+  } do
+    alice = account_fixture(%{"name" => "Alice"})
+    game_id = Games.create_game(%{max_players: 2})
+    {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+    {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+    assert has_element?(view, "h1.sr-only", "Game #{game_id}")
+    assert has_element?(view, "#lobby h2", "Game #{game_id}")
+    refute has_element?(view, "#lobby h1")
   end
 
   test "the lobby (pre-Start-Game) also keeps the site chrome visible (GIF-102)", %{conn: conn} do
