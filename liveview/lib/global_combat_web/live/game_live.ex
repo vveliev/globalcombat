@@ -28,6 +28,7 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.Components.Boutique.Button
   alias GlobalCombatWeb.Components.Boutique.Card
   alias GlobalCombatWeb.Components.Boutique.Input
+  alias GlobalCombatWeb.Components.Boutique.Kicker
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
   alias GlobalCombatWeb.Components.Boutique.SegmentedControl
   alias GlobalCombatWeb.Components.Boutique.StatusPill
@@ -720,6 +721,8 @@ defmodule GlobalCombatWeb.GameLive do
   # Every map is a responsive SVG (`WorldMap`) — the legacy per-owner GIF
   # sprites `Index.cshtml` composited at fixed pixel offsets are gone.
   defp board(assigns) do
+    assigns = assign(assigns, :winner, find_winner(assigns.view.players))
+
     ~H"""
     <.game_over :if={@view.ended} view={@view} />
     <div class="flex flex-col gap-[var(--space-4)]">
@@ -730,7 +733,7 @@ defmodule GlobalCombatWeb.GameLive do
           <:option value="frontier">Frontier</:option>
         </SegmentedControl.segmented_control>
       </form>
-      <div class="w-full max-w-[60rem]">
+      <figure class="m-0 w-full max-w-[60rem]">
         <WorldMap.world_map
           map_name={@view.map_name}
           areas={@view.areas}
@@ -742,9 +745,15 @@ defmodule GlobalCombatWeb.GameLive do
           interactive={!@view.ended}
           replay_steps={@replay_steps}
         />
-      </div>
+        <figcaption
+          :if={@view.ended && @winner}
+          class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
+        >
+          {@winner.name} holds all {length(@view.areas)} territories.
+        </figcaption>
+      </figure>
       <div class="flex flex-wrap items-start gap-[var(--space-4)]">
-        <.region_bonuses map_name={@view.map_name} />
+        <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
         <.your_orders_card :if={my_orders(@view) != []} orders={my_orders(@view)} />
         <.order_panel
           :if={@selected_area && !@view.ended}
@@ -768,66 +777,126 @@ defmodule GlobalCombatWeb.GameLive do
     """
   end
 
-  # GIF-122: once `engine.ended` the board used to look exactly like a live turn — "Waiting on
-  # other players… [Force Turn]" with the outcome only visible as a small "place 1" next to a
-  # name in the roster. This is the explicit end-of-game state: a winner banner up top, the
-  # final standings, and the in-progress controls (End Turn / Force Turn / Quit) gone.
+  # `engine.ended` is an explicit state instead of a live turn stuck on "Waiting on
+  # other players… [Force Turn]" with the outcome buried as a small "place 1" in the roster.
+  # That state carries the weight the finale of the game deserves: a headline the size of
+  # a real heading (not `text-lg`), the board's own owner colour bleeding into the panel instead
+  # of a neutral `border-divider` box, full per-player final stats (not just a placing number —
+  # `player_list`'s roster hides armies/areas the instant `place > 0`, which is every seated
+  # player once the game has ended, winner included), and a primary next action (`Play again`)
+  # instead of leaving Send in chat as the only `intent="primary"` button on the page.
+  #
+  # `role="status"`/`aria-live="polite"` never fired here — this section exists at first render
+  # for anyone loading an already-finished game, and a live region only announces *changes*
+  # after mount. `aria-labelledby` gives it a name for landmark navigation without pretending to
+  # announce a mutation that already happened by the time the socket connects.
   attr :view, :map, required: true
 
   defp game_over(assigns) do
-    winner = Enum.find(assigns.view.players, &(&1.place == 1))
+    winner = find_winner(assigns.view.players)
     standings = assigns.view.players |> Enum.filter(&(&1.place > 0)) |> Enum.sort_by(& &1.place)
+    role = viewer_role(assigns.view, winner)
 
     assigns =
       assign(assigns,
         winner: winner,
         standings: standings,
-        outcome: viewer_outcome(assigns.view, winner)
+        headline: headline(role, winner),
+        outcome: viewer_outcome(role, assigns.view, length(assigns.view.players))
       )
 
     ~H"""
     <section
       id="game-over"
-      role="status"
-      aria-live="polite"
-      class="mb-[var(--space-4)] rounded border border-divider p-[var(--space-4)] flex flex-col gap-[var(--space-2)]"
+      aria-labelledby="game-over-heading"
+      class="world-map-owner mb-[var(--space-4)] flex flex-col gap-[var(--space-3)] rounded-[var(--radius-md)] border border-divider border-l-4 bg-surface p-[var(--space-5)]"
+      data-owner={@winner && WorldMap.owner_slot(@winner.number)}
+      style="border-left-color: var(--map-owner-fill, var(--map-owner-0));"
     >
+      <Kicker.kicker>Game Over · Turn {@view.turn}</Kicker.kicker>
+
       <h2
         id="game-over-heading"
-        class="heading-3"
+        class="m-0 font-heading font-[var(--font-heading-weight)] text-[length:var(--heading-2)] leading-[var(--heading-leading)] tracking-[var(--heading-tracking)] text-text"
       >
-        Game Over<span :if={@winner}> — {@winner.name} wins</span>
+        {@headline}
       </h2>
-      <p :if={@outcome} id="game-over-outcome" class="text-text-muted">{@outcome}</p>
+
+      <p :if={@outcome} id="game-over-outcome" class="m-0 text-text">{@outcome}</p>
+
       <ol
         :if={@standings != []}
         id="game-over-standings"
-        class="flex flex-wrap gap-[var(--space-3)] text-sm"
+        class="mt-[var(--space-2)] flex flex-col gap-[var(--space-2)]"
       >
-        <li :for={p <- @standings}>{p.place}. {p.name}</li>
+        <li
+          :for={p <- @standings}
+          class="flex items-center justify-between gap-[var(--space-4)] text-[length:var(--text-sm)]"
+        >
+          <span class="flex items-center gap-[var(--space-2)]">
+            <span
+              class="world-map-swatch world-map-owner"
+              data-owner={WorldMap.owner_slot(p.number)}
+              aria-hidden="true"
+            />
+            <span class={p.place == 1 && "font-semibold"}>{p.place}. {p.name}</span>
+          </span>
+          <span class="text-text-muted">{p.armies} armies · {p.areas} territories</span>
+        </li>
       </ol>
-      <a id="game-over-home" href={~p"/"} class="hover:underline font-semibold">Back to Home</a>
+
+      <div class="mt-[var(--space-2)] flex flex-wrap gap-[var(--space-3)]">
+        <Button.button id="game-over-play-again" intent="primary" navigate={~p"/Create-Game"}>
+          Play again
+        </Button.button>
+        <Button.button id="game-over-home" intent="neutral" navigate={~p"/"}>
+          Back to Home
+        </Button.button>
+      </div>
     </section>
     """
   end
 
-  # The viewer's own line under the banner; `nil` for a spectator.
-  defp viewer_outcome(view, winner) do
+  defp find_winner(players), do: Enum.find(players, &(&1.place == 1))
+
+  # :winner/:loser require a seat (`my_player/1`); anyone else — logged out, or logged in but
+  # never joined this game — is a :spectator, same viewer this module already treats as one
+  # everywhere else (`viewer_number: nil`).
+  defp viewer_role(view, winner) do
     cond do
-      winner && winner.number == view.viewer_number -> "You won."
-      me = my_player(view) -> "You placed #{ordinal(me.place)} of #{length(view.players)}."
-      true -> nil
+      winner && winner.number == view.viewer_number -> :winner
+      my_player(view) -> :loser
+      true -> :spectator
     end
   end
+
+  defp headline(:winner, _winner), do: "Victory"
+  defp headline(:loser, _winner), do: "Defeat"
+  defp headline(:spectator, nil), do: "Game Over"
+  defp headline(:spectator, winner), do: "#{winner.name} wins"
+
+  # The viewer's own line under the headline; `nil` for a spectator.
+  defp viewer_outcome(:winner, _view, _total), do: "You won."
+
+  defp viewer_outcome(:loser, view, total),
+    do: "You placed #{ordinal(my_player(view).place)} of #{total}."
+
+  defp viewer_outcome(:spectator, _view, _total), do: nil
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
 
   # Player-facing ordinal ("1st place"), replacing the engine's bare `place` integer
   # ("place 1") that used to leak straight into the UI — port of `Player.cs`'s `GetPlace()`.
-  defp ordinal(1), do: "1st"
-  defp ordinal(2), do: "2nd"
-  defp ordinal(3), do: "3rd"
-  defp ordinal(n), do: "#{n}th"
+  defp ordinal(n) when rem(n, 100) in 11..13, do: "#{n}th"
+
+  defp ordinal(n) do
+    case rem(n, 10) do
+      1 -> "#{n}st"
+      2 -> "#{n}nd"
+      3 -> "#{n}rd"
+      _ -> "#{n}th"
+    end
+  end
 
   # GIF-111's order-composition panel — LiveView equivalent of `Main.js`'s
   # `EntryForm`/`ActionMessage`/`AmountInput`/`ActionSubmit`. `:assign` (no target

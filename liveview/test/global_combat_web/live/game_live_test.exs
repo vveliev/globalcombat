@@ -68,8 +68,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2") =~ "Turn 2"
   end
 
-  describe "end of game (GIF-122)" do
-    test "a finished game shows a Game Over banner naming the winner and drops the in-progress controls",
+  describe "end of game" do
+    test "the winner sees Victory, full standings, and a primary Play again action",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
 
@@ -87,21 +87,19 @@ defmodule GlobalCombatWeb.GameLiveTest do
       sync_game(game_id, alice_view)
       sync_game(game_id, bob_view)
 
-      assert has_element?(alice_view, "#game-over-heading", "Game Over — Alice wins")
+      assert has_element?(alice_view, "#game-over", "Game Over · Turn")
+      assert has_element?(alice_view, "#game-over-heading", "Victory")
       assert has_element?(alice_view, "#game-over-outcome", "You won.")
       assert has_element?(alice_view, "#game-over-standings li", "1. Alice")
       assert has_element?(alice_view, "#game-over-standings li", "2. Bob")
-      assert has_element?(alice_view, "#game-over-home")
+      assert has_element?(alice_view, "#game-over-play-again", "Play again")
+      assert has_element?(alice_view, "#game-over-home", "Back to Home")
+      refute has_element?(alice_view, "#game-board", "Region Bonuses")
       refute has_element?(alice_view, "#turn-controls")
       refute has_element?(alice_view, "button", "End Turn")
       refute has_element?(alice_view, "button", "Force Turn")
 
-      # No green "Ended"/"Done" success signal for the loser, and the winner is
-      # named through the finished roster's rank marker, not the elimination "place N" path.
-      assert render(alice_view) =~ "Victory"
-      refute render(alice_view) =~ "Defeat"
-      assert render(bob_view) =~ "Defeat"
-
+      assert has_element?(bob_view, "#game-over-heading", "Defeat")
       assert has_element?(bob_view, "#game-over-outcome", "You placed 2nd of 2.")
       refute has_element?(bob_view, "button", "Force Turn")
     end
@@ -133,14 +131,16 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "li span", "Done")
     end
 
-    test "a spectator sees the banner without a personal outcome line", %{conn: conn1} do
+    test "a spectator sees the winner named in the headline and no personal outcome line",
+         %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
       %{game_id: game_id, bob: bob} = start_two_player_game(conn1, conn2)
       :ok = Games.quit(game_id, bob.id)
 
       {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
-      assert has_element?(spectator, "#game-over-heading", "Game Over — Alice wins")
+      assert has_element?(spectator, "#game-over-heading", "Alice wins")
       refute has_element?(spectator, "#game-over-outcome")
+      assert has_element?(spectator, "#game-over-play-again", "Play again")
     end
 
     test "clicking a territory on a finished game is a no-op — no order panel, no focusable/clickable territory",

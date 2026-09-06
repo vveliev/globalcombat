@@ -50,6 +50,19 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
     assert html =~ "disabled"
   end
 
+  test "renders as a link, not a button, when given navigate/href/patch" do
+    assigns = %{}
+
+    html =
+      rendered_to_string(~H"""
+      <Button.button intent="primary" navigate="/Create-Game">Play again</Button.button>
+      """)
+
+    assert html =~ ~r/<a[^>]*href="\/Create-Game"/
+    assert html =~ "bg-primary"
+    refute html =~ "<button"
+  end
+
   test "references semantic tokens only — no literal hex/rgb/hsl colors in source" do
     source = File.read!("lib/global_combat_web/components/boutique/button.ex")
     refute source =~ ~r/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/
