@@ -24,6 +24,7 @@ defmodule GlobalCombat.Games.LiveResolver do
   alias GlobalCombat.Engine.Wire
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Server
+  alias GlobalCombat.Games.TurnLog
   alias GlobalCombat.GrpcHost
 
   @impl true
@@ -47,10 +48,10 @@ defmodule GlobalCombat.Games.LiveResolver do
   defp resolve_offline(%{serialized: serialized} = game) do
     wire = GrpcHost.Game.decode(serialized)
     rng = DotnetRandom.new(:erlang.unique_integer())
-    %{engine: engine} = Wire.from_wire_snapshot(wire, rng)
+    %{engine: old_engine} = Wire.from_wire_snapshot(wire, rng)
 
-    before_owners = Map.new(engine.areas, fn {number, area} -> {number, area.owner_number} end)
-    {engine, events} = Engine.resolve_turn(engine)
+    {engine, events} = Engine.resolve_turn(old_engine)
+    turn_log = TurnLog.snapshot(old_engine, engine, events)
 
     resolved_wire =
       Wire.to_wire_game(engine,
@@ -60,12 +61,7 @@ defmodule GlobalCombat.Games.LiveResolver do
         is_fogged: Map.fetch!(wire, :IsFogged)
       )
 
-    GamesDb.persist_serialized(game.id, GrpcHost.Game.encode(resolved_wire))
-
-    GamesDb.persist_last_turn_events(
-      game.id,
-      :erlang.term_to_binary({events, before_owners})
-    )
+    GamesDb.persist_turn(game.id, GrpcHost.Game.encode(resolved_wire), TurnLog.encode(turn_log))
 
     if engine.ended, do: GamesDb.finish_game(game.id)
 
