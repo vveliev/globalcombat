@@ -1,7 +1,7 @@
 import Config
 
 # Configure your database
-# Ports follow the fleet's block scheme (skynet registry/PORTS.md): this
+# Ports follow the fleet's block scheme (the fleet's port registry): this
 # project owns block 11400 — 11400 web, 11410 gRPC engine, 11434 mysql.
 config :global_combat, GlobalCombat.Repo,
   username: System.get_env("MYSQL_USER", "root"),

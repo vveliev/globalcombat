@@ -1,7 +1,7 @@
 # Local development stack for the Global Combat port.
 #
-# Ports and the network subnet are allocated in the fleet registry
-# (vveliev/skynet, registry/PORTS.md) so nothing here collides with another
+# Ports and the network subnet are allocated in the fleet's private port registry
+# so nothing here collides with another
 # project running at the same time. This project owns block 11400:
 #
 #   11400  Phoenix / LiveView web        (+00)

@@ -16,6 +16,14 @@
       content={GlobalCombatWeb.Layouts.open_chat_windows_json(assigns[:open_chat_windows])}
     />
     <.live_title default="GlobalCombat" suffix=" · Phoenix Framework" phx-no-format>{assigns[:page_title]}</.live_title>
+    <%!-- AGENTS.md forbids external script/link hrefs in layouts (vendor deps
+         must go through app.js/app.css); a preconnect resource hint carries
+         no payload, so it's a reasonable exception — design-boutique's brand
+         fonts load via Google Fonts @import inside app.css (see
+         assets/css/app.css) and these warm the connection so the @import's
+         request doesn't pay DNS/TLS setup after CSS parses. --%>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>

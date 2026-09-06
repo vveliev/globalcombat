@@ -111,9 +111,20 @@ absorbing an empty React slot's area.
 | `management_layout` | `:filter_bar`*, `:primary`, `:inspector`* | Same dense filter/primary/inspector split; omitting `:inspector` collapses its column |
 | `marketing_layout` | `:nav`*, `:hero`*, `:section` (repeatable, `muted` slot attr)*, `:footer`* | Same full-bleed bands wrapping a centered `--size-page` column; sticky nav |
 | `console_layout` | `:banner`*, `:queue`*, `:stage`, `:focus`*, `:strip`* | Same fixed-viewport cockpit; `lg:h-screen` (100vh, no page scroll) holds only at `lg:` and above |
-| `game_layout` | `:status`*, `:board`, `:players`* | **New, LiveView-only** — board region + player panel + live status for turn-based multiplayer (`DESIGN-CONTRACTS.md`'s C5 pending list). No React shape to mirror: designed directly against this doc's slot/grid-area/token contract. |
+| `game_layout` | `:status`*, `:board`, `:players`* | **New, LiveView-only** — board region + player panel + live status for turn-based multiplayer (`DESIGN-CONTRACTS.md`'s C5 pending list). No React shape to mirror: designed directly against this doc's slot/grid-area/token contract. `players_first` (boolean attr, default `false`) flips the below-`lg:` stack from `status/board/players` to `status/players/board` — once a game has ended, the outcome and final standings matter more than a board a phone/tablet viewport clips to a fraction of the map; the side-by-side `lg:` arrangement is unaffected either way. |
 
 \* optional — same absorbed-empty-area behavior as the React table above.
+
+Every shell root sets `font-body` (brand body typeface) plus the app-level
+`heading-3`/`body-text` Tailwind utilities (`assets/css/app.css`) so headings
+and body copy pick up the active theme's `--font-heading`/`--font-body`
+instead of Tailwind's generic `font-sans` stack. `console_layout`
+and `management_layout` are the one deviation: per this doc's "dense" density
+contract (their own sections above) they keep `text-[length:var(--text-sm)]`
+instead of `body-text`'s `--font-body-size` — one step tighter than the other
+four shells, same as their existing padding/type density call
+(`DESIGN-CONTRACTS.md` C7). `font-body` and `--font-body-leading` still apply
+to both, so only the size deviates.
 
 Responsive collapse (all shells except Marketing, which has no grid to
 collapse): at `lg:` — Tailwind's default 64rem breakpoint is the same

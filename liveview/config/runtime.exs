@@ -119,7 +119,7 @@ if config_env() == :prod do
   #
   # Password reset and account notifications (`GlobalCombat.Accounts.Notifier`) go out through
   # Mailgun when its credentials are present. `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` come from
-  # 1Password via the fleet's compose env, like `DATABASE_URL`/`SECRET_KEY_BASE` above;
+  # the secrets manager via the fleet's compose env, like `DATABASE_URL`/`SECRET_KEY_BASE` above;
   # `MAILER_FROM` is the bare sender address (defaults to no-reply@ the Mailgun domain).
   # Without a key the app boots on a log-only adapter and says so — see
   # `GlobalCombat.MailerConfig` for why that is not `Swoosh.Adapters.Local` in prod.

@@ -53,10 +53,10 @@ which domain answers, since `PHX_HOST` is already an environment variable
 
 **Decision: deploy to vveliev's existing self-hosted fleet, not a cloud PaaS.** Evidence for
 this, not a preference: the dev stack (`docker-compose.yml`) already reserves a port block
-(`11400`) against a fleet-wide port registry (`vveliev/skynet`, `registry/PORTS.md`) and picks
+(`11400`) against the fleet-wide port registry and picks
 its Docker subnet specifically to avoid colliding with other projects on that same fleet. That
-registry and the fleet it describes live in `vveliev/home-lab`, a repo this company's agents
-cannot reach (see GIF-57's cross-company note) — so the actual host machine, reverse proxy, and
+registry and the fleet it describes live in a private infrastructure repo this project's agents
+cannot reach — so the actual host machine, reverse proxy, and
 TLS termination are **vveliev's action item**, not something this doc or an agent can provision
 directly.
 
@@ -103,21 +103,21 @@ and `GRPC_HOST`/`GRPC_PORT` are read the same way in `lib/global_combat/game_eng
 No new config-loading mechanism needs to be built; what's missing is *where the values come from*
 and *how they reach the container*.
 
-**Decision:** environment variables, sourced from 1Password, injected via the fleet's compose
+**Decision:** environment variables, sourced from the secrets manager, injected via the fleet's compose
 stack (a production `docker-compose.yml`/`.env`, not committed with real values — same shape as
-the dev file, different content). This is not a new pattern for this org: GIF-57 already
-established 1Password as the source of truth for secrets, reconciling out-of-band Paperclip
+the dev file, different content). This is not a new pattern for this org: the fleet already
+established its secrets manager as the source of truth for secrets, reconciling out-of-band board
 secrets against it. The values needed:
 
 | Variable | Consumed by | Source |
 |---|---|---|
-| `DATABASE_URL` | Phoenix (`runtime.exs`) | 1Password, generated at DB provisioning (§3) |
-| `SECRET_KEY_BASE` | Phoenix (`runtime.exs`) | 1Password, generated once via `mix phx.gen.secret` |
+| `DATABASE_URL` | Phoenix (`runtime.exs`) | secrets manager, generated at DB provisioning (§3) |
+| `SECRET_KEY_BASE` | Phoenix (`runtime.exs`) | secrets manager, generated once via `mix phx.gen.secret` |
 | `PHX_HOST` | Phoenix (`runtime.exs`) | Whichever domain is live per §1 — not a secret, but must track DNS |
 | `GRPC_HOST` / `GRPC_PORT` | Phoenix → GrpcHost (`client.ex`) | Fleet-internal service name/port, not a secret |
-| `MAILGUN_API_KEY` / mailer config | Phoenix (account notifications — `accounts/notifier.ex`) | 1Password; **mailer adapter itself is still unconfigured** — `runtime.exs` only has a commented example. Needs a decision on which transactional-email provider before password-reset emails work in prod. |
+| `MAILGUN_API_KEY` / mailer config | Phoenix (account notifications — `accounts/notifier.ex`) | secrets manager; **mailer adapter itself is still unconfigured** — `runtime.exs` only has a commented example. Needs a decision on which transactional-email provider before password-reset emails work in prod. |
 
-**Owner: vveliev** for provisioning the 1Password items and wiring them into the fleet's
+**Owner: vveliev** for provisioning the secrets-manager items and wiring them into the fleet's
 deployment mechanism (however it injects env vars today — outside this company's visibility per
 the GIF-57 boundary). The mailer-provider decision is a small open sub-question; flagged in Gaps.
 
@@ -191,7 +191,7 @@ cleanly, with no player-facing system left half-up.
 | Domain (contact upstream / register alternate) | vveliev | Track 1 open, no fixed deadline. Track 2 decided: launch on hosting provider's default subdomain first (zero-cost interim) — see Status below |
 | Fleet host + port block + reverse proxy/TLS | vveliev | Not yet provisioned — vveliev will ping when ready to hand off details |
 | Production release Dockerfiles + `phx.gen.release` | **Done** — GIF-110, PR #34 (merged to `main`) | Shipped `Dockerfile.prod` for both services, `bin/server`/`bin/migrate` overlays, `docker-compose.prod.yml` |
-| 1Password secrets wired into fleet deploy mechanism | vveliev | Not yet provisioned |
+| Secrets wired into fleet deploy mechanism | vveliev | Not yet provisioned |
 | Mailer provider decision | Follow-up issue (new) | Blocks password-reset emails only, not launch |
 | MySQL instance sizing + backup job | vveliev | Provision alongside app host |
 | Migration execution (`mix ecto.migrate`) on deploy | Release-owner (same as Dockerfiles) | `bin/migrate` shipped in PR #34, ready to run once a host exists |
@@ -206,10 +206,10 @@ Per the decisions vveliev made on GIF-110's launch-decisions interaction:
   `globalcombat.com`) remains open with no fixed timeline.
 - **Fleet host:** not yet provisioned. vveliev will ping when ready to hand off the host/port/TLS
   details from §2.1.
-- **Secrets:** not yet provisioned in 1Password.
+- **Secrets:** not yet provisioned in the secrets manager.
 - **Go-live:** vveliev will run the actual deploy from the release artifacts in PR #34, not an
-  agent — the same cross-company fleet boundary as GIF-57 (`vveliev/home-lab` is unreachable from
-  this company's agents).
+  agent — the same cross-company fleet boundary noted in §2.1 (the infrastructure repo is
+  unreachable from this project's agents).
 
 This closes the in-repo portion of this plan (§2.2's Dockerfiles/release scaffolding). Everything
 else in the Owners summary above is an out-of-band action on vveliev's fleet; there is nothing

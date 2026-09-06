@@ -12,6 +12,7 @@ defmodule GlobalCombatWeb.Router do
     plug :put_secure_browser_headers
     plug :fetch_current_account
     plug :fetch_open_chat_windows
+    plug GlobalCombatWeb.Plugs.CurrentPath
   end
 
   pipeline :api do

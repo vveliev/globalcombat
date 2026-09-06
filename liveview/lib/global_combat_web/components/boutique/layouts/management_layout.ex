@@ -11,6 +11,13 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.ManagementLayout do
   (Tailwind's 64rem breakpoint matches `--size-collapse`,
   tokens/scales.json) — a CSS media query stands in for the React
   version's `useCollapsed()` hook.
+
+  Root uses `text-[length:var(--text-sm)]` rather than the `body-text`
+  utility's `--font-body-size` — "type runs one step tighter" (above) is
+  this shell's density contract and predates the brand-typography wiring
+  below it (`LAYOUTS.md`, `DESIGN-CONTRACTS.md` C7); `font-body` and
+  `--font-body-leading` still apply so the brand typeface and rhythm
+  carry through, only the size is denser, same as `ConsoleLayout`.
   """
   use Phoenix.Component
 
@@ -27,7 +34,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.ManagementLayout do
     <div
       id={@id}
       class={[
-        "grid min-h-screen bg-background text-text font-sans text-[length:var(--text-sm)]",
+        "grid min-h-screen bg-background text-text font-body text-[length:var(--text-sm)] leading-[var(--font-body-leading)]",
         "grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto]",
         "[grid-template-areas:'filter'_'primary'_'inspector']",
         "lg:grid-cols-[minmax(0,1fr)_auto] lg:grid-rows-[auto_minmax(0,1fr)]",

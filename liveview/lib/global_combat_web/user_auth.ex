@@ -98,7 +98,22 @@ defmodule GlobalCombatWeb.UserAuth do
   def on_mount(:assign_current_account, _params, session, socket) do
     account_id = Map.get(session, "account_id") || Map.get(session, @account_id_key)
     account = account_id && Accounts.get_account(account_id)
-    {:cont, Phoenix.Component.assign(socket, :current_account, account)}
+
+    socket =
+      socket
+      |> Phoenix.Component.assign(:current_account, account)
+      |> Phoenix.Component.assign(:current_path, nil)
+      |> Phoenix.LiveView.attach_hook(:current_path, :handle_params, &assign_current_path/3)
+
+    {:cont, socket}
+  end
+
+  # LiveView counterpart of `GlobalCombatWeb.Plugs.CurrentPath`: `SiteChrome` marks the
+  # sidebar link matching `:current_path` as `aria-current="page"`, and a LiveView only
+  # learns its URL in `handle_params`, which is also the callback that re-fires on live
+  # navigation, so the marker follows the user across pages.
+  defp assign_current_path(_params, uri, socket) do
+    {:cont, Phoenix.Component.assign(socket, :current_path, URI.parse(uri).path)}
   end
 
   @doc "Plug: redirects logged-in visitors away from LogOn/Register, same intent as the legacy `RedirectToAction` after a successful LogOn."
