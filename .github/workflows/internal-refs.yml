@@ -35,6 +35,18 @@ jobs:
       BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
+      # This fleet provisions every coding agent with the same fixed
+      # commit-author identity on an internal domain, and a single
+      # feature-branch agent cannot change that provisioning (global git
+      # config is off-limits to agents). Exempts that exact address from the
+      # internal-email pattern, but only as a commit *author* -- the same
+      # address in file content, a commit message, PR text, or a branch name
+      # still fails the gate. The address itself is a repo variable, not a
+      # literal here, so this exception doesn't itself publish the thing the
+      # gate exists to keep out of a public repo. Empty/unset is safe: the
+      # allowlist is then empty and behavior is unchanged. Remove once the
+      # identity itself is reprovisioned with a non-internal domain.
+      INTERNAL_REFS_AGENT_AUTHORS: ${{ vars.INTERNAL_REFS_AGENT_AUTHORS }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:

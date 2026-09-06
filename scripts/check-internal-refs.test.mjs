@@ -101,6 +101,31 @@ test("commit messages and author identities in the range are scanned in full", (
   assert.deepEqual(new Set(findings.map((f) => f.id)), new Set(["agent-trailer", "internal-email"]));
 });
 
+test("a commit author on the allowlist is exempt, but the same address in a commit message is not", () => {
+  const r = repo();
+  r.write("f", "x\n");
+  const base = r.commit("base");
+  r.write("f", "y\n");
+  r.g("add", "-A");
+  r.g("commit", "-q", "-m", "fix thing", "--author", `Agent <${mail("agent", "example", "internal")}>`);
+  const findings = inRepo(r.dir, () => scanRange(`${base}..HEAD`, { authorAllowlist: new Set([mail("agent", "example", "internal")]) }).findings);
+  assert.deepEqual(findings, []);
+
+  const notAllowlisted = inRepo(r.dir, () => scanRange(`${base}..HEAD`).findings);
+  assert.deepEqual(ids(notAllowlisted), [`internal-email@commit authors:1`]);
+
+  r.write("f", "z\n");
+  r.commit(`edit\n\nsee ${mail("agent", "example", "internal")} for context`);
+  const messageStillFlagged = inRepo(r.dir, () =>
+    scanRange(`${base}..HEAD`, { authorAllowlist: new Set([mail("agent", "example", "internal")]) }).findings,
+  );
+  assert.deepEqual(
+    messageStillFlagged.map((f) => f.id),
+    ["internal-email"],
+    "the allowlist covers author identity only, never the same address appearing in message text",
+  );
+});
+
 test("the branch name is scanned by name, not from the checked-out HEAD", () => {
   const r = repo();
   r.write("f", "x\n");

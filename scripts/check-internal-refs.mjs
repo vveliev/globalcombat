@@ -67,6 +67,24 @@ export const PATTERNS = [
   },
 ];
 
+// Known, reviewed coding-agent author identities that are exempt from the
+// internal-email pattern *only when that email is the commit author*: this
+// fleet's harness provisions every coding agent with the same fixed
+// author identity on an @...internal domain, agents cannot change git config
+// themselves, and blanket INTERNAL_REFS_ALLOW=1 would suppress every pattern
+// everywhere. This is scoped narrowly instead: it never touches file content,
+// PR title/body, branch names, or the commit-message body, so a real internal
+// address leaked into any of those still fails the gate. Set from the
+// workflow env, not a secret, so the exemption is visible to reviewers of
+// this public repo. Reprovisioning the identity itself (the preferred fix)
+// is tracked separately and removes the need for this once it lands.
+const AGENT_AUTHOR_ALLOWLIST = new Set(
+  (process.env.INTERNAL_REFS_AGENT_AUTHORS ?? "")
+    .split(/[,\n]/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 const wordlistPath = process.env.INTERNAL_REFS_WORDLIST;
 if (wordlistPath && existsSync(wordlistPath)) {
   const words = readFileSync(wordlistPath, "utf8")
@@ -106,13 +124,18 @@ const commitExists = (rev) => git(["cat-file", "-e", `${rev}^{commit}`], { allow
  *   metadata that reveals nothing -- the UUID rule exists to catch instance/
  *   company/agent ids leaking into published *content*, and applying it to a
  *   branch name would forbid the safest template available.
+ * @param authorAllowlist emails exempt from the `internal-email` pattern,
+ *   applied only by the caller scanning commit-author identity (see
+ *   AGENT_AUTHOR_ALLOWLIST) -- never passed when scanning content, commit
+ *   messages, PR text, or branch names.
  */
-export function scan(text, label, findings, { exclude = [], line = null } = {}) {
+export function scan(text, label, findings, { exclude = [], line = null, authorAllowlist = null } = {}) {
   for (const p of PATTERNS) {
     if (exclude.includes(p.id)) continue;
     p.re.lastIndex = 0;
     for (const m of text.matchAll(p.re)) {
       if (p.ignore && p.ignore.test(m[0])) continue;
+      if (authorAllowlist && p.id === "internal-email" && authorAllowlist.has(m[0].toLowerCase())) continue;
       const at = line ?? text.slice(0, m.index).split("\n").length;
       findings.push({ where: `${label}:${at}`, match: m[0].split("\n")[0].slice(0, 90), why: p.why, id: p.id });
     }
@@ -181,12 +204,17 @@ export function addedLines({ from, to }) {
   return out;
 }
 
-export function scanRange(range, { fallback, branch } = {}) {
+export function scanRange(range, { fallback, branch, authorAllowlist = AGENT_AUTHOR_ALLOWLIST } = {}) {
   const findings = [];
   const resolved = resolveRange(range, fallback);
   for (const { file, line, text } of addedLines(resolved)) scan(text, file, findings, { line });
   const logRange = resolved.from ? `${resolved.from}..${resolved.to}` : resolved.to;
-  scan(git(["log", "--format=%B%n%an <%ae>", logRange]), "commit messages", findings);
+  scan(git(["log", "--format=%B", logRange]), "commit messages", findings);
+  // Author identity is scanned separately from the message body so the
+  // allowlist -- which must only ever cover a commit's *author*, never
+  // arbitrary text a commit message can carry -- has something narrower than
+  // the whole blob to apply to.
+  scan(git(["log", "--format=%an <%ae>", logRange]), "commit authors", findings, { authorAllowlist });
   if (branch) scan(branch, "branch name", findings, { exclude: ["instance-uuid"], line: 1 });
   return { findings, resolved };
 }
