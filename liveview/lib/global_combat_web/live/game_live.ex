@@ -32,6 +32,7 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
   alias GlobalCombatWeb.Components.Boutique.SegmentedControl
   alias GlobalCombatWeb.Components.Boutique.StatusPill
+  alias GlobalCombatWeb.GameLive.Replay
   alias GlobalCombatWeb.GameLive.WorldMap
 
   @impl true
@@ -394,8 +395,21 @@ defmodule GlobalCombatWeb.GameLive do
 
   # --- rendering -------------------------------------------------------------
 
+  # Computed once per render (not per sub-template) so `status_line/1`'s replay
+  # controls and `board/1`'s WorldMap + results list always agree on the same
+  # steps — see `GameLive.Replay.steps/4` for the shape.
   @impl true
-  def render(assigns) do
+  def render(%{status: :playing} = assigns) do
+    assigns = assign(assigns, :replay_steps, replay_steps(assigns.view))
+    render_game(assigns)
+  end
+
+  def render(assigns), do: render_game(assigns)
+
+  defp replay_steps(view),
+    do: Replay.steps(view.last_turn_events, view.areas, view.players, view.map_name)
+
+  defp render_game(assigns) do
     ~H"""
     <.site_chrome current_account={@current_account}>
       <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
@@ -449,6 +463,139 @@ defmodule GlobalCombatWeb.GameLive do
           }
         }
       </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".TurnReplay">
+        // Replays the last resolved turn from the JSON payload LiveView
+        // put in `data-steps` (`GameLive.Replay.steps/4`, already fog-filtered) —
+        // every play/step/back afterwards is pure client-side timing, no
+        // `pushEvent` round trip ("the hook owns the timing"). Mounted on a
+        // wrapper that renders every turn regardless of whether there's anything
+        // to replay, so `updated()` reliably fires exactly once per resolved
+        // turn (comparing `data-turn`) whether or not the *previous* turn had
+        // any visible events of its own.
+        //
+        // Delegates clicks from the wrapper rather than binding the buttons
+        // directly: the buttons themselves come and go (rendered only when
+        // `@steps != []`), but this element's `id` never does, so LiveView
+        // never remounts the hook — only a plain `updated()` patch.
+        export default {
+          mounted() {
+            this.current = -1
+            this.timer = null
+            this.seenTurn = this.el.dataset.turn
+            this.el.addEventListener("click", (e) => this.onClick(e))
+            this.render()
+          },
+
+          updated() {
+            const turn = this.el.dataset.turn
+            const isNewTurn = turn !== this.seenTurn
+            this.seenTurn = turn
+
+            if (!isNewTurn) {
+              // Some *other* part of this LiveView patched (a chat message, a
+              // player's status pill) and happened to touch this subtree —
+              // must not wipe a viewer's in-progress replay position.
+              this.render()
+              return
+            }
+
+            this.stop()
+            this.current = -1
+
+            if (!this.reducedMotion() && this.steps().length > 0) {
+              this.play()
+            } else {
+              this.render()
+            }
+          },
+
+          destroyed() {
+            this.stop()
+          },
+
+          onClick(e) {
+            if (e.target.closest("[data-replay-play]")) this.play()
+            else if (e.target.closest("[data-replay-back]")) { this.stop(); this.show(this.current - 1) }
+            else if (e.target.closest("[data-replay-forward]")) { this.stop(); this.show(this.current + 1) }
+          },
+
+          steps() {
+            return JSON.parse(this.el.dataset.steps)
+          },
+
+          reducedMotion() {
+            return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          },
+
+          play() {
+            this.stop()
+            this.show(-1)
+            this.timer = setInterval(() => {
+              if (this.current >= this.steps().length - 1) { this.stop(); return }
+              this.show(this.current + 1)
+            }, 900)
+          },
+
+          stop() {
+            if (this.timer) clearInterval(this.timer)
+            this.timer = null
+          },
+
+          show(index) {
+            const steps = this.steps()
+            this.current = Math.max(-1, Math.min(index, steps.length - 1))
+            this.render()
+          },
+
+          render() {
+            const steps = this.steps()
+            const animate = !this.reducedMotion()
+            const board = document.getElementById("world-map-replay")
+
+            if (board) {
+              board.classList.toggle("world-map-replay--js", animate)
+
+              board.querySelectorAll("[data-step]").forEach((el) => {
+                const step = Number(el.dataset.step)
+                el.classList.toggle("is-revealed", step <= this.current)
+
+                if (el.classList.contains("world-map-replay-pulse")) {
+                  // Landing on the capture step always shows *some* indicator —
+                  // reduced motion (media query, `app.css`) drops the animating
+                  // keyframe but keeps a static ring rather than suppressing it
+                  // outright, so "no animation" doesn't also mean "no signal".
+                  el.classList.remove("is-active")
+                  if (step === this.current) { void el.offsetWidth; el.classList.add("is-active") }
+                }
+              })
+            }
+
+            document.querySelectorAll("#turn-results-list [data-step]").forEach((el) => {
+              const step = Number(el.dataset.step)
+              el.classList.toggle("is-current", step === this.current)
+              if (step === this.current) el.setAttribute("aria-current", "step")
+              else el.removeAttribute("aria-current")
+            })
+
+            const counts = {}
+            for (let i = 0; i <= this.current; i++) {
+              (steps[i]?.counts || []).forEach(({area, value}) => { counts[area] = value })
+            }
+            Object.entries(counts).forEach(([area, value]) => {
+              const el = document.querySelector(`#territory-${area} .world-map-count`)
+              if (el?.firstChild) el.firstChild.textContent = value
+            })
+
+            const announce = document.getElementById("turn-replay-announce")
+            if (announce) announce.textContent = this.current >= 0 ? (steps[this.current]?.text || "") : ""
+
+            const back = this.el.querySelector("[data-replay-back]")
+            const forward = this.el.querySelector("[data-replay-forward]")
+            if (back) back.disabled = this.current <= -1
+            if (forward) forward.disabled = this.current >= steps.length - 1
+          }
+        }
+      </script>
     </.site_chrome>
     """
   end
@@ -474,6 +621,7 @@ defmodule GlobalCombatWeb.GameLive do
       {@ended_pill.label}
     </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
+    <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
     """
   end
 
@@ -487,6 +635,40 @@ defmodule GlobalCombatWeb.GameLive do
       %{place: 1} -> %{tone: "done", label: "Victory"}
       _ -> %{tone: "blocked", label: "Defeat"}
     end
+  end
+
+  # Play/back/forward for the last-turn replay, plus the live-region
+  # announcement span the `.TurnReplay` hook narrates each step into (picked up by
+  # `GameLayout`'s already-`aria-live="polite"` `:status` section — see that
+  # module's moduledoc). The wrapper itself renders every turn regardless of
+  # whether there's anything to replay, and only its *contents* are conditional —
+  # `data-turn` has to change on an element the hook stays mounted on the whole
+  # time for `updated/0` to reliably tell "a new turn resolved" from "this turn
+  # simply had no visible events", including the very next turn that does.
+  # Stepping/announcing here is otherwise plain client-side JS (no phx-click):
+  # "the hook owns the timing", not the server.
+  attr :turn, :integer, required: true
+  attr :steps, :list, required: true
+
+  defp turn_replay_controls(assigns) do
+    assigns = assign(assigns, :steps_json, Jason.encode!(assigns.steps))
+
+    ~H"""
+    <div
+      id="turn-replay-controls"
+      phx-hook=".TurnReplay"
+      data-turn={@turn}
+      data-steps={@steps_json}
+      class="flex items-center gap-[var(--space-2)]"
+    >
+      <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
+        <Button.button type="button" data-replay-play>Turn {@turn} results ▶</Button.button>
+        <Button.button type="button" intent="neutral" data-replay-back>◀ Step</Button.button>
+        <Button.button type="button" intent="neutral" data-replay-forward>Step ▶</Button.button>
+      </span>
+      <span id="turn-replay-announce" class="sr-only"></span>
+    </div>
+    """
   end
 
   defp lobby(assigns) do
@@ -557,6 +739,7 @@ defmodule GlobalCombatWeb.GameLive do
           lens={@lens}
           viewer_number={@view.viewer_number}
           interactive={!@view.ended}
+          replay_steps={@replay_steps}
         />
         <figcaption
           :if={@view.ended && @winner}
@@ -575,6 +758,7 @@ defmodule GlobalCombatWeb.GameLive do
           target_area={@target_area}
           order_amount={@order_amount}
         />
+        <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
       </div>
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
@@ -798,6 +982,28 @@ defmodule GlobalCombatWeb.GameLive do
       <ul id="your-orders" class="flex flex-col gap-[var(--space-1)] text-sm">
         <li :for={order <- @orders}>{order}</li>
       </ul>
+    </Card.card>
+    """
+  end
+
+  # The accessible equivalent of the board's replay arrows/counts — every
+  # `GameLive.Replay.steps/4` line as ordinary, always-present text next to the
+  # board (works with no JS, and is exactly what `prefers-reduced-motion` falls
+  # back to). The `.TurnReplay` hook toggles `aria-current`/`.is-current` on each
+  # `<li>` as the sighted replay steps through them; nothing here depends on it.
+  attr :turn, :integer, required: true
+  attr :steps, :list, required: true
+
+  defp turn_results(assigns) do
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>Turn {@turn} results</:header>
+      <ol
+        id="turn-results-list"
+        class="flex flex-col gap-[var(--space-1)] text-sm list-decimal pl-[var(--space-4)]"
+      >
+        <li :for={step <- @steps} data-step={step.index}>{step.text}</li>
+      </ol>
     </Card.card>
     """
   end
