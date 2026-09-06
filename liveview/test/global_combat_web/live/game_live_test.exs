@@ -226,6 +226,34 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "good luck!") =~ "Alice"
   end
 
+  test "the chat input carries a label and stays inside the players rail (WCAG 3.3.2)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    # A placeholder alone isn't an accessible name (WCAG 3.3.2) — the input
+    # needs a real <label>.
+    assert has_element?(alice_view, "label[for=chat-message]", "Message")
+
+    # The rail is a fixed `--size-rail` (15rem); without `min-w-0` the input's
+    # intrinsic content width won the flex layout and pushed the Send button
+    # past the rail's right edge. Assert the class survives on the
+    # rendered <input>, not just in the component source.
+    assert has_element?(alice_view, "input#chat-message.min-w-0")
+
+    # The exact-match selector also proves the placeholder has no trailing
+    # period (WCAG 3.3.2 phrasing nit fixed alongside the layout bug).
+    assert has_element?(alice_view, "input#chat-message[placeholder='Send a message']")
+  end
+
+  test "an empty chat log shows a muted empty state instead of nothing",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, "li.text-text-muted", "No messages yet.")
+  end
+
   test "one player marking done shows up on the other session without a full reload (GameHub.SetDone -> setDone)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
