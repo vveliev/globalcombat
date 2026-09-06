@@ -532,6 +532,131 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  describe "pending-orders overlay" do
+    test "a queued attack draws a labelled, clickable arrow that re-opens the order panel", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(
+               alice_view,
+               ~s(g.world-map-order[data-area="1"][aria-label="Attack #{area_two_name} with 4 armies from Alaska"])
+             )
+
+      assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
+
+      # The panel closed on submit — clicking the arrow re-selects area 1, same as
+      # clicking the territory itself, so the player can review/edit the order
+      # instead of only being able to see that it exists.
+      refute has_element?(alice_view, "#order-form")
+      html = render_click(alice_view, "select_area", %{"area" => "1"})
+      assert html =~ "Assign new armies or select a target area"
+    end
+
+    test "a queued transfer draws the primary-hued arrow, not the attack/danger one", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--transfer))
+      refute has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
+    end
+
+    test "an assign-only order (no target) draws no arrow", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_submit(alice_view, "submit_order", %{"amount" => "5"})
+      sync_game(game_id, alice_view)
+
+      refute has_element?(alice_view, "g.world-map-order")
+    end
+
+    test "the viewer's own orders are also listed as text in a Your orders card", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      refute has_element?(alice_view, "#your-orders")
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(
+               alice_view,
+               "#your-orders li",
+               "Attack #{area_two_name} with 4 armies from Alaska"
+             )
+    end
+
+    test "an opponent never sees another player's queued order — not as an arrow, not in their own Your orders card",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      # Positive control: Alice, the order's owner, does see it — so the assertions
+      # below are actually exercising the fog boundary, not a broken feature.
+      assert has_element?(alice_view, "g.world-map-order")
+
+      refute render(bob_view) =~ "world-map-order"
+      refute has_element?(bob_view, "#your-orders")
+    end
+
+    test "the arrow disappears once the turn resolves", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(alice_view, "g.world-map-order")
+
+      render_click(alice_view, "done")
+      render_click(bob_view, "done")
+      wait_for(alice_view, "Turn 2")
+
+      refute has_element?(alice_view, "g.world-map-order")
+      refute has_element?(alice_view, "#your-orders")
+    end
+  end
+
   describe "fog of war (leak regression)" do
     # deal_areas/2's round-robin can leave every area adjacent to some opponent (e.g. a
     # 2-way alternating deal on a densely-linked map) — that's a property of the demo
