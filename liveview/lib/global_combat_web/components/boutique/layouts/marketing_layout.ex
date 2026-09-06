@@ -31,7 +31,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.MarketingLayout do
     ~H"""
     <div
       id={@id}
-      class={["min-h-screen flex flex-col bg-background text-text font-sans", @class]}
+      class={[
+        "min-h-screen flex flex-col bg-background text-text font-body text-[length:var(--font-body-size)] leading-[var(--font-body-leading)]",
+        @class
+      ]}
       {@rest}
     >
       <header

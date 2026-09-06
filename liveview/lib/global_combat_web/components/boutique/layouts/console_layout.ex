@@ -31,7 +31,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.ConsoleLayout do
     <div
       id={@id}
       class={[
-        "grid min-h-screen lg:h-screen bg-background text-text font-sans text-[length:var(--text-sm)]",
+        "grid min-h-screen lg:h-screen bg-background text-text font-body text-[length:var(--text-sm)] leading-[var(--font-body-leading)]",
         "grid-cols-1 grid-rows-[auto_auto_auto_auto_auto]",
         "[grid-template-areas:'banner'_'stage'_'focus'_'queue'_'strip']",
         "lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:grid-rows-[auto_minmax(0,1fr)_auto]",
