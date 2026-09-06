@@ -209,14 +209,43 @@ defmodule GlobalCombat.Engine.Game do
   def run_turn(%__MODULE__{ended: true} = game), do: game
 
   def run_turn(%__MODULE__{} = game) do
+    {game, _events} = resolve_turn(game)
     game
-    |> Map.update!(:turn, &(&1 + 1))
-    |> reset_done_flags()
-    |> assign_armies()
-    |> do_transfers()
-    |> do_attacks()
-    |> clear_commands()
-    |> resolve_reinforcements_and_eliminations()
+  end
+
+  @doc """
+  GIF-185: same resolution `run_turn/1` performs, plus the ordered log of what happened along the
+  way — `run_turn/1` (and therefore the differential harness and `Wire`'s persisted snapshot,
+  which only ever round-trip the resulting `%Game{}`) is unchanged; this is purely an additive
+  view built from the same pass, for players who want to see the turn play out rather than just
+  its aftermath.
+
+  Returns `{game, events}`, `events` a list of, in resolution order:
+
+    * `{:assign, area_number, amount}` — reinforcements landing (`assign_armies`)
+    * `{:transfer, from_area_number, to_area_number, amount}` — a completed transfer
+    * `{:attack, from_area_number, to_area_number, amount, attacker_lost, defender_lost, captured?}`
+    * `{:eliminated, player_number}`
+    * `{:ended, winner_player_number}`
+
+  `game.turn` (already incremented by the time this returns, same as `run_turn/1`) is the turn
+  number these events belong to. A no-op once the game has ended, matching `run_turn/1`.
+  """
+  def resolve_turn(%__MODULE__{ended: true} = game), do: {game, []}
+
+  def resolve_turn(%__MODULE__{} = game) do
+    game =
+      game
+      |> Map.update!(:turn, &(&1 + 1))
+      |> reset_done_flags()
+
+    {game, assign_events} = assign_armies(game)
+    {game, transfer_events} = do_transfers(game)
+    {game, attack_events} = do_attacks(game)
+    game = clear_commands(game)
+    {game, end_events} = resolve_reinforcements_and_eliminations(game)
+
+    {game, assign_events ++ transfer_events ++ attack_events ++ end_events}
   end
 
   @doc "Port of `Game.ResetDoneFlags`. AccountId 1 is the reserved \"Computer\" convention — always treated as done, never waited on."
@@ -228,28 +257,49 @@ defmodule GlobalCombat.Engine.Game do
   end
 
   defp assign_armies(game) do
-    Enum.reduce(areas_in_order(game), game, fn area, game ->
-      update_area(
-        game,
-        area.number,
-        &%{&1 | armies: &1.armies + &1.assigned_armies, assigned_armies: 0}
-      )
+    Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
+      events =
+        if area.assigned_armies > 0,
+          do: events ++ [{:assign, area.number, area.assigned_armies}],
+          else: events
+
+      game =
+        update_area(
+          game,
+          area.number,
+          &%{&1 | armies: &1.armies + &1.assigned_armies, assigned_armies: 0}
+        )
+
+      {game, events}
     end)
   end
 
   defp do_transfers(game) do
-    Enum.reduce(areas_in_order(game), game, fn area, game ->
-      if area.command == :transfer, do: do_transfer(game, area.number), else: game
+    Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
+      if area.command == :transfer do
+        {game, event} = do_transfer_and_event(game, area.number)
+        {game, events ++ [event]}
+      else
+        {game, events}
+      end
     end)
   end
 
   @doc "Port of `Game.DoTransfer`."
   def do_transfer(game, area_number) do
+    {game, _event} = do_transfer_and_event(game, area_number)
+    game
+  end
+
+  defp do_transfer_and_event(game, area_number) do
     area = area!(game, area_number)
 
-    game
-    |> update_area(area.target_number, &%{&1 | armies: &1.armies + area.amount})
-    |> update_area(area_number, &%{&1 | armies: &1.armies - area.amount})
+    game =
+      game
+      |> update_area(area.target_number, &%{&1 | armies: &1.armies + area.amount})
+      |> update_area(area_number, &%{&1 | armies: &1.armies - area.amount})
+
+    {game, {:transfer, area_number, area.target_number, area.amount}}
   end
 
   # Stable sort by Amount (descending, or ascending under ReverseAttackOrder),
@@ -264,21 +314,37 @@ defmodule GlobalCombat.Engine.Game do
       areas_in_order(game)
       |> Enum.sort_by(& &1.amount, order)
 
-    Enum.reduce(sorted, game, fn area, game ->
+    Enum.reduce(sorted, {game, []}, fn area, {game, events} ->
       # Re-fetch: an earlier attack in this same pass may have overwritten
       # this area's Command (see do_attack/2's defender-command-cancel).
       current = area!(game, area.number)
-      if current.command == :attack, do: do_attack(game, area.number), else: game
+
+      if current.command == :attack do
+        {game, event} = do_attack_and_event(game, area.number)
+        events = if event, do: events ++ [event], else: events
+        {game, events}
+      else
+        {game, events}
+      end
     end)
   end
 
   @doc "Port of `Game.DoAttack`. Returns the updated game (the original's narrated message string is not ported — see moduledoc)."
   def do_attack(game, attacker_number) do
+    {game, _event} = do_attack_and_event(game, attacker_number)
+    game
+  end
+
+  # Same resolution as `do_attack/2`, plus (for GIF-185) the `{:attack, ...}` event describing it
+  # — `nil` for the two ways an attack order can resolve to nothing happening at all (already-
+  # same-owner, or clamped down to a non-positive amount), since no event is more useful there
+  # than a misleading "0 losses, no capture" record of an attack that never actually rolled.
+  defp do_attack_and_event(game, attacker_number) do
     attacker = area!(game, attacker_number)
     defender = area!(game, attacker.target_number)
 
     if same_owner?(attacker, defender) do
-      game
+      {game, nil}
     else
       # Game.cs only clamps (and only *possibly* early-returns) when Amount actually exceeds
       # Armies - 1. If Amount is already <= Armies - 1 — including Amount == 0 — the code falls
@@ -293,7 +359,7 @@ defmodule GlobalCombat.Engine.Game do
       amount = if needs_clamp, do: attacker.armies - 1, else: attacker.amount
 
       if needs_clamp and amount <= 0 do
-        game
+        {game, nil}
       else
         # `DotnetRandom.next(rng, min, max)` is exclusive of `max`, matching `Random.Next(int,
         # int)` — `Rng.Next(1, 10 + 1) <= 6` in Game.cs is `next(rng, 1, 11)` here, not
@@ -306,28 +372,40 @@ defmodule GlobalCombat.Engine.Game do
 
         defend_damage = min(defend_damage, amount)
 
-        if attack_damage >= defender.armies and defend_damage < amount do
-          # Attacker wins: takes the area. Defender's own queued command is
-          # cancelled (Game.cs: `defender.Command = Command.None`) since it
-          # no longer belongs to that player when the sorted attack pass
-          # reaches it, if it hasn't already.
-          game
-          |> update_area(attacker_number, &%{&1 | armies: &1.armies - amount})
-          |> update_area(defender.number, fn d ->
-            %{
-              d
-              | armies: amount - defend_damage,
-                owner_number: attacker.owner_number,
-                command: :none
-            }
-          end)
-          |> update_player(attacker.owner_number, &%{&1 | areas: &1.areas + 1})
-          |> update_player(defender.owner_number, &%{&1 | areas: &1.areas - 1})
-        else
-          game
-          |> update_area(defender.number, &%{&1 | armies: &1.armies - attack_damage})
-          |> update_area(attacker_number, &%{&1 | armies: &1.armies - defend_damage})
-        end
+        captured? = attack_damage >= defender.armies and defend_damage < amount
+
+        game =
+          if captured? do
+            # Attacker wins: takes the area. Defender's own queued command is
+            # cancelled (Game.cs: `defender.Command = Command.None`) since it
+            # no longer belongs to that player when the sorted attack pass
+            # reaches it, if it hasn't already.
+            game
+            |> update_area(attacker_number, &%{&1 | armies: &1.armies - amount})
+            |> update_area(defender.number, fn d ->
+              %{
+                d
+                | armies: amount - defend_damage,
+                  owner_number: attacker.owner_number,
+                  command: :none
+              }
+            end)
+            |> update_player(attacker.owner_number, &%{&1 | areas: &1.areas + 1})
+            |> update_player(defender.owner_number, &%{&1 | areas: &1.areas - 1})
+          else
+            game
+            |> update_area(defender.number, &%{&1 | armies: &1.armies - attack_damage})
+            |> update_area(attacker_number, &%{&1 | armies: &1.armies - defend_damage})
+          end
+
+        # `attack_damage` is capped to `defender.armies` above, and `captured?` requires
+        # `attack_damage >= defender.armies` — so on capture, `attack_damage == defender.armies`
+        # exactly: the defender's *entire* garrison is lost either way, not just the capped roll.
+        event =
+          {:attack, attacker_number, defender.number, amount, defend_damage, attack_damage,
+           captured?}
+
+        {game, event}
       end
     end
   end
@@ -359,23 +437,30 @@ defmodule GlobalCombat.Engine.Game do
   end
 
   defp resolve_reinforcements_and_eliminations(game) do
-    {game, alive_players} =
-      Enum.reduce(players_in_order(game), {game, 0}, fn player, {game, alive_players} ->
+    {game, alive_players, events} =
+      Enum.reduce(players_in_order(game), {game, 0, []}, fn player,
+                                                             {game, alive_players, events} ->
         player = player!(game, player.number)
 
         cond do
           eliminated?(player) ->
-            {game, alive_players}
+            {game, alive_players, events}
 
           player.areas == 0 ->
-            {eliminate_player(game, player.number), alive_players}
+            {game, new_events} = eliminate_player_and_events(game, player.number)
+            {game, alive_players, events ++ new_events}
 
           true ->
-            {reinforce(game, player.number), alive_players + 1}
+            {reinforce(game, player.number), alive_players + 1, events}
         end
       end)
 
-    if alive_players <= 1, do: end_game(game), else: game
+    if alive_players <= 1 do
+      {game, end_events} = end_game_and_events(game)
+      {game, events ++ end_events}
+    else
+      {game, events}
+    end
   end
 
   defp reinforce(game, player_number) do
@@ -414,6 +499,11 @@ defmodule GlobalCombat.Engine.Game do
 
   @doc "Port of `Game.EliminatePlayer` (only the RunTurn-reachable path — `loser.IsEliminated` is always false here, RunTurn only calls this on non-eliminated players)."
   def eliminate_player(game, player_number) do
+    {game, _events} = eliminate_player_and_events(game, player_number)
+    game
+  end
+
+  defp eliminate_player_and_events(game, player_number) do
     place = players_in_order(game) |> Enum.count(&(not eliminated?(&1)))
 
     game =
@@ -421,13 +511,25 @@ defmodule GlobalCombat.Engine.Game do
         %{p | areas: 0, armies: 0, unassigned_armies: 0, place: place, done: true}
       end)
 
-    if place <= 2, do: end_game(game), else: game
+    events = [{:eliminated, player_number}]
+
+    if place <= 2 do
+      {game, end_events} = end_game_and_events(game)
+      {game, events ++ end_events}
+    else
+      {game, events}
+    end
   end
 
   @doc "Port of `Game.End`. A no-op once already ended, matching the original's guard (so a mid-loop early end from `eliminate_player/2` doesn't get recomputed by the trailing alive_players<=1 check)."
-  def end_game(%__MODULE__{ended: true} = game), do: game
+  def end_game(game) do
+    {game, _events} = end_game_and_events(game)
+    game
+  end
 
-  def end_game(%__MODULE__{} = game) do
+  defp end_game_and_events(%__MODULE__{ended: true} = game), do: {game, []}
+
+  defp end_game_and_events(%__MODULE__{} = game) do
     winner = players_in_order(game) |> Enum.find(&(&1.place <= 1))
     game = if winner, do: update_player(game, winner.number, &%{&1 | place: 1}), else: game
 
@@ -446,7 +548,7 @@ defmodule GlobalCombat.Engine.Game do
         end)
       end
 
-    %{game | ended: true}
+    {%{game | ended: true}, [{:ended, winner && winner.number}]}
   end
 
   @doc "Port of `Game.GenScoreExpected` — note the 1500f divisor is a 32-bit float in the original, emulated here via `to_float32/1` since it measurably changes the result's low bits."

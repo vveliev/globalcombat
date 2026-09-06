@@ -34,6 +34,28 @@ defmodule GlobalCombat.Games.PlayerView do
   fog-gated — `Index.cshtml`'s `PlayerReadout` table shows every player's totals to
   everyone in the game regardless of `IsFogged`; only the per-area board detail is
   hidden. A spectator (`viewer_number: nil`) sees exactly what a fogged non-owner sees.
+
+  ## GIF-185: turn-resolution event visibility
+
+  `last_turn_events` (the previous turn's `GlobalCombat.Engine.Game.resolve_turn/1` log) is
+  filtered by the *same* rule as the board above, applied per event rather than per area — an
+  event is exposed only if every area it touches (`{:assign, area, _}`'s one area; `{:transfer,
+  from, to, _}`/`{:attack, from, to, ...}`'s two) was visible to this viewer (owned, or adjacent
+  to an owned area) at *either* endpoint of the turn: right before it resolved, or right after.
+  Checking only "after" would leak a hidden area's fate the instant it changes hands (an attack
+  into fog the viewer had no way to see coming); checking only "before" would keep hiding an
+  attack the viewer's own troops just captured visibility into. Both instants have to be checked
+  independently — `owns_adjacent?/3` depends on a *neighboring* area's owner, which can itself
+  flip mid-turn, so "visible before" and "visible after" are genuinely different computations,
+  not the same check run twice. `{:eliminated, _}`/`{:ended, _}` touch no area and are never
+  filtered, matching the player-roll-up rule above (elimination/game-end is public information,
+  not a board detail).
+
+  The "before" ownership snapshot has no equivalent already sitting in `Engine.Game` — the engine
+  is pure and only ever hands back the *resolved* state (see its moduledoc's "old state is
+  discarded" framing) — so `GlobalCombat.Games.Server` captures owner numbers only (never army
+  counts, which this rule never needs) just before calling `resolve_turn/1`, and threads them
+  through as `last_turn_before_owners`.
   """
 
   alias GlobalCombat.Engine.Game, as: Engine
@@ -48,7 +70,8 @@ defmodule GlobalCombat.Games.PlayerView do
     :viewer_number,
     areas: [],
     players: [],
-    messages: []
+    messages: [],
+    last_turn_events: []
   ]
 
   @doc """
@@ -60,6 +83,8 @@ defmodule GlobalCombat.Games.PlayerView do
     game_id = Keyword.fetch!(opts, :game_id)
     is_fogged = Keyword.fetch!(opts, :is_fogged)
     messages = Keyword.get(opts, :messages, [])
+    last_turn_events = Keyword.get(opts, :last_turn_events, [])
+    last_turn_before_owners = Keyword.get(opts, :last_turn_before_owners, %{})
 
     %__MODULE__{
       game_id: game_id,
@@ -71,7 +96,12 @@ defmodule GlobalCombat.Games.PlayerView do
       areas:
         Enum.map(Engine.areas_in_order(engine), &area_view(engine, &1, viewer_number, is_fogged)),
       players: Enum.map(Engine.players_in_order(engine), &player_summary/1),
-      messages: messages
+      messages: messages,
+      last_turn_events:
+        Enum.filter(
+          last_turn_events,
+          &event_visible?(&1, engine, last_turn_before_owners, viewer_number, is_fogged)
+        )
     }
   end
 
@@ -119,6 +149,44 @@ defmodule GlobalCombat.Games.PlayerView do
     |> Enum.any?(fn inbound_number ->
       Engine.area!(engine, inbound_number).owner_number == viewer_number
     end)
+  end
+
+  # See the moduledoc's "GIF-185: turn-resolution event visibility" section — an event is exposed
+  # only if every area it touches was visible to this viewer either right before this turn
+  # resolved (`before_owners`) or right after (`engine`'s own current state); `{:eliminated, _}`/
+  # `{:ended, _}` touch no area and are always exposed, same as the player roll-ups above.
+  defp event_visible?(event, engine, before_owners, viewer_number, is_fogged) do
+    before_owner = before_owners_lookup(before_owners)
+    current_owner = current_owner_lookup(engine)
+
+    event
+    |> event_area_numbers()
+    |> Enum.all?(fn area_number ->
+      area_visible_at?(before_owner, engine, viewer_number, is_fogged, area_number) or
+        area_visible_at?(current_owner, engine, viewer_number, is_fogged, area_number)
+    end)
+  end
+
+  defp event_area_numbers({:assign, area, _amount}), do: [area]
+  defp event_area_numbers({:transfer, from, to, _amount}), do: [from, to]
+
+  defp event_area_numbers(
+         {:attack, from, to, _amount, _attacker_lost, _defender_lost, _captured?}
+       ),
+       do: [from, to]
+
+  defp event_area_numbers({:eliminated, _player}), do: []
+  defp event_area_numbers({:ended, _winner}), do: []
+
+  defp before_owners_lookup(before_owners), do: fn number -> Map.fetch!(before_owners, number) end
+  defp current_owner_lookup(engine), do: fn number -> Engine.area!(engine, number).owner_number end
+
+  defp area_visible_at?(_owner_of, _engine, _viewer_number, false, _area_number), do: true
+
+  defp area_visible_at?(owner_of, engine, viewer_number, true, area_number) do
+    owner_of.(area_number) == viewer_number or
+      MapInfo.inbounds(engine.map_name, area_number)
+      |> Enum.any?(&(owner_of.(&1) == viewer_number))
   end
 
   defp player_summary(%Engine.Player{} = player) do

@@ -49,7 +49,8 @@ defmodule GlobalCombat.Games.LiveResolver do
     rng = DotnetRandom.new(:erlang.unique_integer())
     %{engine: engine} = Wire.from_wire_snapshot(wire, rng)
 
-    engine = Engine.run_turn(engine)
+    before_owners = Map.new(engine.areas, fn {number, area} -> {number, area.owner_number} end)
+    {engine, events} = Engine.resolve_turn(engine)
 
     resolved_wire =
       Wire.to_wire_game(engine,
@@ -60,6 +61,12 @@ defmodule GlobalCombat.Games.LiveResolver do
       )
 
     GamesDb.persist_serialized(game.id, GrpcHost.Game.encode(resolved_wire))
+
+    GamesDb.persist_last_turn_events(
+      game.id,
+      :erlang.term_to_binary({events, before_owners})
+    )
+
     if engine.ended, do: GamesDb.finish_game(game.id)
 
     :ok
