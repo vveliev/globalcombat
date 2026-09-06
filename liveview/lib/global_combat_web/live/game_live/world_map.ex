@@ -122,6 +122,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: nil,
     doc: "`PlayerView.viewer_number` — nil for a spectator, needed by the :frontier lens"
 
+  attr :interactive, :boolean,
+    default: true,
+    doc:
+      "false once the game has ended: territories stop being a focus/click target " <>
+        "at all rather than staying clickable dead controls"
+
   def world_map(assigns) do
     lens = effective_lens(assigns.lens, assigns.viewer_number)
 
@@ -157,6 +163,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             selected={area.number == @selected_area}
             target={area.number == @target_area}
             fill={Map.fetch!(@fills, area.number)}
+            interactive={@interactive}
           />
         </g>
         <use href="#gc-region-outlines" class="world-map-outlines" />
@@ -236,6 +243,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   attr :selected, :boolean, required: true
   attr :target, :boolean, required: true
   attr :fill, :map, required: true, doc: "one entry of `fills/4`: `%{owner:, dim:, delta:}`"
+  attr :interactive, :boolean, required: true
 
   defp territory(assigns) do
     assigns =
@@ -246,19 +254,22 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     ~H"""
     <g
       id={"territory-#{@area.number}"}
-      class="world-map-territory world-map-owner"
-      role="button"
-      tabindex="0"
+      class={[
+        "world-map-territory world-map-owner",
+        @interactive && "world-map-territory--interactive"
+      ]}
+      role={@interactive && "button"}
+      tabindex={@interactive && "0"}
       aria-label={@label}
-      aria-pressed={to_string(@selected or @target)}
+      aria-pressed={@interactive && to_string(@selected or @target)}
       data-area={@area.number}
       data-owner={@fill.owner}
       data-fog={!@area.visible}
       data-frontier={@fill.dim && "dim"}
       data-element={@element}
-      phx-hook=".TerritoryKeyboard"
-      phx-click="select_area"
-      phx-value-area={@area.number}
+      phx-hook={@interactive && ".TerritoryKeyboard"}
+      phx-click={@interactive && "select_area"}
+      phx-value-area={@interactive && @area.number}
     >
       <use href={"#gc-area-#{@area.number}"} class="world-map-area" />
       <use
