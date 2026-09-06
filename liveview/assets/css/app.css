@@ -472,6 +472,76 @@
   user-select: none;
 }
 
+/* The last-turn replay layer. Arrows are visible by default (opacity
+   1) so a no-JS render, or a JS one that never adds `.world-map-replay--js`
+   (prefers-reduced-motion), shows the whole turn at once — the "reduced motion:
+   no animation, render everything statically" fallback the issue calls for.
+   Only once the `.TurnReplay` hook opts into animating does `--js` gate
+   unrevealed steps down to invisible until the hook reveals them stepwise. */
+.world-map-replay {
+  pointer-events: none;
+}
+
+.world-map-replay-arrow {
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 1;
+  transition: opacity 0.25s ease;
+}
+
+.world-map-replay--js .world-map-replay-arrow:not(.is-revealed) {
+  opacity: 0;
+}
+
+.world-map-replay-arrow--attack {
+  stroke: var(--color-danger);
+  marker-end: url(#gc-replay-arrowhead-attack);
+}
+
+.world-map-replay-arrow--transfer {
+  stroke: var(--color-primary);
+  marker-end: url(#gc-replay-arrowhead-transfer);
+}
+
+.world-map-replay-arrowhead--attack {
+  fill: var(--color-danger);
+}
+
+.world-map-replay-arrowhead--transfer {
+  fill: var(--color-primary);
+}
+
+/* A captured area's brief halo pulse — invisible until the hook lands on that
+   step and adds `.is-active`; removing then re-adding the class (with a forced
+   reflow, see the `.TurnReplay` hook's `render()`) lets it replay identically
+   every time that step is revisited. Animates under normal motion, holds as a
+   static ring under `prefers-reduced-motion` (below) — reduced motion opts out
+   of the animation, not the signal itself. */
+.world-map-replay-pulse {
+  opacity: 0;
+}
+
+.world-map-replay-pulse.is-active {
+  animation: world-map-replay-pulse 700ms ease-out;
+}
+
+@keyframes world-map-replay-pulse {
+  0% {
+    opacity: 1;
+    stroke-width: 5;
+  }
+  100% {
+    opacity: 0;
+    stroke-width: 14;
+  }
+}
+
+/* The accessible "Turn N results" list next to the board — highlights whichever
+   step the replay (or reduced-motion-safe manual stepping) is currently on. */
+#turn-results-list [data-step].is-current {
+  font-weight: 700;
+}
+
 /* Player-list legend dot, same tokens as the territory fills. */
 .world-map-swatch {
   display: inline-block;
@@ -494,5 +564,16 @@
 
   .world-map-order-line {
     animation: none;
+  }
+
+  .world-map-replay-arrow {
+    transition: none;
+  }
+
+  /* The animating keyframe is what "reduced motion" opts out of, not the signal
+     itself — landing on a capture step still shows a static ring. */
+  .world-map-replay-pulse.is-active {
+    animation: none;
+    opacity: 1;
   }
 }
