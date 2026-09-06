@@ -17,11 +17,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   same `MapInfo` adjacency the rules use, so they can never disagree with it.
 
   Layering (paint order, bottom to top): sea → sea lanes → territories (the only
-  interactive layer) → region borders → selected/target highlight → army counts.
-  The highlight is a second `<use>` of the same outline drawn *above* the
-  neighbours so a selected coastline is never half-covered by the territory
-  painted after it, over a wider surface-coloured halo so the ring reads even
-  where the owner fill happens to match the focus-ring or danger hue.
+  interactive layer, alongside the order arrows below) → region borders →
+  selected/target highlight → pending-order arrows → army counts. The highlight is
+  a second `<use>` of the same outline drawn *above* the neighbours so a selected
+  coastline is never half-covered by the territory painted after it, over a wider
+  surface-coloured halo so the ring reads even where the owner fill happens to
+  match the focus-ring or danger hue. The order arrows sit above the highlight but
+  below the counts so a queued move's amount label never gets buried under an
+  area's resolved army count.
 
   Geometry (`world_map/<map>_map_defs.html.heex`, `MapGeometry`) is generated
   by `scripts/trace_maps.py` from the legacy silhouettes, so shapes, adjacency
@@ -107,6 +110,22 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   @doc "`%{player_number => name}` from `PlayerView.players`, built once per render."
   def owner_names(players), do: Map.new(players, &{&1.number, &1.name})
 
+  @doc "`%{area_number => name}` from `PlayerView.areas`, built once per render."
+  def area_names(areas), do: Map.new(areas, &{&1.number, &1.name})
+
+  @doc """
+  Worded once and shared by the board's pending-orders arrows (`aria-label`) and
+  `GameLive`'s "Your orders" sr card, so the two textual descriptions of the same
+  queued order can never drift apart. `order` is a `PlayerView` area's `order` field
+  (`%{command:, target:, amount:}`, never `nil` here — callers only reach this once
+  they've already checked).
+  """
+  def order_label(source_name, %{command: :attack} = order, target_name),
+    do: "Attack #{target_name} with #{armies_text(order.amount)} from #{source_name}"
+
+  def order_label(source_name, %{command: :transfer} = order, target_name),
+    do: "Transfer #{armies_text(order.amount)} to #{target_name} from #{source_name}"
+
   attr :map_name, :atom, required: true, doc: "`:original` or `:elements`"
   attr :areas, :list, required: true, doc: "`PlayerView.areas` — already fog-filtered"
   attr :players, :list, required: true, doc: "`PlayerView.players`, for owner names"
@@ -129,6 +148,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       assigns
       |> assign(:view_box, Geometry.view_box(assigns.map_name))
       |> assign(:owner_names, owner_names(assigns.players))
+      |> assign(:area_names, area_names(assigns.areas))
       |> assign(:lens, lens)
       |> assign(:fills, fills(lens, assigns.areas, assigns.map_name, assigns.viewer_number))
       |> assign(
@@ -144,6 +164,23 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         aria-label={board_label(@map_name)}
         class="block h-auto w-full"
       >
+        <defs>
+          <marker
+            :for={kind <- ~w(attack transfer)}
+            id={"gc-order-arrowhead-#{kind}"}
+            viewBox="0 0 10 10"
+            refX="8.5"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto"
+          >
+            <path
+              d="M0,0 L10,5 L0,10 Z"
+              class={"gc-order-arrowhead gc-order-arrowhead--#{kind}"}
+            />
+          </marker>
+        </defs>
         <.original_map_defs :if={@map_name == :original} />
         <.elements_map_defs :if={@map_name == :elements} />
         <.board_ground view_box={@view_box} />
@@ -172,6 +209,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             :if={@target_area}
             href={"#gc-area-#{@target_area}"}
             class="world-map-highlight world-map-highlight--target"
+          />
+        </g>
+        <g :if={Enum.any?(@areas, & &1.order)} class="world-map-orders">
+          <.order_arrow
+            :for={area <- @areas}
+            :if={area.order}
+            area={area}
+            area_names={@area_names}
+            map_name={@map_name}
           />
         </g>
         <g class="world-map-counts" aria-hidden="true">
@@ -453,6 +499,70 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     {sum_x, sum_y} = Enum.reduce(points, {0, 0}, fn {x, y}, {sx, sy} -> {sx + x, sy + y} end)
     count = length(points)
     {sum_x / count, sum_y / count}
+  end
+
+  # One arrow per owned area carrying a queued transfer/attack, from its
+  # label anchor to the target's — the same anchors `army_count/1` uses, so an arrow
+  # always starts/ends exactly where the two counts it connects are drawn. A thick
+  # transparent `.world-map-order-hit` line rides under the thin visible dashed one
+  # because the visible stroke alone (2px) is too thin a hit target for a pointer or
+  # touch to reliably land on, unlike a territory's whole filled silhouette.
+  attr :area, :map, required: true
+  attr :area_names, :map, required: true
+  attr :map_name, :atom, required: true
+
+  defp order_arrow(assigns) do
+    {x1, y1} = Geometry.label(assigns.map_name, assigns.area.number)
+    {x2, y2} = Geometry.label(assigns.map_name, assigns.area.order.target)
+    kind = to_string(assigns.area.order.command)
+    target_name = Map.fetch!(assigns.area_names, assigns.area.order.target)
+
+    assigns =
+      assign(assigns,
+        x1: x1,
+        y1: y1,
+        x2: x2,
+        y2: y2,
+        mx: (x1 + x2) / 2,
+        my: (y1 + y2) / 2,
+        kind: kind,
+        label: order_label(assigns.area.name, assigns.area.order, target_name)
+      )
+
+    ~H"""
+    <g
+      id={"order-#{@area.number}"}
+      class="world-map-order"
+      role="button"
+      tabindex="0"
+      aria-label={@label}
+      data-area={@area.number}
+      phx-hook=".TerritoryKeyboard"
+      phx-click="select_area"
+      phx-value-area={@area.number}
+    >
+      <line x1={@x1} y1={@y1} x2={@x2} y2={@y2} class="world-map-order-hit" />
+      <line
+        x1={@x1}
+        y1={@y1}
+        x2={@x2}
+        y2={@y2}
+        class={"world-map-order-line world-map-order-line--#{@kind}"}
+        marker-end={"url(#gc-order-arrowhead-#{@kind})"}
+      />
+      <text
+        x={@mx}
+        y={@my}
+        class="world-map-order-amount"
+        text-anchor="middle"
+        dominant-baseline="central"
+        paint-order="stroke"
+        stroke-linejoin="round"
+      >
+        {@area.order.amount}
+      </text>
+    </g>
+    """
   end
 
   # Fog-hidden areas get no owner slot at all (`data-owner` is omitted) — the fog

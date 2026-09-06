@@ -543,6 +543,7 @@ defmodule GlobalCombatWeb.GameLive do
       </div>
       <div class="flex flex-wrap items-start gap-[var(--space-4)]">
         <.region_bonuses map_name={@view.map_name} />
+        <.your_orders_card :if={my_orders(@view) != []} orders={my_orders(@view)} />
         <.order_panel
           :if={@selected_area}
           view={@view}
@@ -684,6 +685,35 @@ defmodule GlobalCombatWeb.GameLive do
   defp order_submit_label(:assign), do: "Assign"
   defp order_submit_label(:transfer), do: "Transfer"
   defp order_submit_label(:attack), do: "Attack"
+
+  # The same queued transfers/attacks the board draws as arrows, worded as
+  # plain text — an "error prevention" review surface for all five queued orders at
+  # once without re-clicking every source territory, and the accessible equivalent of
+  # the arrows for anyone who can't see the board (an arrow's own `aria-label` covers
+  # it in isolation, but this list is what makes "did I queue everything I meant to"
+  # answerable in one place). `WorldMap.order_label/3` words each line so this list and
+  # an arrow's `aria-label` can never describe the same order differently.
+  # `view.areas` already dropped every non-owner's `order` to `nil` (`PlayerView`'s
+  # fog-of-war boundary), so this needs no owner check of its own.
+  defp my_orders(view) do
+    for area <- view.areas, area.order do
+      target = find_area(view, area.order.target)
+      WorldMap.order_label(area.name, area.order, target.name)
+    end
+  end
+
+  attr :orders, :list, required: true
+
+  defp your_orders_card(assigns) do
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>Your orders</:header>
+      <ul id="your-orders" class="flex flex-col gap-[var(--space-1)] text-sm">
+        <li :for={order <- @orders}>{order}</li>
+      </ul>
+    </Card.card>
+    """
+  end
 
   # Player-facing rule info (GIF-103): every region's control bonus, sourced
   # from the same `MapInfo.regions/1` the board's areas/adjacency already

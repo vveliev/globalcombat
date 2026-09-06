@@ -387,6 +387,65 @@
   user-select: none;
 }
 
+/* Pending-orders overlay — one arrow per owned area with a queued
+   transfer/attack, label-anchor to label-anchor. Attack borrows the same danger
+   hue and marching-dashes keyframe as `.world-map-highlight--target` so "this is a
+   hostile move" reads consistently everywhere the board uses it; transfer gets the
+   primary hue instead since it's a friendly reassignment, not a threat. */
+.world-map-order {
+  cursor: pointer;
+  outline: none;
+}
+
+.world-map-order:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Invisible fat stroke riding under the thin visible one so the arrow has a
+   pointer/touch hit target wider than its 2px visible line. */
+.world-map-order-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+}
+
+.world-map-order-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 5 3;
+  animation: world-map-march 1.2s linear infinite;
+  pointer-events: none;
+}
+
+.world-map-order-line--attack {
+  stroke: var(--color-danger);
+}
+
+.world-map-order-line--transfer {
+  stroke: var(--color-primary);
+}
+
+.gc-order-arrowhead--attack {
+  fill: var(--color-danger);
+}
+
+.gc-order-arrowhead--transfer {
+  fill: var(--color-primary);
+}
+
+.world-map-order-amount {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--white);
+  stroke: var(--black);
+  stroke-width: 2.5px;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* Player-list legend dot, same tokens as the territory fills. */
 .world-map-swatch {
   display: inline-block;
@@ -404,6 +463,10 @@
   }
 
   .world-map-highlight--target {
+    animation: none;
+  }
+
+  .world-map-order-line {
     animation: none;
   }
 }
