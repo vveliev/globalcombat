@@ -291,6 +291,36 @@
   stroke-opacity: 0.25;
 }
 
+/* :frontier lens: interior areas keep the true owner fill, just
+   dimmed, so the contact line (full strength) reads at a glance without
+   losing "who owns the interior" entirely. */
+.world-map-territory[data-frontier="dim"] .world-map-area {
+  opacity: 0.4;
+}
+
+/* :region lens: a decorative bonus readout per region centroid —
+   aria-hidden, since `region_bonuses/1`'s panel and the sr-only board table
+   already carry the same numbers accessibly. */
+.world-map-region-label {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--color-text-muted);
+  paint-order: stroke;
+  stroke: var(--color-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* :frontier lens: the delta against the strongest adjacent
+   opposing stack, printed next to the count — secondary to it, so it takes
+   the muted text token rather than the count's own white-on-black outline. */
+.world-map-delta {
+  fill: var(--color-text-muted);
+  font-weight: 600;
+}
+
 /* Elements map: a per-element texture over the owner fill (patterns in
    elements_map_defs.html.heex draw with currentColor = the board ink). */
 .world-map-texture {

@@ -42,9 +42,32 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   Owner colours are the app-level `--map-owner-N` tokens (see ADR-0003); the
   same `owner_slot/1` drives the territory fill and the player-list legend dot,
   so there is one place the legacy `Player.GetColor()` numbering lives.
+
+  The `lens` attr swaps what the territory fill (and, for
+  `:frontier`, the army count) encodes without touching the paint order,
+  fog gate, or accessible labels above — those stay truthful to the real
+  per-area owner/visibility regardless of lens, so the sr-only board table
+  never has to know a lens exists.
+
+    * `:owner` (default) — fill is the area's own owner slot.
+    * `:region` — fill is the slot of whoever holds every area in that
+      area's region (`--map-owner-0` if contested or, since a region can
+      only read as "held" when every one of its areas is individually
+      visible, if any of them is fogged — never the true per-area owner
+      leaking through a mixed region), plus a decorative bonus label per
+      region centroid.
+    * `:frontier` — fill is the true owner slot as in `:owner`, but interior
+      areas are dimmed (`data-frontier="dim"`); only the viewer's border
+      areas and the enemy areas touching them stay full strength, with the
+      army delta against the strongest adjacent opposing stack shown next
+      to the count. A spectator (`viewer_number: nil`) has no "own"
+      territory to draw a frontier from, so this lens falls back to
+      `:owner` for them, same as `PlayerView`'s fog treats a spectator as a
+      fogged non-owner.
   """
   use Phoenix.Component
 
+  alias GlobalCombat.Engine.MapInfo
   alias GlobalCombatWeb.GameLive.MapGeometry, as: Geometry
 
   embed_templates "world_map/*"
@@ -90,11 +113,28 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   attr :selected_area, :integer, default: nil, doc: "area number, or nil when none is selected"
   attr :target_area, :integer, default: nil, doc: "area number, or nil when no target is picked"
 
+  attr :lens, :atom,
+    default: :owner,
+    values: [:owner, :region, :frontier],
+    doc: "which view mode fills the territories — see the moduledoc"
+
+  attr :viewer_number, :any,
+    default: nil,
+    doc: "`PlayerView.viewer_number` — nil for a spectator, needed by the :frontier lens"
+
   def world_map(assigns) do
+    lens = effective_lens(assigns.lens, assigns.viewer_number)
+
     assigns =
       assigns
       |> assign(:view_box, Geometry.view_box(assigns.map_name))
       |> assign(:owner_names, owner_names(assigns.players))
+      |> assign(:lens, lens)
+      |> assign(:fills, fills(lens, assigns.areas, assigns.map_name, assigns.viewer_number))
+      |> assign(
+        :region_labels,
+        if(lens == :region, do: region_labels(assigns.map_name), else: [])
+      )
 
     ~H"""
     <div class="world-map" data-map={@map_name}>
@@ -116,6 +156,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             owner_names={@owner_names}
             selected={area.number == @selected_area}
             target={area.number == @target_area}
+            fill={Map.fetch!(@fills, area.number)}
           />
         </g>
         <use href="#gc-region-outlines" class="world-map-outlines" />
@@ -134,7 +175,25 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           />
         </g>
         <g class="world-map-counts" aria-hidden="true">
-          <.army_count :for={area <- @areas} :if={area.armies} area={area} map_name={@map_name} />
+          <.army_count
+            :for={area <- @areas}
+            :if={area.armies}
+            area={area}
+            map_name={@map_name}
+            delta={Map.fetch!(@fills, area.number).delta}
+          />
+        </g>
+        <g :if={@lens == :region} class="world-map-region-labels" aria-hidden="true">
+          <text
+            :for={r <- @region_labels}
+            x={r.x}
+            y={r.y}
+            class="world-map-region-label"
+            text-anchor="middle"
+            dominant-baseline="central"
+          >
+            {"+#{r.bonus}"}
+          </text>
         </g>
       </svg>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".TerritoryKeyboard">
@@ -176,6 +235,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   attr :owner_names, :map, required: true
   attr :selected, :boolean, required: true
   attr :target, :boolean, required: true
+  attr :fill, :map, required: true, doc: "one entry of `fills/4`: `%{owner:, dim:, delta:}`"
 
   defp territory(assigns) do
     assigns =
@@ -192,8 +252,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       aria-label={@label}
       aria-pressed={to_string(@selected or @target)}
       data-area={@area.number}
-      data-owner={@area.visible && owner_slot(@area.owner_number)}
+      data-owner={@fill.owner}
       data-fog={!@area.visible}
+      data-frontier={@fill.dim && "dim"}
       data-element={@element}
       phx-hook=".TerritoryKeyboard"
       phx-click="select_area"
@@ -211,6 +272,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
   attr :area, :map, required: true
   attr :map_name, :atom, required: true
+
+  attr :delta, :integer,
+    default: nil,
+    doc: ":frontier lens only — delta vs. the strongest adjacent opposing stack"
 
   defp army_count(assigns) do
     {x, y} = Geometry.label(assigns.map_name, assigns.area.number)
@@ -230,8 +295,164 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       stroke-linejoin="round"
     >
       {@area.armies}
+      <tspan :if={@delta} dx="10" class="world-map-delta">{delta_text(@delta)}</tspan>
     </text>
     """
+  end
+
+  defp delta_text(delta) when delta > 0, do: "(+#{delta})"
+  defp delta_text(delta), do: "(#{delta})"
+
+  # --- lenses -----------------------------------------------------------
+
+  # A spectator has no "own" territory for :frontier to draw a border from —
+  # same treatment `PlayerView` gives a spectator elsewhere (it "sees exactly
+  # what a fogged non-owner sees"), so this falls back to :owner rather than
+  # rendering every area dimmed.
+  defp effective_lens(:frontier, nil), do: :owner
+  defp effective_lens(lens, _viewer_number), do: lens
+
+  @doc false
+  def fills(:owner, areas, _map_name, _viewer_number) do
+    Map.new(areas, fn area ->
+      {area.number,
+       %{owner: area.visible && owner_slot(area.owner_number), dim: false, delta: nil}}
+    end)
+  end
+
+  def fills(:region, areas, map_name, _viewer_number) do
+    region_owners = region_owners(map_name, areas)
+
+    area_regions =
+      Map.new(MapInfo.areas(map_name), fn {number, _name, region, _links} -> {number, region} end)
+
+    Map.new(areas, fn area ->
+      region_owner = Map.fetch!(region_owners, Map.fetch!(area_regions, area.number))
+      {area.number, %{owner: owner_slot(region_owner), dim: false, delta: nil}}
+    end)
+  end
+
+  def fills(:frontier, areas, _map_name, viewer_number) do
+    frontier = frontier_info(areas, viewer_number)
+    areas_by_number = Map.new(areas, &{&1.number, &1})
+
+    Map.new(areas, fn area ->
+      on_frontier? = MapSet.member?(frontier, area.number)
+
+      {area.number,
+       %{
+         owner: area.visible && owner_slot(area.owner_number),
+         dim: not on_frontier?,
+         delta: if(on_frontier?, do: frontier_delta(area, areas_by_number))
+       }}
+    end)
+  end
+
+  @doc """
+  `%{region_number => owner_number | nil}` for every region of `map_name` — the
+  owner is set only when every area of that region is individually visible to
+  this viewer *and* shares one owner; a region with a hidden area, or a mix of
+  owners, reads as contested (`nil`, `--map-owner-0`). A hidden area can never
+  tip a region into reading as "held" by its true owner — the same fog
+  invariant `owner_text/2` enforces per-area.
+  """
+  def region_owners(map_name, areas) do
+    areas_by_number = Map.new(areas, &{&1.number, &1})
+
+    map_name
+    |> MapInfo.areas()
+    |> Enum.group_by(
+      fn {_number, _name, region, _links} -> region end,
+      fn {number, _name, _region, _links} -> number end
+    )
+    |> Map.new(fn {region_number, area_numbers} ->
+      region_areas = Enum.map(area_numbers, &Map.fetch!(areas_by_number, &1))
+      {region_number, region_owner(region_areas)}
+    end)
+  end
+
+  @doc "The single owner_number holding every one of `region_areas` (visible, one owner), else nil."
+  def region_owner(region_areas) do
+    if Enum.all?(region_areas, & &1.visible) do
+      case region_areas |> Enum.map(& &1.owner_number) |> Enum.uniq() do
+        [owner] when not is_nil(owner) -> owner
+        _ -> nil
+      end
+    else
+      nil
+    end
+  end
+
+  # Every area bordering one of the viewer's own areas is already visible
+  # regardless of fog (`PlayerView.owns_adjacent?/3`), so this needs no
+  # separate fog check: an owned area with a differently-owned neighbour is a
+  # border area, and every enemy area adjacent to one is, by that same rule,
+  # already revealed.
+  defp frontier_info(areas, viewer_number) do
+    areas_by_number = Map.new(areas, &{&1.number, &1})
+
+    my_borders =
+      areas
+      |> Enum.filter(&(&1.owner_number == viewer_number))
+      |> Enum.filter(fn area ->
+        Enum.any?(area.adjacent, fn n ->
+          case Map.fetch(areas_by_number, n) do
+            {:ok, neighbor} -> neighbor.owner_number != viewer_number
+            :error -> false
+          end
+        end)
+      end)
+      |> MapSet.new(& &1.number)
+
+    enemy_borders =
+      areas
+      |> Enum.filter(&(&1.owner_number != viewer_number))
+      |> Enum.filter(&Enum.any?(&1.adjacent, fn n -> MapSet.member?(my_borders, n) end))
+      |> MapSet.new(& &1.number)
+
+    MapSet.union(my_borders, enemy_borders)
+  end
+
+  # The army delta shown next to a frontier tile's count: this area's armies
+  # minus the strongest visible, differently-owned neighbour — from either
+  # side of the line, a positive delta favours whoever holds the tile it's
+  # printed on.
+  defp frontier_delta(area, areas_by_number) do
+    opposing =
+      area.adjacent
+      |> Enum.map(&Map.get(areas_by_number, &1))
+      |> Enum.filter(&(&1 && &1.visible && &1.armies && &1.owner_number != area.owner_number))
+      |> Enum.map(& &1.armies)
+
+    case opposing do
+      [] -> nil
+      armies -> area.armies - Enum.max(armies)
+    end
+  end
+
+  # Region label anchor: the mean of its areas' own label points (the pole of
+  # inaccessibility `MapGeometry` already computed per area) rather than new
+  # generated geometry — close enough for a decorative, aria-hidden bonus
+  # readout backed by the accessible `region_bonuses/1` panel.
+  defp region_labels(map_name) do
+    areas_by_region =
+      MapInfo.areas(map_name)
+      |> Enum.group_by(
+        fn {_number, _name, region, _links} -> region end,
+        fn {number, _name, _region, _links} -> number end
+      )
+
+    for {region_number, _name, _num_areas, bonus} <- MapInfo.regions(map_name) do
+      {x, y} = region_centroid(map_name, Map.fetch!(areas_by_region, region_number))
+      %{number: region_number, bonus: bonus, x: x, y: y}
+    end
+  end
+
+  defp region_centroid(map_name, area_numbers) do
+    points = Enum.map(area_numbers, &Geometry.label(map_name, &1))
+    {sum_x, sum_y} = Enum.reduce(points, {0, 0}, fn {x, y}, {sx, sy} -> {sx + x, sy + y} end)
+    count = length(points)
+    {sum_x / count, sum_y / count}
   end
 
   # Fog-hidden areas get no owner slot at all (`data-owner` is omitted) — the fog
