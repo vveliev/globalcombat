@@ -122,6 +122,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: nil,
     doc: "`PlayerView.viewer_number` — nil for a spectator, needed by the :frontier lens"
 
+  attr :replay_steps, :list,
+    default: [],
+    doc: "`GameLive.Replay.steps/4` output for `PlayerView.last_turn_events`"
+
   def world_map(assigns) do
     lens = effective_lens(assigns.lens, assigns.viewer_number)
 
@@ -135,6 +139,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         :region_labels,
         if(lens == :region, do: region_labels(assigns.map_name), else: [])
       )
+      |> assign(:replay_arrows, Enum.filter(assigns.replay_steps, &(&1.from && &1.to)))
+      |> assign(:replay_captures, Enum.filter(assigns.replay_steps, & &1.captured))
 
     ~H"""
     <div class="world-map" data-map={@map_name}>
@@ -146,6 +152,36 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       >
         <.original_map_defs :if={@map_name == :original} />
         <.elements_map_defs :if={@map_name == :elements} />
+        <defs>
+          <marker
+            id="gc-replay-arrowhead-attack"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path
+              d="M0,0 L10,5 L0,10 z"
+              class="world-map-replay-arrowhead world-map-replay-arrowhead--attack"
+            />
+          </marker>
+          <marker
+            id="gc-replay-arrowhead-transfer"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path
+              d="M0,0 L10,5 L0,10 z"
+              class="world-map-replay-arrowhead world-map-replay-arrowhead--transfer"
+            />
+          </marker>
+        </defs>
         <.board_ground view_box={@view_box} />
         <use href="#gc-links" class="world-map-links" />
         <g class="world-map-areas">
@@ -172,6 +208,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             :if={@target_area}
             href={"#gc-area-#{@target_area}"}
             class="world-map-highlight world-map-highlight--target"
+          />
+        </g>
+        <g id="world-map-replay" class="world-map-replay" aria-hidden="true">
+          <.replay_arrow :for={step <- @replay_arrows} step={step} />
+          <use
+            :for={step <- @replay_captures}
+            data-step={step.index}
+            href={"#gc-area-#{step.to.area}"}
+            class="world-map-halo world-map-replay-pulse"
           />
         </g>
         <g class="world-map-counts" aria-hidden="true">
@@ -302,6 +347,29 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
   defp delta_text(delta) when delta > 0, do: "(+#{delta})"
   defp delta_text(delta), do: "(#{delta})"
+
+  # One `world-map-replay` arrow per `:attack`/`:transfer` step — `:assign`/
+  # `:eliminated`/`:ended` steps have no `from`/`to` and are filtered out of
+  # `@replay_arrows` before this ever renders (see `world_map/1`). Static and fully
+  # visible by default (no-JS / prefers-reduced-motion); `data-step` is what the
+  # `.TurnReplay` hook keys its stepwise reveal off of.
+  attr :step, :map, required: true
+
+  defp replay_arrow(assigns) do
+    ~H"""
+    <line
+      data-step={@step.index}
+      class={["world-map-replay-arrow", replay_color_class(@step.kind)]}
+      x1={@step.from.x}
+      y1={@step.from.y}
+      x2={@step.to.x}
+      y2={@step.to.y}
+    />
+    """
+  end
+
+  defp replay_color_class(:attack), do: "world-map-replay-arrow--attack"
+  defp replay_color_class(:transfer), do: "world-map-replay-arrow--transfer"
 
   # --- lenses -----------------------------------------------------------
 
