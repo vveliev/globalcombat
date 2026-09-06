@@ -166,6 +166,123 @@ defmodule GlobalCombat.Engine.GameTest do
     end
   end
 
+  describe "resolve_turn/1" do
+    test "emits assign/transfer/attack events, in resolution order, alongside the resolved state" do
+      # Player 1 owns areas 1 (reinforcing), 2/3 (transferring between them), and 5 (about to be
+      # attacked and captured). Player 2 owns area 4 and attacks area 5 with `is_non_random: true`
+      # so the outcome — and therefore the expected event — is arithmetic, not RNG-dependent.
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(1),
+        is_non_random: true,
+        minimum_armies: 0,
+        areas: %{
+          1 => %Area{number: 1, owner_number: 1, armies: 10, assigned_armies: 4},
+          2 => %Area{
+            number: 2,
+            owner_number: 1,
+            armies: 6,
+            command: :transfer,
+            target_number: 3,
+            amount: 2
+          },
+          3 => %Area{number: 3, owner_number: 1, armies: 4},
+          4 => %Area{
+            number: 4,
+            owner_number: 2,
+            armies: 20,
+            command: :attack,
+            target_number: 5,
+            amount: 19
+          },
+          5 => %Area{number: 5, owner_number: 1, armies: 5}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 4},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      # attack_damage = trunc(19 * 0.6) = 11, capped to defender.armies (5) = 5.
+      # defend_damage = trunc(5 * 0.75) = 3, capped to amount (19) = 3.
+      # captured?: attack_damage (5) >= defender.armies (5) and defend_damage (3) < amount (19).
+      assert events == [
+               {:assign, 1, 4},
+               {:transfer, 2, 3, 2},
+               {:attack, 4, 5, 19, 3, 5, true}
+             ]
+
+      assert Game.area!(resolved, 1).armies == 14
+      assert Game.area!(resolved, 2).armies == 4
+      assert Game.area!(resolved, 3).armies == 6
+      assert Game.area!(resolved, 5).armies == 16
+      assert Game.area!(resolved, 5).owner_number == 2
+      assert Game.player!(resolved, 1).areas == 3
+      assert Game.player!(resolved, 2).areas == 2
+    end
+
+    test "emits :eliminated then :ended when a captured area leaves its owner with none left" do
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(1),
+        is_non_random: true,
+        minimum_armies: 0,
+        areas: %{
+          1 => %Area{
+            number: 1,
+            owner_number: 1,
+            armies: 20,
+            command: :attack,
+            target_number: 2,
+            amount: 19
+          },
+          2 => %Area{number: 2, owner_number: 2, armies: 5}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 1},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      assert events == [
+               {:attack, 1, 2, 19, 3, 5, true},
+               {:eliminated, 2},
+               {:ended, 1}
+             ]
+
+      assert resolved.ended
+      assert Game.player!(resolved, 1).place == 1
+    end
+
+    test "run_turn/1 still returns only the resolved state, unaffected by resolve_turn/1's event log" do
+      # Two still-standing players (not one) — a single-player game would hit `end_game/1`'s
+      # `alive_players <= 1` path here, which this test isn't exercising.
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(1),
+        is_non_random: true,
+        minimum_armies: 0,
+        areas: %{
+          1 => %Area{number: 1, owner_number: 1, armies: 10, assigned_armies: 4},
+          2 => %Area{number: 2, owner_number: 2, armies: 5}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 1},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolve_result, events} = Game.resolve_turn(game)
+      assert events == [{:assign, 1, 4}]
+      assert Game.area!(resolve_result, 1).armies == 14
+      assert Game.run_turn(game) == resolve_result
+    end
+  end
+
   describe "reset_done_flags/1" do
     test "AccountId 1 is always done; eliminated players are always done; everyone else resets to false" do
       game = %Game{

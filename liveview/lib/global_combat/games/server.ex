@@ -58,7 +58,9 @@ defmodule GlobalCombat.Games.Server do
     players: [],
     invites: [],
     engine: nil,
-    messages: []
+    messages: [],
+    last_turn_events: [],
+    last_turn_before_owners: %{}
   ]
 
   # --- client API --------------------------------------------------------
@@ -289,6 +291,17 @@ defmodule GlobalCombat.Games.Server do
       engine: engine,
       players: rehydrated_players(engine)
     }
+    |> Map.merge(decode_last_turn_events(Keyword.get(opts, :last_turn_events)))
+  end
+
+  # `nil` covers both a game rehydrated before this column existed (no `last_turn_events` value
+  # yet) and one no turn has resolved for since — `:erlang.binary_to_term/1` has no representation for
+  # "nothing yet" to decode, so this is handled before ever reaching it.
+  defp decode_last_turn_events(nil), do: %{last_turn_events: [], last_turn_before_owners: %{}}
+
+  defp decode_last_turn_events(binary) do
+    {events, before_owners} = :erlang.binary_to_term(binary)
+    %{last_turn_events: events, last_turn_before_owners: before_owners}
   end
 
   defp rehydrated_players(engine) do
@@ -330,7 +343,9 @@ defmodule GlobalCombat.Games.Server do
       PlayerView.build(state.engine, viewer_number,
         game_id: state.game_id,
         is_fogged: state.is_fogged,
-        messages: state.messages
+        messages: state.messages,
+        last_turn_events: state.last_turn_events,
+        last_turn_before_owners: state.last_turn_before_owners
       )
 
     {:reply, {:playing, view}, state}
@@ -829,9 +844,26 @@ defmodule GlobalCombat.Games.Server do
   defp run_turn(state, opts \\ []) do
     advance_clock? = Keyword.get(opts, :advance_clock, true)
     old_engine = state.engine
-    engine = state.engine |> Engine.run_turn() |> run_ai_turns()
+    # Ownership as of the instant this turn started resolving (queued orders applied, nothing
+    # resolved yet) — assign/transfer never change an area's owner, so this is also each area's
+    # owner going into the attack phase. Kept only as owner numbers, not full `old_engine`: that's
+    # all `PlayerView`'s fog rule needs to tell "was this area's neighborhood visible before the
+    # attack that flipped it" from "only after" (see PlayerView moduledoc), without holding onto
+    # (or ever exposing) last turn's army counts.
+    before_owners =
+      Map.new(old_engine.areas, fn {number, area} -> {number, area.owner_number} end)
+
+    {engine, events} = Engine.resolve_turn(old_engine)
+    engine = run_ai_turns(engine)
     now = DateTime.utc_now() |> DateTime.truncate(:second)
-    state = %{state | engine: engine, turn_started_at: now}
+
+    state = %{
+      state
+      | engine: engine,
+        turn_started_at: now,
+        last_turn_events: events,
+        last_turn_before_owners: before_owners
+    }
 
     state =
       if advance_clock? do
@@ -842,6 +874,12 @@ defmodule GlobalCombat.Games.Server do
       end
 
     persist_snapshot(state)
+
+    GamesDb.persist_last_turn_events(
+      state.game_id,
+      :erlang.term_to_binary({events, before_owners})
+    )
+
     record_game_results(old_engine, engine)
 
     if engine.ended do

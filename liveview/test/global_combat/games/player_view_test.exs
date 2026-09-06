@@ -33,6 +33,32 @@ defmodule GlobalCombat.Games.PlayerViewTest do
     {engine, is_fogged}
   end
 
+  # Turn-resolution event-visibility fixtures: a full 1..42 area map (same reasoning as `game/1` above —
+  # `MapInfo.inbounds/2` walks real map topology regardless of which areas a test cares about) with
+  # only the given `overrides` non-default, plus a minimal two-player roster.
+  defp full_areas(overrides) do
+    base =
+      for number <- 1..GlobalCombat.Engine.MapInfo.num_areas(:original), into: %{} do
+        {number, %Engine.Area{number: number, owner_number: nil, armies: 5}}
+      end
+
+    Map.merge(base, overrides)
+  end
+
+  defp owners(areas), do: Map.new(areas, fn {number, area} -> {number, area.owner_number} end)
+
+  defp engine_with(area_overrides) do
+    %Engine{
+      map_name: :original,
+      turn: 3,
+      areas: full_areas(area_overrides),
+      players: %{
+        1 => %Engine.Player{number: 1, account_id: 101, name: "Alice"},
+        2 => %Engine.Player{number: 2, account_id: 102, name: "Bob"}
+      }
+    }
+  end
+
   describe "fog of war" do
     test "the owner always sees their own area's real owner and armies (base + assigned)" do
       {engine, is_fogged} = game()
@@ -114,6 +140,127 @@ defmodule GlobalCombat.Games.PlayerViewTest do
       refute area5.visible
       assert area5.name == "Quebec"
       assert Enum.sort(area5.adjacent) == [2, 4, 6, 7, 9]
+    end
+  end
+
+  describe "turn-resolution event visibility" do
+    test "an attack between two areas invisible to the viewer, before and after, is omitted" do
+      # Areas 5 (Quebec) and 9 (Greenland) are both owned by player 2 and neither is adjacent
+      # to anything player 1 owns — the same "nowhere near anything I own" case the
+      # area-visibility tests above cover, applied to an event instead of a single area.
+      engine =
+        engine_with(%{
+          5 => %Engine.Area{number: 5, owner_number: 2, armies: 5},
+          9 => %Engine.Area{number: 9, owner_number: 2, armies: 5}
+        })
+
+      before_owners = owners(engine.areas)
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_events: [{:attack, 5, 9, 10, 1, 5, true}],
+          last_turn_before_owners: before_owners
+        )
+
+      assert view.last_turn_events == []
+    end
+
+    test "an attack whose attacker area the viewer owns is exposed" do
+      engine =
+        engine_with(%{
+          1 => %Engine.Area{number: 1, owner_number: 1, armies: 5},
+          3 => %Engine.Area{number: 3, owner_number: 2, armies: 5}
+        })
+
+      before_owners = owners(engine.areas)
+      event = {:attack, 1, 3, 4, 0, 4, false}
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_events: [event],
+          last_turn_before_owners: before_owners
+        )
+
+      assert view.last_turn_events == [event]
+    end
+
+    test "an event visible only through pre-turn ownership (an adjacency lost this turn) is still exposed" do
+      # Player 1 owned area 4 (adjacent to area 5) going into the turn but not anymore by the
+      # time this render reads `engine` — `last_turn_before_owners` is what still remembers it.
+      engine = engine_with(%{5 => %Engine.Area{number: 5, owner_number: 2, armies: 5}})
+      before_owners = engine.areas |> owners() |> Map.put(4, 1)
+      event = {:assign, 5, 3}
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_events: [event],
+          last_turn_before_owners: before_owners
+        )
+
+      assert view.last_turn_events == [event]
+    end
+
+    test "an event visible only through post-turn ownership (an adjacency gained this turn) is still exposed" do
+      engine =
+        engine_with(%{
+          4 => %Engine.Area{number: 4, owner_number: 1, armies: 5},
+          5 => %Engine.Area{number: 5, owner_number: 2, armies: 5}
+        })
+
+      before_owners = engine.areas |> owners() |> Map.put(4, nil)
+      event = {:assign, 5, 3}
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_events: [event],
+          last_turn_before_owners: before_owners
+        )
+
+      assert view.last_turn_events == [event]
+    end
+
+    test ":eliminated and :ended touch no area and are exposed regardless of fog or ownership" do
+      engine = engine_with(%{})
+      before_owners = owners(engine.areas)
+      events = [{:eliminated, 2}, {:ended, 1}]
+
+      view =
+        PlayerView.build(engine, nil,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_events: events,
+          last_turn_before_owners: before_owners
+        )
+
+      assert view.last_turn_events == events
+    end
+
+    test "a non-fogged game exposes every event unfiltered" do
+      engine =
+        engine_with(%{
+          5 => %Engine.Area{number: 5, owner_number: 2, armies: 5},
+          9 => %Engine.Area{number: 9, owner_number: 2, armies: 5}
+        })
+
+      event = {:attack, 5, 9, 10, 1, 5, true}
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: false,
+          last_turn_events: [event],
+          last_turn_before_owners: %{}
+        )
+
+      assert view.last_turn_events == [event]
     end
   end
 end

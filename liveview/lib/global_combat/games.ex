@@ -71,6 +71,20 @@ defmodule GlobalCombat.Games do
   end
 
   @doc """
+  Overwrites `last_turn_events` for `game_id` — `GlobalCombat.Games.Server` calls this
+  every time it resolves a turn, right alongside `persist_serialized/2`, so a crash/rehydrate
+  never leaves the resolution log stale relative to the state it describes. `events` is any
+  `:erlang.term_to_binary/1`-encoded blob; see `GlobalCombat.Games.Game`'s schema moduledoc for
+  why this is a plain column rather than a `serialized`/ProtoBuf field.
+  """
+  def persist_last_turn_events(game_id, events) do
+    from(g in Game, where: g.id == ^game_id)
+    |> Repo.update_all(set: [last_turn_events: events])
+
+    :ok
+  end
+
+  @doc """
   Advances `games.turn`/`prev_turn_time`/`last_turn_time` for a turn `GlobalCombat.Games.Server`
   ran on its own initiative (a player forcing the turn, or every seat marking done) rather than
   one `GlobalCombat.Games.TurnScheduler` already claimed via `GlobalCombat.Games.Scheduling.

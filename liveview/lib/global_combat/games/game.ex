@@ -37,6 +37,13 @@ defmodule GlobalCombat.Games.Game do
     field :reverse_attack_order, :boolean, default: false
     field :minimum_armies, :integer, default: 3
 
+    # The last turn's resolution log (`GlobalCombat.Engine.Game.resolve_turn/1`'s
+    # events), `:erlang.term_to_binary/1`-encoded rather than added to `serialized`'s ProtoBuf
+    # `Game` message on purpose -- that message is the shared wire contract the .NET oracle and
+    # the differential harness (`GlobalCombat.Engine.Harness`) also speak, and this log has no
+    # oracle-side equivalent to diff against. Elixir-only, so an Elixir-only encoding.
+    field :last_turn_events, :binary
+
     has_many :game_players, GlobalCombat.Games.GamePlayer
   end
 end
