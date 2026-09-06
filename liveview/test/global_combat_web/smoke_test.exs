@@ -40,10 +40,16 @@ defmodule GlobalCombatWeb.SmokeTest do
     # --- Create Game (LiveView form) -------------------------------------------------------
     {:ok, create_view, _html} = live(conn, ~p"/Create-Game")
 
+    # Non-random combat: every turn-1 area is dealt exactly 5 armies, so this
+    # human attack is always 4-against-5. With real dice the defender's 5 rolls can all miss
+    # (0.25^5 odds), leaving the source's army count unchanged. Fixed-percentage damage makes
+    # that specific roll deterministic — see the assertion below for the *other* source of
+    # flakiness this doesn't cover.
     assert {:error, {:live_redirect, %{to: "/Game-" <> id}}} =
              create_view
              |> form("main form", %{
                "is_training" => "true",
+               "is_non_random" => "true",
                "max_players" => "2",
                "map_name" => "original",
                "turn_length_minutes" => "1",
@@ -89,9 +95,17 @@ defmodule GlobalCombatWeb.SmokeTest do
     assert has_element?(game_view, "#game-status", "Turn 2")
     refute has_element?(game_view, "#game-over")
 
-    # The attack actually resolved: the source territory spent its armies.
+    # The attack actually resolved: the source territory either spent its armies attacking, or
+    # — since Training Mode's Computer opponent (RandomAi) queued its own whole-turn worth of
+    # random attacks back at "start", unscoped in *target* even though it is scoped in which
+    # areas it attacks *from* — the Computer's own random attack reached this same frontier
+    # territory first and took it before the human's queued order got a turn to run (do_attacks
+    # cancels a defender's own pending command when it changes hands). Either outcome is a
+    # real resolved combat; only "nothing at all happened to source" would mean the wiring
+    # broke, so assert on that instead of assuming the human's order is the only one in play.
     {:playing, after_view} = Games.player_view(game_id, account.id)
-    assert Enum.find(after_view.areas, &(&1.number == source.number)).armies < source.armies
+    after_source = Enum.find(after_view.areas, &(&1.number == source.number))
+    assert after_source.armies < source.armies or after_source.owner_number != source.owner_number
 
     # --- Home lists it under the player's current games ------------------------------------
     home = conn |> get(~p"/") |> html_response(200)
