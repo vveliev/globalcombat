@@ -90,9 +90,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#game-over", "Game Over · Turn")
       assert has_element?(alice_view, "#game-over-heading", "Victory")
       assert has_element?(alice_view, "#game-over-outcome", "You won.")
-      # Numbering is a `list-decimal` `::marker` now, not DOM text.
-      assert has_element?(alice_view, "#game-over-standings li", "Alice")
-      assert has_element?(alice_view, "#game-over-standings li", "Bob")
+      # Placing order is part of the claim, so assert position, not just membership.
+      assert has_element?(alice_view, "#game-over-standings li:nth-child(1)", "1. Alice")
+      assert has_element?(alice_view, "#game-over-standings li:nth-child(2)", "2. Bob")
       assert has_element?(alice_view, "#game-over-play-again", "Play again")
       assert has_element?(alice_view, "#game-over-home", "Back to Home")
       refute has_element?(alice_view, "#game-board", "Region Bonuses")
@@ -202,6 +202,19 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ "Log Off"
     # the board itself must still be present, nested inside that chrome.
     assert html =~ ~r/id="game-board"/
+  end
+
+  test "the page has one sr-only h1 for the game and the lobby heading is an h2 under it", %{
+    conn: conn
+  } do
+    alice = account_fixture(%{"name" => "Alice"})
+    game_id = Games.create_game(%{max_players: 2})
+    {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+    {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+    assert has_element?(view, "h1.sr-only", "Game #{game_id}")
+    assert has_element?(view, "#lobby h2", "Game #{game_id}")
+    refute has_element?(view, "#lobby h1")
   end
 
   test "the lobby (pre-Start-Game) also keeps the site chrome visible (GIF-102)", %{conn: conn} do
@@ -561,7 +574,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
   end
 
   describe "pending-orders overlay" do
-    test "a queued attack draws a labelled, clickable arrow that re-opens the order panel", %{
+    test "a queued attack draws a labelled, clickable, keyboard-reachable arrow", %{
       conn: conn1
     } do
       conn2 = Phoenix.ConnTest.build_conn()
@@ -584,12 +597,15 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
 
-      # The panel closed on submit — clicking the arrow re-selects area 1, same as
-      # clicking the territory itself, so the player can review/edit the order
-      # instead of only being able to see that it exists.
-      refute has_element?(alice_view, "#order-form")
-      html = render_click(alice_view, "select_area", %{"area" => "1"})
-      assert html =~ "Assign new armies or select a target area"
+      # role/tabindex/phx-hook prove the arrow is a keyboard-reachable target through
+      # the same .TerritoryKeyboard hook a territory uses — its Enter/Space handler
+      # pushes whatever event `data-select-event` names, "select_order" here (the
+      # `select_order` describe block below exercises that event directly since
+      # ExUnit has no way to fire a real DOM keydown).
+      assert has_element?(
+               alice_view,
+               ~s(g.world-map-order[role="button"][tabindex="0"][phx-hook=".TerritoryKeyboard"][data-select-event="select_order"])
+             )
     end
 
     test "a queued transfer draws the primary-hued arrow, not the attack/danger one", %{
@@ -659,7 +675,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # below are actually exercising the fog boundary, not a broken feature.
       assert has_element?(alice_view, "g.world-map-order")
 
-      refute render(bob_view) =~ "world-map-order"
+      refute has_element?(bob_view, "g.world-map-order")
       refute has_element?(bob_view, "#your-orders")
     end
 
@@ -682,6 +698,74 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       refute has_element?(alice_view, "g.world-map-order")
       refute has_element?(alice_view, "#your-orders")
+    end
+  end
+
+  describe "select_order (order-arrow re-select)" do
+    setup %{conn: conn} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      %{alice_view: alice_view, area_two_name: area_two_name}
+    end
+
+    test "with nothing selected, it reopens the panel prefilled with the queued order", %{
+      alice_view: alice_view,
+      area_two_name: area_two_name
+    } do
+      refute has_element?(alice_view, "#order-form")
+
+      render_click(alice_view, "select_order", %{"area" => "1"})
+
+      assert has_element?(
+               alice_view,
+               "#order-panel",
+               "Attack #{area_two_name} with how many armies?"
+             )
+
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
+    end
+
+    test "with a different area already selected, it overrides that selection with the arrow's own order",
+         %{alice_view: alice_view, area_two_name: area_two_name} do
+      # Area 3 is another territory Alice owns — selecting it first opens a fresh
+      # assign-mode panel with nothing to do with area 1's queued attack.
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      assert has_element?(alice_view, "#order-panel", "Assign new armies or select a target area")
+
+      render_click(alice_view, "select_order", %{"area" => "1"})
+
+      assert has_element?(
+               alice_view,
+               "#order-panel",
+               "Attack #{area_two_name} with how many armies?"
+             )
+
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
+    end
+
+    test "with the arrow's own source already selected, it leaves the panel showing the same order",
+         %{alice_view: alice_view, area_two_name: area_two_name} do
+      render_click(alice_view, "select_order", %{"area" => "1"})
+      render_click(alice_view, "select_order", %{"area" => "1"})
+
+      assert has_element?(
+               alice_view,
+               "#order-panel",
+               "Attack #{area_two_name} with how many armies?"
+             )
+
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
     end
   end
 

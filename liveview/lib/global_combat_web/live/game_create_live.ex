@@ -75,7 +75,7 @@ defmodule GlobalCombatWeb.GameCreateLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.site_chrome current_account={@current_account} current_page={:create_game}>
+    <.site_chrome current_account={@current_account} current_path={assigns[:current_path]}>
       <div class="mx-auto max-w-2xl p-[var(--space-4)]">
         <h1 class="text-lg font-semibold mb-[var(--space-4)]">Create a New Game</h1>
 

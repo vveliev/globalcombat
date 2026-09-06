@@ -71,4 +71,14 @@ defmodule GlobalCombatWeb.GameCreateLiveTest do
     assert view_state.max_players == 2
     assert Enum.map(view_state.players, & &1.name) == [account.name, "Computer"]
   end
+
+  test "the sidebar marks New Game as the current page (LiveView handle_params hook)", %{
+    conn: conn
+  } do
+    account = account_fixture()
+    {:ok, view, _html} = conn |> log_in_account(account) |> live(~p"/Create-Game")
+
+    assert has_element?(view, ~s(nav a[href="/Create-Game"][aria-current="page"]))
+    refute has_element?(view, ~s(nav a[href="/"][aria-current]))
+  end
 end

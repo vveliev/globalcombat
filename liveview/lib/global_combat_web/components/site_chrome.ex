@@ -18,6 +18,13 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   GIF-86). `sr-only` because the design has no visual slot for a page title (`Card`'s own
   `:header` already carries the visible section titles) and this port isn't the place to
   add one.
+
+  `current_path` marks the matching sidebar link `aria-current="page"`. It is rendered
+  server-side rather than patched in by a script because this chrome sits inside LiveViews
+  as well as controller pages: a client-side attribute would not survive LiveView's first
+  patch after the socket joins, and would never re-run on live navigation. Controller
+  pages get the assign from `GlobalCombatWeb.Plugs.CurrentPath`; LiveViews get it from the
+  `handle_params` hook `GlobalCombatWeb.UserAuth.on_mount/4` attaches.
   """
 
   use Phoenix.Component
@@ -30,13 +37,7 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
 
   attr :current_account, :any, default: nil
   attr :page_title, :string, default: nil
-
-  # One of :home, :game_manual, :create_game, :messages, :settings, :contact —
-  # whichever sidebar link the current page corresponds to, so it can carry
-  # `aria-current="page"`. `nil` (the default) renders no link as current,
-  # which is correct for every page the sidebar doesn't list (a game board,
-  # player info, stats, …).
-  attr :current_page, :atom, default: nil
+  attr :current_path, :string, default: nil, doc: "request path, for the active sidebar link"
   slot :inner_block, required: true
 
   def site_chrome(assigns) do
@@ -89,51 +90,19 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   end
 
   attr :current_account, :any, required: true
-  attr :current_page, :atom, default: nil
+  attr :current_path, :string, required: true
 
   defp sidebar_links(assigns) do
     ~H"""
-    <a href="/" aria-current={@current_page == :home && "page"} class={nav_link_class()}>
-      Home
-    </a>
-    <a
-      href={~p"/Game-Manual"}
-      aria-current={@current_page == :game_manual && "page"}
-      class={nav_link_class()}
-    >
-      Game Manual
-    </a>
+    <.nav_link href="/" current_path={@current_path}>Home</.nav_link>
+    <.nav_link href={~p"/Game-Manual"} current_path={@current_path}>Game Manual</.nav_link>
     <hr class="border-border my-[var(--space-2)]" />
     <%= if @current_account do %>
-      <a
-        href={~p"/Create-Game"}
-        aria-current={@current_page == :create_game && "page"}
-        class={nav_link_class()}
-      >
-        New Game
-      </a>
-      <a
-        href={~p"/Messages"}
-        aria-current={@current_page == :messages && "page"}
-        class={nav_link_class()}
-      >
-        Messages
-      </a>
-      <a
-        href={~p"/account/settings"}
-        aria-current={@current_page == :settings && "page"}
-        class={nav_link_class()}
-      >
-        Settings
-      </a>
+      <.nav_link href={~p"/Create-Game"} current_path={@current_path}>New Game</.nav_link>
+      <.nav_link href={~p"/Messages"} current_path={@current_path}>Messages</.nav_link>
+      <.nav_link href={~p"/account/settings"} current_path={@current_path}>Settings</.nav_link>
       <hr class="border-border my-[var(--space-2)]" />
-      <a
-        href={~p"/account/contact"}
-        aria-current={@current_page == :contact && "page"}
-        class={nav_link_class()}
-      >
-        Contact Us
-      </a>
+      <.nav_link href={~p"/account/contact"} current_path={@current_path}>Contact Us</.nav_link>
       <hr class="border-border my-[var(--space-2)]" />
       <form method="post" action={~p"/account/log-off"}>
         <input type="hidden" name="_method" value="delete" />
@@ -141,19 +110,27 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         <button type="submit" class={nav_link_class()}>Log Off</button>
       </form>
     <% else %>
-      <a href={~p"/account/log-on"} class={nav_link_class()}>Log On</a>
-      <a href={~p"/account/register"} class={nav_link_class()}>New Account</a>
+      <.nav_link href={~p"/account/log-on"} current_path={@current_path}>Log On</.nav_link>
+      <.nav_link href={~p"/account/register"} current_path={@current_path}>New Account</.nav_link>
     <% end %>
+    """
+  end
+
+  attr :href, :string, required: true
+  attr :current_path, :string, required: true
+  slot :inner_block, required: true
+
+  defp nav_link(assigns) do
+    ~H"""
+    <a href={@href} aria-current={@current_path == @href && "page"} class={nav_link_class()}>
+      {render_slot(@inner_block)}
+    </a>
     """
   end
 
   # Shared by every sidebar `<a>` and the "Log Off" `<button>` (semantically a
   # form submit, styled as a nav item) so the two element kinds can never
-  # drift apart, and so `aria-current="page"` — set server-side above from
-  # `current_page`, each call site's own route — has a visual hook to land
-  # on. A prior version set this client-side from `window.location.pathname`;
-  # that worked but ran an inline `<script>` for something the server already
-  # knows on every render.
+  # drift apart, and so `aria-current="page"` has a visual hook to land on.
   defp nav_link_class do
     [
       "rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-1)] text-left cursor-pointer",
