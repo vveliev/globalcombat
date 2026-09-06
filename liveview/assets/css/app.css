@@ -272,8 +272,11 @@
 }
 
 .world-map-territory {
-  cursor: pointer;
   outline: none;
+}
+
+.world-map-territory--interactive {
+  cursor: pointer;
 }
 
 .world-map-territory:focus-visible {

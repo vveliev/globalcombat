@@ -77,6 +77,12 @@ defmodule GlobalCombatWeb.GameLive do
         |> put_flash(:info, "That game is no longer open.")
         |> push_navigate(to: ~p"/")
 
+      {:playing, %{ended: true} = view} ->
+        # A game that just ended can't leave a stale click-to-select in progress —
+        # without this, `order_panel` (guarded on `@selected_area`) could still be
+        # showing "Assign new armies" over a board with no more turns to take.
+        socket |> assign(status: :playing, view: view) |> clear_selection()
+
       {status, view} ->
         assign(socket, status: status, view: view)
     end
@@ -252,7 +258,11 @@ defmodule GlobalCombatWeb.GameLive do
   # Every other click (unowned first click, non-adjacent or hidden second click) is a
   # no-op, same as the original hiding non-adjacent territories entirely while a
   # source is active.
-  def handle_event("select_area", %{"area" => area_str}, %{assigns: %{status: :playing}} = socket) do
+  def handle_event(
+        "select_area",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false}}} = socket
+      ) do
     case Integer.parse(area_str) do
       {area_number, ""} ->
         case find_area(socket.assigns.view, area_number) do
@@ -543,12 +553,13 @@ defmodule GlobalCombatWeb.GameLive do
           target_area={@target_area}
           lens={@lens}
           viewer_number={@view.viewer_number}
+          interactive={!@view.ended}
         />
       </div>
       <div class="flex flex-wrap items-start gap-[var(--space-4)]">
         <.region_bonuses map_name={@view.map_name} />
         <.order_panel
-          :if={@selected_area}
+          :if={@selected_area && !@view.ended}
           view={@view}
           selected_area={@selected_area}
           target_area={@target_area}

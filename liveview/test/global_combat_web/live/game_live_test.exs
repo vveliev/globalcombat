@@ -142,6 +142,32 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(spectator, "#game-over-heading", "Game Over — Alice wins")
       refute has_element?(spectator, "#game-over-outcome")
     end
+
+    test "clicking a territory on a finished game is a no-op — no order panel, no focusable/clickable territory",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+
+      # Alice (the winner) owns area 1 already, so this is exactly the click this
+      # test covers: a live seat clicking one of its own, still-owned territories
+      # after the game ended.
+      html = render_click(alice_view, "select_area", %{"area" => "1"})
+
+      refute html =~ "Assign new armies or select a target area"
+      refute has_element?(alice_view, "#order-form")
+
+      # Territories stop being an interactive control at all, not just an
+      # unresponsive one — no role/tabindex/click/keyboard hook survives.
+      refute has_element?(alice_view, ~s(g#territory-1[role]))
+      refute has_element?(alice_view, ~s(g#territory-1[tabindex]))
+      refute has_element?(alice_view, ~s(g#territory-1[phx-click]))
+      refute has_element?(alice_view, ~s(g#territory-1[phx-hook]))
+    end
   end
 
   test "the lobby renders a just-joined player without crashing (GIF-94 regression)", %{
