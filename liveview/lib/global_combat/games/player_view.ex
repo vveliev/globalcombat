@@ -35,7 +35,7 @@ defmodule GlobalCombat.Games.PlayerView do
   everyone in the game regardless of `IsFogged`; only the per-area board detail is
   hidden. A spectator (`viewer_number: nil`) sees exactly what a fogged non-owner sees.
 
-  ## GIF-185: turn-resolution event visibility
+  ## Turn-resolution event visibility
 
   `last_turn_events` (the previous turn's `GlobalCombat.Engine.Game.resolve_turn/1` log) is
   filtered by the *same* rule as the board above, applied per event rather than per area — an
@@ -151,7 +151,7 @@ defmodule GlobalCombat.Games.PlayerView do
     end)
   end
 
-  # See the moduledoc's "GIF-185: turn-resolution event visibility" section — an event is exposed
+  # See the moduledoc's "Turn-resolution event visibility" section — an event is exposed
   # only if every area it touches was visible to this viewer either right before this turn
   # resolved (`before_owners`) or right after (`engine`'s own current state); `{:eliminated, _}`/
   # `{:ended, _}` touch no area and are always exposed, same as the player roll-ups above.
@@ -179,7 +179,9 @@ defmodule GlobalCombat.Games.PlayerView do
   defp event_area_numbers({:ended, _winner}), do: []
 
   defp before_owners_lookup(before_owners), do: fn number -> Map.fetch!(before_owners, number) end
-  defp current_owner_lookup(engine), do: fn number -> Engine.area!(engine, number).owner_number end
+
+  defp current_owner_lookup(engine),
+    do: fn number -> Engine.area!(engine, number).owner_number end
 
   defp area_visible_at?(_owner_of, _engine, _viewer_number, false, _area_number), do: true
 

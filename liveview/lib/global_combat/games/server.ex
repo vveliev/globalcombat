@@ -294,8 +294,8 @@ defmodule GlobalCombat.Games.Server do
     |> Map.merge(decode_last_turn_events(Keyword.get(opts, :last_turn_events)))
   end
 
-  # `nil` covers both a game rehydrated before GIF-185 (no `last_turn_events` column value yet)
-  # and one no turn has resolved for since — `:erlang.binary_to_term/1` has no representation for
+  # `nil` covers both a game rehydrated before this column existed (no `last_turn_events` value
+  # yet) and one no turn has resolved for since — `:erlang.binary_to_term/1` has no representation for
   # "nothing yet" to decode, so this is handled before ever reaching it.
   defp decode_last_turn_events(nil), do: %{last_turn_events: [], last_turn_before_owners: %{}}
 
@@ -850,7 +850,9 @@ defmodule GlobalCombat.Games.Server do
     # all `PlayerView`'s fog rule needs to tell "was this area's neighborhood visible before the
     # attack that flipped it" from "only after" (see PlayerView moduledoc), without holding onto
     # (or ever exposing) last turn's army counts.
-    before_owners = Map.new(old_engine.areas, fn {number, area} -> {number, area.owner_number} end)
+    before_owners =
+      Map.new(old_engine.areas, fn {number, area} -> {number, area.owner_number} end)
+
     {engine, events} = Engine.resolve_turn(old_engine)
     engine = run_ai_turns(engine)
     now = DateTime.utc_now() |> DateTime.truncate(:second)

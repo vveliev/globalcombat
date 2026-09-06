@@ -71,7 +71,7 @@ defmodule GlobalCombat.Games do
   end
 
   @doc """
-  Overwrites `last_turn_events` for `game_id` (GIF-185) — `GlobalCombat.Games.Server` calls this
+  Overwrites `last_turn_events` for `game_id` — `GlobalCombat.Games.Server` calls this
   every time it resolves a turn, right alongside `persist_serialized/2`, so a crash/rehydrate
   never leaves the resolution log stale relative to the state it describes. `events` is any
   `:erlang.term_to_binary/1`-encoded blob; see `GlobalCombat.Games.Game`'s schema moduledoc for

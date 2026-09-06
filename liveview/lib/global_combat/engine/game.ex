@@ -214,7 +214,7 @@ defmodule GlobalCombat.Engine.Game do
   end
 
   @doc """
-  GIF-185: same resolution `run_turn/1` performs, plus the ordered log of what happened along the
+  Same resolution `run_turn/1` performs, plus the ordered log of what happened along the
   way — `run_turn/1` (and therefore the differential harness and `Wire`'s persisted snapshot,
   which only ever round-trip the resulting `%Game{}`) is unchanged; this is purely an additive
   view built from the same pass, for players who want to see the turn play out rather than just
@@ -335,7 +335,7 @@ defmodule GlobalCombat.Engine.Game do
     game
   end
 
-  # Same resolution as `do_attack/2`, plus (for GIF-185) the `{:attack, ...}` event describing it
+  # Same resolution as `do_attack/2`, plus the `{:attack, ...}` event describing it
   # — `nil` for the two ways an attack order can resolve to nothing happening at all (already-
   # same-owner, or clamped down to a non-positive amount), since no event is more useful there
   # than a misleading "0 losses, no capture" record of an attack that never actually rolled.
@@ -439,7 +439,7 @@ defmodule GlobalCombat.Engine.Game do
   defp resolve_reinforcements_and_eliminations(game) do
     {game, alive_players, events} =
       Enum.reduce(players_in_order(game), {game, 0, []}, fn player,
-                                                             {game, alive_players, events} ->
+                                                            {game, alive_players, events} ->
         player = player!(game, player.number)
 
         cond do

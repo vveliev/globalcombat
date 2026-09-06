@@ -33,7 +33,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
     {engine, is_fogged}
   end
 
-  # GIF-185 event-visibility fixtures: a full 1..42 area map (same reasoning as `game/1` above —
+  # Turn-resolution event-visibility fixtures: a full 1..42 area map (same reasoning as `game/1` above —
   # `MapInfo.inbounds/2` walks real map topology regardless of which areas a test cares about) with
   # only the given `overrides` non-default, plus a minimal two-player roster.
   defp full_areas(overrides) do
@@ -143,7 +143,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
     end
   end
 
-  describe "GIF-185 turn-resolution event visibility" do
+  describe "turn-resolution event visibility" do
     test "an attack between two areas invisible to the viewer, before and after, is omitted" do
       # Areas 5 (Quebec) and 9 (Greenland) are both owned by player 2 and neither is adjacent
       # to anything player 1 owns — the same "nowhere near anything I own" case the

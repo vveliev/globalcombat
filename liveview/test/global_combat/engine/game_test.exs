@@ -166,7 +166,7 @@ defmodule GlobalCombat.Engine.GameTest do
     end
   end
 
-  describe "resolve_turn/1 (GIF-185)" do
+  describe "resolve_turn/1" do
     test "emits assign/transfer/attack events, in resolution order, alongside the resolved state" do
       # Player 1 owns areas 1 (reinforcing), 2/3 (transferring between them), and 5 (about to be
       # attacked and captured). Player 2 owns area 4 and attacks area 5 with `is_non_random: true`
