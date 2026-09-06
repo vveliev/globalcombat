@@ -1,13 +1,19 @@
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 
+/* fonts.css must be imported above the Tailwind entrypoint below: Tailwind
+   expands that entrypoint in place into thousands of lines of generated
+   output, and CSS requires @import to precede all other rules — an
+   @import url(...) landing after regular rules is invalid and browsers
+   silently drop it, which meant every brand's Google Fonts request never
+   fired despite the font-family wiring being correct. */
+@import "../vendor/design-boutique/fonts.css";
 @import "tailwindcss" source(none);
 
 /* design-boutique Layer 1 — the shared token source (generated, do not edit;
    see assets/vendor/design-boutique/PROVENANCE.md): runtime CSS variables for
    every theme (switched by `data-theme`) plus the Tailwind v4 @theme fragment
    mapping them to utilities (bg-primary, text-text-muted, border-border, …). */
-@import "../vendor/design-boutique/fonts.css";
 @import "../vendor/design-boutique/variables.css";
 @import "../vendor/design-boutique/theme.css";
 
