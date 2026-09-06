@@ -114,6 +114,74 @@ defmodule GlobalCombat.Games.PlayerViewTest do
     end
   end
 
+  describe "orders (pending-orders overlay fog boundary)" do
+    test "the owner sees their own queued attack/transfer" do
+      {engine, is_fogged} = game()
+
+      engine =
+        put_in(engine.areas[1], %Engine.Area{
+          number: 1,
+          owner_number: 1,
+          armies: 5,
+          command: :attack,
+          target_number: 2,
+          amount: 12
+        })
+
+      view = PlayerView.build(engine, 1, game_id: 1, is_fogged: is_fogged)
+      area1 = Enum.find(view.areas, &(&1.number == 1))
+
+      assert area1.order == %{command: :attack, target: 2, amount: 12}
+    end
+
+    test "a non-owner never sees another player's queued order, even when the area itself is visible" do
+      {engine, is_fogged} = game()
+
+      engine =
+        put_in(engine.areas[2], %Engine.Area{
+          number: 2,
+          owner_number: 2,
+          armies: 7,
+          command: :transfer,
+          target_number: 5,
+          amount: 3
+        })
+
+      view = PlayerView.build(engine, 1, game_id: 1, is_fogged: is_fogged)
+      area2 = Enum.find(view.areas, &(&1.number == 2))
+
+      assert area2.visible
+      assert area2.order == nil
+    end
+
+    test "a spectator never sees anyone's queued order" do
+      {engine, is_fogged} = game()
+
+      engine =
+        put_in(engine.areas[1], %Engine.Area{
+          number: 1,
+          owner_number: 1,
+          armies: 5,
+          command: :attack,
+          target_number: 2,
+          amount: 12
+        })
+
+      view = PlayerView.build(engine, nil, game_id: 1, is_fogged: is_fogged)
+      area1 = Enum.find(view.areas, &(&1.number == 1))
+
+      assert area1.order == nil
+    end
+
+    test "an owned area with no queued command has a nil order, not a :none sentinel" do
+      {engine, is_fogged} = game()
+      view = PlayerView.build(engine, 1, game_id: 1, is_fogged: is_fogged)
+
+      area1 = Enum.find(view.areas, &(&1.number == 1))
+      assert area1.order == nil
+    end
+  end
+
   describe "player roll-ups" do
     test "are never fog-gated — every player's totals are visible to every viewer, including spectators" do
       {engine, is_fogged} = game()

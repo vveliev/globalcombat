@@ -78,6 +78,12 @@ defmodule GlobalCombatWeb.GameLive do
         |> put_flash(:info, "That game is no longer open.")
         |> push_navigate(to: ~p"/")
 
+      {:playing, %{ended: true} = view} ->
+        # A game that just ended can't leave a stale click-to-select in progress —
+        # without this, `order_panel` (guarded on `@selected_area`) could still be
+        # showing "Assign new armies" over a board with no more turns to take.
+        socket |> assign(status: :playing, view: view) |> clear_selection()
+
       {status, view} ->
         assign(socket, status: status, view: view)
     end
@@ -253,7 +259,11 @@ defmodule GlobalCombatWeb.GameLive do
   # Every other click (unowned first click, non-adjacent or hidden second click) is a
   # no-op, same as the original hiding non-adjacent territories entirely while a
   # source is active.
-  def handle_event("select_area", %{"area" => area_str}, %{assigns: %{status: :playing}} = socket) do
+  def handle_event(
+        "select_area",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false}}} = socket
+      ) do
     case Integer.parse(area_str) do
       {area_number, ""} ->
         case find_area(socket.assigns.view, area_number) do
@@ -725,13 +735,15 @@ defmodule GlobalCombatWeb.GameLive do
           target_area={@target_area}
           lens={@lens}
           viewer_number={@view.viewer_number}
+          interactive={!@view.ended}
           replay_steps={@replay_steps}
         />
       </div>
       <div class="flex flex-wrap items-start gap-[var(--space-4)]">
         <.region_bonuses map_name={@view.map_name} />
+        <.your_orders_card :if={my_orders(@view) != []} orders={my_orders(@view)} />
         <.order_panel
-          :if={@selected_area}
+          :if={@selected_area && !@view.ended}
           view={@view}
           selected_area={@selected_area}
           target_area={@target_area}
@@ -875,6 +887,35 @@ defmodule GlobalCombatWeb.GameLive do
   defp order_submit_label(:assign), do: "Assign"
   defp order_submit_label(:transfer), do: "Transfer"
   defp order_submit_label(:attack), do: "Attack"
+
+  # The same queued transfers/attacks the board draws as arrows, worded as
+  # plain text — an "error prevention" review surface for all five queued orders at
+  # once without re-clicking every source territory, and the accessible equivalent of
+  # the arrows for anyone who can't see the board (an arrow's own `aria-label` covers
+  # it in isolation, but this list is what makes "did I queue everything I meant to"
+  # answerable in one place). `WorldMap.order_label/3` words each line so this list and
+  # an arrow's `aria-label` can never describe the same order differently.
+  # `view.areas` already dropped every non-owner's `order` to `nil` (`PlayerView`'s
+  # fog-of-war boundary), so this needs no owner check of its own.
+  defp my_orders(view) do
+    for area <- view.areas, area.order do
+      target = find_area(view, area.order.target)
+      WorldMap.order_label(area.name, area.order, target.name)
+    end
+  end
+
+  attr :orders, :list, required: true
+
+  defp your_orders_card(assigns) do
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>Your orders</:header>
+      <ul id="your-orders" class="flex flex-col gap-[var(--space-1)] text-sm">
+        <li :for={order <- @orders}>{order}</li>
+      </ul>
+    </Card.card>
+    """
+  end
 
   # The accessible equivalent of the board's replay arrows/counts — every
   # `GameLive.Replay.steps/4` line as ordinary, always-present text next to the

@@ -15,7 +15,7 @@ defmodule GlobalCombat.Games.PlayerView do
   accident. Filtering happens once, here, at the context boundary
   (`GlobalCombat.Games.Live.player_view/2`) — `GameLive` never touches `Engine.Game` at all.
 
-  Two independent things are hidden from a non-owner, matching the original exactly:
+  Three independent things are hidden from a non-owner, matching the original exactly:
 
     1. Fog of war (`is_fogged: true`, the `IsFogged` game option): an area's true
        owner/army-count is hidden unless the viewer owns it, or owns an area that
@@ -29,6 +29,11 @@ defmodule GlobalCombat.Games.PlayerView do
        non-fogged game. Every other viewer sees the area's resolved `armies` only. This
        is what stops "how many armies did my opponent just queue for their next attack"
        from leaking to anyone but the player who queued it.
+    3. A queued transfer/attack (`order: %{command:, target:, amount:}`) is `nil` for
+       every non-owner regardless of `is_fogged` — the board's pending-orders arrow
+       overlay must never let an opponent preview a move before it resolves, which is
+       a stricter bar than fog of war itself (fog can still reveal an *area's*
+       owner/armies to an inbound neighbour; an order is never shared, full stop).
 
   Player roll-ups (name, total armies, area count, done/eliminated/place) are **not**
   fog-gated — `Index.cshtml`'s `PlayerReadout` table shows every player's totals to
@@ -134,13 +139,26 @@ defmodule GlobalCombat.Games.PlayerView do
       # same static layout every viewer already sees rendered on the board
       # regardless of fog, unlike `owner_number`/`armies` above. Safe to expose in
       # full for GIF-81's accessible board table.
-      adjacent: links
+      adjacent: links,
+      # The viewer's own queued transfer/attack, for the board's pending-orders arrow
+      # overlay. `nil` for every non-owner (fog-of-war for *orders*, not just areas —
+      # an opponent must never see what a player queued before it resolves) and also
+      # `nil` for the owner's own area when there's nothing queued (`:command ==
+      # :none`), so the overlay's `if area.order do` has one clean falsy case to check
+      # instead of a sentinel command atom.
+      order: order_view(area, owns_it?)
     }
   end
 
   defp area_armies(_area, false, _owns_it?), do: nil
   defp area_armies(area, true, false), do: area.armies
   defp area_armies(area, true, true), do: area.armies + area.assigned_armies
+
+  defp order_view(%Engine.Area{command: :none}, _owns_it?), do: nil
+  defp order_view(_area, false), do: nil
+
+  defp order_view(%Engine.Area{} = area, true),
+    do: %{command: area.command, target: area.target_number, amount: area.amount}
 
   defp owns_adjacent?(_engine, _area, nil), do: false
 
