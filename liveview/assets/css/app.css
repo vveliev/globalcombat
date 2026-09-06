@@ -419,8 +419,11 @@
    hostile move" reads consistently everywhere the board uses it; transfer gets the
    primary hue instead since it's a friendly reassignment, not a threat. */
 .world-map-order {
-  cursor: pointer;
   outline: none;
+}
+
+.world-map-order--interactive {
+  cursor: pointer;
 }
 
 .world-map-order:focus-visible {
@@ -461,6 +464,9 @@
   fill: var(--color-primary);
 }
 
+/* Same light-fill/dark-stroke outline as `.world-map-count` above, and for the
+   same reason (WCAG 1.4.3 contrast against every owner-slot background) — an
+   order's amount label sits on the map exactly like an army count does. */
 .world-map-order-amount {
   font-family: inherit;
   font-size: 11px;
