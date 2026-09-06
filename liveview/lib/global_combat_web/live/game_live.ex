@@ -29,6 +29,7 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.Components.Boutique.Card
   alias GlobalCombatWeb.Components.Boutique.Input
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
+  alias GlobalCombatWeb.Components.Boutique.SegmentedControl
   alias GlobalCombatWeb.Components.Boutique.StatusPill
   alias GlobalCombatWeb.GameLive.WorldMap
 
@@ -58,6 +59,7 @@ defmodule GlobalCombatWeb.GameLive do
        |> assign(:selected_area, nil)
        |> assign(:target_area, nil)
        |> assign(:order_amount, "")
+       |> assign(:lens, :owner)
        |> refresh_view()}
     else
       {:ok, socket |> put_flash(:error, "Game not found.") |> push_navigate(to: ~p"/")}
@@ -288,6 +290,18 @@ defmodule GlobalCombatWeb.GameLive do
 
   def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
 
+  # The map lens is a per-viewer display preference, not game state —
+  # it lives only in this socket's assigns, same as :selected_area/:target_area,
+  # never touching `PlayerView`.
+  def handle_event("set_lens", %{"lens" => lens}, socket) do
+    case lens do
+      "owner" -> {:noreply, assign(socket, :lens, :owner)}
+      "region" -> {:noreply, assign(socket, :lens, :region)}
+      "frontier" -> {:noreply, assign(socket, :lens, :frontier)}
+      _ -> {:noreply, socket}
+    end
+  end
+
   defp handle_area_click(socket, area) do
     view = socket.assigns.view
 
@@ -509,6 +523,13 @@ defmodule GlobalCombatWeb.GameLive do
     ~H"""
     <.game_over :if={@view.ended} view={@view} />
     <div class="flex flex-col gap-[var(--space-4)]">
+      <form id="lens-form" phx-change="set_lens">
+        <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
+          <:option value="owner">Owner</:option>
+          <:option value="region">Region control</:option>
+          <:option value="frontier">Frontier</:option>
+        </SegmentedControl.segmented_control>
+      </form>
       <div class="w-full max-w-[60rem]">
         <WorldMap.world_map
           map_name={@view.map_name}
@@ -516,6 +537,8 @@ defmodule GlobalCombatWeb.GameLive do
           players={@view.players}
           selected_area={@selected_area}
           target_area={@target_area}
+          lens={@lens}
+          viewer_number={@view.viewer_number}
         />
       </div>
       <div class="flex flex-wrap items-start gap-[var(--space-4)]">
