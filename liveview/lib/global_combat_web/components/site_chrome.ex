@@ -24,11 +24,19 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   use GlobalCombatWeb, :verified_routes
 
   import Phoenix.Controller, only: [get_csrf_token: 0]
+  import GlobalCombatWeb.CoreComponents, only: [icon: 1]
 
   alias GlobalCombatWeb.Layouts
 
   attr :current_account, :any, default: nil
   attr :page_title, :string, default: nil
+
+  # One of :home, :game_manual, :create_game, :messages, :settings, :contact —
+  # whichever sidebar link the current page corresponds to, so it can carry
+  # `aria-current="page"`. `nil` (the default) renders no link as current,
+  # which is correct for every page the sidebar doesn't list (a game board,
+  # player info, stats, …).
+  attr :current_page, :atom, default: nil
   slot :inner_block, required: true
 
   def site_chrome(assigns) do
@@ -43,37 +51,30 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         </div>
       </:topbar>
       <:sidebar>
-        <nav id="sidebar-nav" class="flex flex-col gap-[var(--space-2)] text-sm">
-          <a href="/" class={nav_link_class()}>Home</a>
-          <a href={~p"/Game-Manual"} class={nav_link_class()}>Game Manual</a>
-          <hr class="border-border my-[var(--space-2)]" />
-          <%= if @current_account do %>
-            <a href={~p"/Create-Game"} class={nav_link_class()}>New Game</a>
-            <a href={~p"/Messages"} class={nav_link_class()}>Messages</a>
-            <a href={~p"/account/settings"} class={nav_link_class()}>Settings</a>
-            <hr class="border-border my-[var(--space-2)]" />
-            <a href={~p"/account/contact"} class={nav_link_class()}>Contact Us</a>
-            <hr class="border-border my-[var(--space-2)]" />
-            <form method="post" action={~p"/account/log-off"}>
-              <input type="hidden" name="_method" value="delete" />
-              <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-              <button type="submit" class={nav_link_class()}>Log Off</button>
-            </form>
-          <% else %>
-            <a href={~p"/account/log-on"} class={nav_link_class()}>Log On</a>
-            <a href={~p"/account/register"} class={nav_link_class()}>New Account</a>
-          <% end %>
+        <%!-- Below `lg:` this nav used to render at full height (7 links, ~273px)
+        between the topbar and the page content, pushing the game board down a
+        full screen's worth on phone/tablet. A single `<nav>` toggled with
+        `hidden lg:flex`/`<details>` can't serve both breakpoints: a closed
+        `<details>` hides its content at the UA level (Chromium >=131 via
+        `::details-content { content-visibility: hidden }`, older engines via
+        an unrendered slot) regardless of an author `display` override, so
+        `lg:flex` on the nested `<nav>` never actually shows it again past
+        `lg:` — reproduced with `checkVisibility() === false` despite a
+        computed `display:flex` at 1280px. Two separate markup branches next
+        to each other avoids fighting that: a plain nav shown `hidden lg:flex`
+        for `lg:` and above, and a `<details>` disclosure shown only
+        `lg:hidden` below it, each with its own copy of the links. --%>
+        <nav class="hidden lg:flex lg:flex-col lg:gap-[var(--space-2)] text-sm">
+          {sidebar_links(assigns)}
         </nav>
-        <script>
-          (() => {
-            const nav = document.getElementById("sidebar-nav");
-            if (!nav) return;
-            const path = window.location.pathname;
-            nav.querySelectorAll("a[href]").forEach((a) => {
-              if (a.pathname === path) a.setAttribute("aria-current", "page");
-            });
-          })();
-        </script>
+        <details class="group lg:hidden">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-[var(--space-2)] text-sm font-semibold [&::-webkit-details-marker]:hidden">
+            Menu <.icon name="hero-chevron-down" class="size-4 group-open:rotate-180" />
+          </summary>
+          <nav class="mt-[var(--space-2)] hidden flex-col gap-[var(--space-2)] text-sm group-open:flex">
+            {sidebar_links(assigns)}
+          </nav>
+        </details>
       </:sidebar>
       <:content>
         <h1 :if={@page_title} class="sr-only">{@page_title}</h1>
@@ -87,11 +88,72 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
     """
   end
 
+  attr :current_account, :any, required: true
+  attr :current_page, :atom, default: nil
+
+  defp sidebar_links(assigns) do
+    ~H"""
+    <a href="/" aria-current={@current_page == :home && "page"} class={nav_link_class()}>
+      Home
+    </a>
+    <a
+      href={~p"/Game-Manual"}
+      aria-current={@current_page == :game_manual && "page"}
+      class={nav_link_class()}
+    >
+      Game Manual
+    </a>
+    <hr class="border-border my-[var(--space-2)]" />
+    <%= if @current_account do %>
+      <a
+        href={~p"/Create-Game"}
+        aria-current={@current_page == :create_game && "page"}
+        class={nav_link_class()}
+      >
+        New Game
+      </a>
+      <a
+        href={~p"/Messages"}
+        aria-current={@current_page == :messages && "page"}
+        class={nav_link_class()}
+      >
+        Messages
+      </a>
+      <a
+        href={~p"/account/settings"}
+        aria-current={@current_page == :settings && "page"}
+        class={nav_link_class()}
+      >
+        Settings
+      </a>
+      <hr class="border-border my-[var(--space-2)]" />
+      <a
+        href={~p"/account/contact"}
+        aria-current={@current_page == :contact && "page"}
+        class={nav_link_class()}
+      >
+        Contact Us
+      </a>
+      <hr class="border-border my-[var(--space-2)]" />
+      <form method="post" action={~p"/account/log-off"}>
+        <input type="hidden" name="_method" value="delete" />
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <button type="submit" class={nav_link_class()}>Log Off</button>
+      </form>
+    <% else %>
+      <a href={~p"/account/log-on"} class={nav_link_class()}>Log On</a>
+      <a href={~p"/account/register"} class={nav_link_class()}>New Account</a>
+    <% end %>
+    """
+  end
+
   # Shared by every sidebar `<a>` and the "Log Off" `<button>` (semantically a
   # form submit, styled as a nav item) so the two element kinds can never
-  # drift apart, and so `aria-current="page"` (set client-side above — the
-  # sidebar has no server-side notion of "current path" across both LiveView
-  # and plain controller-rendered pages) has a visual hook to land on.
+  # drift apart, and so `aria-current="page"` — set server-side above from
+  # `current_page`, each call site's own route — has a visual hook to land
+  # on. A prior version set this client-side from `window.location.pathname`;
+  # that worked but ran an inline `<script>` for something the server already
+  # knows on every render.
   defp nav_link_class do
     [
       "rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-1)] text-left cursor-pointer",
