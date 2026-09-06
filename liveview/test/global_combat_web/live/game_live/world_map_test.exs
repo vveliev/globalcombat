@@ -1,11 +1,4 @@
 defmodule GlobalCombatWeb.GameLive.WorldMapTest do
-  @moduledoc """
-  Once a game has ended there is nothing left to click, so a territory
-  must stop being a focus/click target entirely rather than staying an
-  unresponsive `role="button"`. Component-level coverage that `interactive={false}`
-  actually drops the interactive attributes; `GameLiveTest` covers the
-  end-to-end "clicking one after Game Over is a no-op" behaviour.
-  """
   use ExUnit.Case, async: true
 
   import Phoenix.Component
@@ -38,40 +31,49 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
 
   defp players, do: [%{number: 1, name: "Alice"}]
 
-  defp territory_tag(html) do
-    Regex.run(~r/<g[^>]*id="territory-1"[^>]*>/s, html) |> List.first()
+  defp territory(html) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query_by_id("territory-1")
   end
 
-  test "interactive (default) territories are focusable role=button click/keyboard targets" do
-    assigns = %{areas: [board_area(1)], players: players()}
+  describe "interactive attr" do
+    # Once a game has ended there is nothing left to click, so a territory
+    # must stop being a focus/click target entirely rather than staying an
+    # unresponsive `role="button"`. This covers `interactive={false}` actually
+    # dropping the interactive attributes; `GameLiveTest` covers the
+    # end-to-end "clicking one after Game Over is a no-op" behaviour.
 
-    html =
-      rendered_to_string(~H"""
-      <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
-      """)
+    test "interactive (default) territories are focusable role=button click/keyboard targets" do
+      assigns = %{areas: [board_area(1)], players: players()}
 
-    assert html =~ ~s(id="territory-1")
-    assert html =~ ~s(role="button")
-    assert html =~ ~s(tabindex="0")
-    assert html =~ ~s(phx-click="select_area")
-    assert html =~ "world-map-territory--interactive"
-  end
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
 
-  test "interactive={false} territories have no role, tabindex, click or keyboard hook" do
-    assigns = %{areas: [board_area(1)], players: players()}
+      territory = territory(html)
 
-    html =
-      rendered_to_string(~H"""
-      <WorldMap.world_map map_name={:original} areas={@areas} players={@players} interactive={false} />
-      """)
+      assert territory |> LazyHTML.filter(~s([role="button"])) |> Enum.any?()
+      assert territory |> LazyHTML.filter(~s([tabindex="0"])) |> Enum.any?()
+      assert territory |> LazyHTML.filter(~s([phx-click="select_area"])) |> Enum.any?()
+      assert territory |> LazyHTML.filter(".world-map-territory--interactive") |> Enum.any?()
+    end
 
-    territory = territory_tag(html)
+    test "interactive={false} territories have no role, tabindex, click or keyboard hook" do
+      assigns = %{areas: [board_area(1)], players: players()}
 
-    refute territory =~ "role="
-    refute territory =~ "tabindex="
-    refute territory =~ "phx-click"
-    refute territory =~ "phx-hook"
-    refute territory =~ "world-map-territory--interactive"
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} interactive={false} />
+        """)
+
+      territory = territory(html)
+
+      assert territory |> LazyHTML.filter("[role]") |> Enum.empty?()
+      assert territory |> LazyHTML.filter("[tabindex]") |> Enum.empty?()
+      assert territory |> LazyHTML.filter("[phx-click]") |> Enum.empty?()
+      assert territory |> LazyHTML.filter("[phx-hook]") |> Enum.empty?()
+      assert territory |> LazyHTML.filter(".world-map-territory--interactive") |> Enum.empty?()
+    end
   end
 
   describe "region_owner/1" do
