@@ -361,23 +361,18 @@ defmodule GlobalCombatWeb.GameLiveTest do
     owned_by_alice = Enum.find(alice_state.areas, &(&1.owner_number == 1))
     assert owned_by_alice
 
-    html = render(alice_view)
-
-    # LiveView tags a function component's root element with `phx-r=""` (visible
-    # throughout this render, e.g. the outer `<div phx-r="" id="game-board" ...>`)
-    # ahead of its own attributes — `board_table/1`'s wrapping `<div>` is one such
-    # root, so the attribute order isn't `<div class="sr-only overflow-hidden">`
-    # verbatim.
-    #
-    # `sr-only` lives on the wrapping div, not the `<table>` itself — see
-    # `board_table/1`'s comment for why, and the real-browser
-    # verification that backs it.
-    assert html =~ ~r/<div[^>]*class="sr-only overflow-hidden"[^>]*>\s*<table>/
-    assert html =~ ~r/<th scope="row">#{owned_by_alice.name}<\/th>\s*<td>Alice<\/td>/
+    # `sr-only` lives on the wrapping `<div>`, not the `<table>` itself — see
+    # `board_table/1`'s comment for why (a table's auto layout algorithm
+    # ignores an explicit width smaller than its min-content width, so
+    # `sr-only` directly on `<table>` still pushed the document's
+    # scrollWidth) — and the real-browser verification that backs it.
+    assert has_element?(alice_view, "div.sr-only > table")
+    assert has_element?(alice_view, "table th[scope=row]", owned_by_alice.name)
+    assert has_element?(alice_view, "table td", "Alice")
 
     [first_neighbor | _] = owned_by_alice.adjacent
     neighbor_name = Enum.find(alice_state.areas, &(&1.number == first_neighbor)).name
-    assert html =~ neighbor_name
+    assert has_element?(alice_view, "table td", neighbor_name)
   end
 
   test "army-count overlays carry a dark outline independent of the owner colour (WCAG 1.4.3, GIF-83)",

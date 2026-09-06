@@ -1063,7 +1063,8 @@ defmodule GlobalCombatWeb.GameLive do
   # min-content width, so `sr-only` directly on `<table>` still laid it out at
   # its full intrinsic width (measured 824px) and that box pushed the
   # document's scrollWidth even though it was visually hidden. A plain `div`
-  # honors the explicit 1px width, and `overflow-hidden` clips the oversized
+  # honors the explicit 1px width, and Tailwind's `sr-only` utility already
+  # sets `overflow: hidden` (no separate class needed) to clip the oversized
   # table inside it, so nothing here contributes to page scroll. Verified with
   # this fix in place, via a real Chromium session (Playwright) against `mix
   # phx.server`, logged in and viewing both an active and a finished game:
@@ -1079,7 +1080,7 @@ defmodule GlobalCombatWeb.GameLive do
       |> assign(:owner_names, WorldMap.owner_names(assigns.players))
 
     ~H"""
-    <div class="sr-only overflow-hidden">
+    <div class="sr-only">
       <table>
         <caption>Board state: territory, owner, armies, and adjacency</caption>
         <thead>
