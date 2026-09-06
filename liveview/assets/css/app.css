@@ -120,6 +120,23 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Layer 3 shell roots and the app's heading-weight elements (Card header,
+   GameLive's lobby h1/game-over h2/turn number) each repeated the same
+   var()-heavy arbitrary-value strings verbatim; these two utilities are
+   the single source of truth for that pairing so every call site tracks
+   the token names together. */
+@utility heading-3 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: var(--heading-3);
+}
+
+@utility body-text {
+  font-family: var(--font-body);
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-leading);
+}
+
 /* This file is for your main application CSS */
 
 /* Floating chat windows (GIF-33) — modernized replacement for Global.js's jQuery
