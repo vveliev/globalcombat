@@ -14,7 +14,9 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
       <Button.button>Save</Button.button>
       """)
 
-    assert html =~ ~r/<button[^>]*type="button"/
+    button = html |> LazyHTML.from_fragment() |> LazyHTML.query("button")
+
+    assert button |> LazyHTML.filter(~s([type="button"])) |> Enum.any?()
     assert html =~ "Save"
     assert html =~ "bg-primary"
     assert html =~ "text-primary-contrast"
@@ -46,8 +48,10 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
       <Button.button type="submit" disabled>Save</Button.button>
       """)
 
-    assert html =~ ~s(type="submit")
-    assert html =~ "disabled"
+    button = html |> LazyHTML.from_fragment() |> LazyHTML.query("button")
+
+    assert button |> LazyHTML.filter(~s([type="submit"])) |> Enum.any?()
+    assert button |> LazyHTML.filter("[disabled]") |> Enum.any?()
   end
 
   test "renders as a link, not a button, when given navigate/href/patch" do
@@ -58,9 +62,21 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
       <Button.button intent="primary" navigate="/Create-Game">Play again</Button.button>
       """)
 
-    assert html =~ ~r/<a[^>]*href="\/Create-Game"/
+    parsed = LazyHTML.from_fragment(html)
+
+    assert parsed |> LazyHTML.filter(~s(a[href="/Create-Game"])) |> Enum.any?()
     assert html =~ "bg-primary"
-    refute html =~ "<button"
+    assert parsed |> LazyHTML.filter("button") |> Enum.empty?()
+  end
+
+  test "raises when disabled is combined with a navigable attr" do
+    assigns = %{}
+
+    assert_raise ArgumentError, ~r/disabled.*cannot be combined/, fn ->
+      rendered_to_string(~H"""
+      <Button.button navigate="/Create-Game" disabled>Play again</Button.button>
+      """)
+    end
   end
 
   test "references semantic tokens only — no literal hex/rgb/hsl colors in source" do

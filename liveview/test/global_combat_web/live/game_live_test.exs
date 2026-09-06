@@ -90,9 +90,16 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#game-over", "Game Over · Turn")
       assert has_element?(alice_view, "#game-over-heading", "Victory")
       assert has_element?(alice_view, "#game-over-outcome", "You won.")
+      # The board's own owner colour (WorldMap.owner_slot(1) == 1) bleeds into the panel.
+      assert has_element?(alice_view, ~s(#game-over[data-owner="1"]))
       # Placing order is part of the claim, so assert position, not just membership.
       assert has_element?(alice_view, "#game-over-standings li:nth-child(1)", "1. Alice")
       assert has_element?(alice_view, "#game-over-standings li:nth-child(2)", "2. Bob")
+      # Bob's areas/armies were zeroed by elimination (Engine.eliminate_player/2) the moment
+      # he quit — showing "0 armies · 0 territories" next to his name would read as data, not
+      # the always-true artifact it actually is, so only the winner's final totals are shown.
+      assert has_element?(alice_view, "#game-over-standings li:nth-child(1)", "armies")
+      refute has_element?(alice_view, "#game-over-standings li:nth-child(2)", "armies")
       assert has_element?(alice_view, "#game-over-play-again", "Play again")
       assert has_element?(alice_view, "#game-over-home", "Back to Home")
       refute has_element?(alice_view, "#game-board", "Region Bonuses")
@@ -100,8 +107,22 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "button", "End Turn")
       refute has_element?(alice_view, "button", "Force Turn")
 
+      # Bob's own areas never transferred to Alice when he quit — his territories still show
+      # his (stale) ownership on the board even though his player record was zeroed — so the
+      # caption must report Alice's own count against the map total, never claim "all".
+      assert has_element?(alice_view, "#game-over-caption", "Alice holds 21 of 42 territories.")
+      refute has_element?(alice_view, "#game-over-caption", "all")
+
+      # The status strip's existing aria-live="polite" region (GameLayout) is what actually
+      # announces the outcome to a player connected when the game ends — the `#game-over`
+      # section itself is present at first render for a late joiner, so it can't announce a
+      # flip that already happened.
+      assert has_element?(alice_view, "#game-over-announce", "Victory")
+      assert has_element?(alice_view, "#game-over-announce", "You won.")
+
       assert has_element?(bob_view, "#game-over-heading", "Defeat")
       assert has_element?(bob_view, "#game-over-outcome", "You placed 2nd of 2.")
+      assert has_element?(bob_view, "#game-over-announce", "Defeat")
       refute has_element?(bob_view, "button", "Force Turn")
     end
 
@@ -142,6 +163,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(spectator, "#game-over-heading", "Alice wins")
       refute has_element?(spectator, "#game-over-outcome")
       assert has_element?(spectator, "#game-over-play-again", "Play again")
+      assert has_element?(spectator, ~s(#game-over[data-owner="1"]))
+      assert has_element?(spectator, "#game-over-caption", "Alice holds 21 of 42 territories.")
     end
 
     test "clicking a territory on a finished game is a no-op — no order panel, no focusable/clickable territory",

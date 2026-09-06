@@ -444,7 +444,29 @@ defmodule GlobalCombatWeb.GameLive do
   defp replay_steps(view),
     do: Replay.steps(view.last_turn_events, view.areas, view.players, view.map_name)
 
+  # Computed once per render and threaded through `assigns` to both the `:status` slot
+  # (`status_line/1`'s ended announcement) and the `:board` slot (`game_over/1`) — `find_winner/1`
+  # and `my_player/1` each used to run twice per render (once per slot, again inside `game_over/1`)
+  # since both slots render from the same top-level `assigns` but neither could see the other's
+  # local computation.
+  defp maybe_assign_outcome(%{status: :playing} = assigns) do
+    winner = find_winner(assigns.view.players)
+    me = my_player(assigns.view)
+    role = viewer_role(assigns.view, winner, me)
+
+    assign(assigns,
+      winner: winner,
+      viewer_role: role,
+      headline: headline(role, winner),
+      outcome: viewer_outcome(role, me, length(assigns.view.players))
+    )
+  end
+
+  defp maybe_assign_outcome(assigns), do: assigns
+
   defp render_game(assigns) do
+    assigns = maybe_assign_outcome(assigns)
+
     ~H"""
     <.site_chrome
       current_account={@current_account}
@@ -665,6 +687,9 @@ defmodule GlobalCombatWeb.GameLive do
     </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
     <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
+    <span :if={@view.ended} id="game-over-announce" class="sr-only">
+      {@headline}<span :if={@outcome}>{" " <> @outcome}</span>
+    </span>
     """
   end
 
@@ -761,14 +786,16 @@ defmodule GlobalCombatWeb.GameLive do
   # Every map is a responsive SVG (`WorldMap`) — the legacy per-owner GIF
   # sprites `Index.cshtml` composited at fixed pixel offsets are gone.
   defp board(assigns) do
-    assigns =
-      assign(assigns,
-        winner: find_winner(assigns.view.players),
-        my_orders: my_orders(assigns.view)
-      )
+    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
 
     ~H"""
-    <.game_over :if={@view.ended} view={@view} />
+    <.game_over
+      :if={@view.ended}
+      view={@view}
+      winner={@winner}
+      headline={@headline}
+      outcome={@outcome}
+    />
     <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
       <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] xl:flex-1">
         <form id="lens-form" phx-change="set_lens">
@@ -792,9 +819,10 @@ defmodule GlobalCombatWeb.GameLive do
           />
           <figcaption
             :if={@view.ended && @winner}
+            id="game-over-caption"
             class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
           >
-            {@winner.name} holds all {length(@view.areas)} territories.
+            {winner_caption(@winner, length(@view.areas))}
           </figcaption>
         </figure>
       </div>
@@ -835,29 +863,24 @@ defmodule GlobalCombatWeb.GameLive do
   # `role="status"`/`aria-live="polite"` never fired here — this section exists at first render
   # for anyone loading an already-finished game, and a live region only announces *changes*
   # after mount. `aria-labelledby` gives it a name for landmark navigation without pretending to
-  # announce a mutation that already happened by the time the socket connects.
+  # announce a mutation that already happened by the time the socket connects; `status_line/1`'s
+  # `#game-over-announce` (inside `GameLayout`'s already-`aria-live="polite"` status strip) covers
+  # the live-flip case for a player connected when the game ends.
   attr :view, :map, required: true
+  attr :winner, :map, required: true
+  attr :headline, :string, required: true
+  attr :outcome, :string, default: nil
 
   defp game_over(assigns) do
-    winner = find_winner(assigns.view.players)
     standings = assigns.view.players |> Enum.filter(&(&1.place > 0)) |> Enum.sort_by(& &1.place)
-    role = viewer_role(assigns.view, winner)
-
-    assigns =
-      assign(assigns,
-        winner: winner,
-        standings: standings,
-        headline: headline(role, winner),
-        outcome: viewer_outcome(role, assigns.view, length(assigns.view.players))
-      )
+    assigns = assign(assigns, :standings, standings)
 
     ~H"""
     <section
       id="game-over"
       aria-labelledby="game-over-heading"
-      class="world-map-owner mb-[var(--space-4)] flex flex-col gap-[var(--space-3)] rounded-[var(--radius-md)] border border-divider border-l-4 bg-surface p-[var(--space-5)]"
+      class="world-map-owner mb-[var(--space-4)] flex flex-col gap-[var(--space-3)] rounded-[var(--radius-md)] border border-divider border-l-4 border-l-[color:var(--map-owner-fill,var(--map-owner-0))] bg-surface p-[var(--space-5)]"
       data-owner={@winner && WorldMap.owner_slot(@winner.number)}
-      style="border-left-color: var(--map-owner-fill, var(--map-owner-0));"
     >
       <Kicker.kicker>Game Over · Turn {@view.turn}</Kicker.kicker>
 
@@ -887,7 +910,9 @@ defmodule GlobalCombatWeb.GameLive do
             />
             <span class={p.place == 1 && "font-semibold"}>{p.place}. {p.name}</span>
           </span>
-          <span class="text-text-muted">{p.armies} armies · {p.areas} territories</span>
+          <span :if={p.place == 1} class="text-text-muted">
+            {p.armies} armies · {p.areas} territories
+          </span>
         </li>
       </ol>
 
@@ -905,13 +930,23 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp find_winner(players), do: Enum.find(players, &(&1.place == 1))
 
+  # A game can also end by every other seat quitting/being eliminated one at a time
+  # (`Engine.eliminate_player/2` zeroes `areas`/`armies` on elimination) rather than the winner
+  # capturing the whole board, so the winner's own `areas` can be less than the board's total —
+  # "all" is only accurate when the two happen to match.
+  defp winner_caption(winner, total_areas) when winner.areas == total_areas,
+    do: "#{winner.name} holds all #{total_areas} territories."
+
+  defp winner_caption(winner, total_areas),
+    do: "#{winner.name} holds #{winner.areas} of #{total_areas} territories."
+
   # :winner/:loser require a seat (`my_player/1`); anyone else — logged out, or logged in but
   # never joined this game — is a :spectator, same viewer this module already treats as one
   # everywhere else (`viewer_number: nil`).
-  defp viewer_role(view, winner) do
+  defp viewer_role(view, winner, me) do
     cond do
       winner && winner.number == view.viewer_number -> :winner
-      my_player(view) -> :loser
+      me -> :loser
       true -> :spectator
     end
   end
@@ -922,12 +957,9 @@ defmodule GlobalCombatWeb.GameLive do
   defp headline(:spectator, winner), do: "#{winner.name} wins"
 
   # The viewer's own line under the headline; `nil` for a spectator.
-  defp viewer_outcome(:winner, _view, _total), do: "You won."
-
-  defp viewer_outcome(:loser, view, total),
-    do: "You placed #{ordinal(my_player(view).place)} of #{total}."
-
-  defp viewer_outcome(:spectator, _view, _total), do: nil
+  defp viewer_outcome(:winner, _me, _total), do: "You won."
+  defp viewer_outcome(:loser, me, total), do: "You placed #{ordinal(me.place)} of #{total}."
+  defp viewer_outcome(:spectator, _me, _total), do: nil
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
 
