@@ -23,6 +23,11 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   64rem breakpoint matches `--size-collapse`, tokens/scales.json), same
   convention as the ported shells.
 
+  `players_first` flips that stacked order to status/players/board
+  below `lg:` only — once a game has ended, the outcome and final standings
+  in the players rail matter more than a board a phone/tablet viewport clips
+  to a fraction of the map. The side-by-side `lg:` arrangement is unaffected.
+
   Sizes to its container rather than forcing its own `min-h-screen` (GIF-102):
   `GameLive` nests this inside `SiteChrome.site_chrome`'s already-`min-h-screen`
   content slot, so a second forced viewport-height here would inflate the page
@@ -33,6 +38,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
 
   attr :id, :any, default: nil
   attr :class, :any, default: nil
+  attr :players_first, :boolean, default: false
   attr :rest, :global
 
   slot :status
@@ -46,7 +52,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       class={[
         "grid bg-background text-text body-text",
         "grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto]",
-        "[grid-template-areas:'status'_'board'_'players']",
+        if(@players_first,
+          do: "[grid-template-areas:'status'_'players'_'board']",
+          else: "[grid-template-areas:'status'_'board'_'players']"
+        ),
         "lg:grid-cols-[minmax(0,1fr)_var(--size-rail)] lg:grid-rows-[auto_minmax(0,1fr)]",
         "lg:[grid-template-areas:'status_status'_'board_players']",
         @class
