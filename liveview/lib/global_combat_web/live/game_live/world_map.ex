@@ -263,6 +263,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             area={area}
             area_names={@area_names}
             map_name={@map_name}
+            interactive={@interactive}
           />
         </g>
         <g id="world-map-replay" class="world-map-replay" aria-hidden="true">
@@ -297,16 +298,19 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         </g>
       </svg>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".TerritoryKeyboard">
-        // SVG has no <button>, so a territory is a focusable role="button" <g>;
-        // this gives it the keyboard activation a real button has for free.
-        // Clicks go through phx-click on the same element — this hook only
-        // covers Enter/Space (Space must be swallowed or the page scrolls).
+        // SVG has no <button>, so a territory (or order arrow) is a focusable
+        // role="button" <g>; this gives it the keyboard activation a real button
+        // has for free. Clicks go through phx-click on the same element — this
+        // hook only covers Enter/Space (Space must be swallowed or the page
+        // scrolls). `data-select-event` lets an order arrow reuse this hook
+        // while pushing `select_order` instead of a territory's `select_area`
+        // (defaulting to `select_area` so territories need no extra attribute).
         export default {
           mounted() {
             this.el.addEventListener("keydown", (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()
-                this.pushEvent("select_area", {area: this.el.dataset.area})
+                this.pushEvent(this.el.dataset.selectEvent || "select_area", {area: this.el.dataset.area})
               }
             })
           }
@@ -591,6 +595,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   attr :area, :map, required: true
   attr :area_names, :map, required: true
   attr :map_name, :atom, required: true
+  attr :interactive, :boolean, required: true
 
   defp order_arrow(assigns) do
     {x1, y1} = Geometry.label(assigns.map_name, assigns.area.number)
@@ -613,14 +618,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     ~H"""
     <g
       id={"order-#{@area.number}"}
-      class="world-map-order"
-      role="button"
-      tabindex="0"
+      class={["world-map-order", @interactive && "world-map-order--interactive"]}
+      role={@interactive && "button"}
+      tabindex={@interactive && "0"}
       aria-label={@label}
       data-area={@area.number}
-      phx-hook=".TerritoryKeyboard"
-      phx-click="select_area"
-      phx-value-area={@area.number}
+      data-select-event={@interactive && "select_order"}
+      phx-hook={@interactive && ".TerritoryKeyboard"}
+      phx-click={@interactive && "select_order"}
+      phx-value-area={@interactive && @area.number}
     >
       <line x1={@x1} y1={@y1} x2={@x2} y2={@y2} class="world-map-order-hit" />
       <line

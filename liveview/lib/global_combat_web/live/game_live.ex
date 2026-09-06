@@ -279,6 +279,41 @@ defmodule GlobalCombatWeb.GameLive do
 
   def handle_event("select_area", _params, socket), do: {:noreply, socket}
 
+  # An order arrow's click must reopen *its own* queued order for
+  # editing, not run through select_area's click-to-target heuristic — that heuristic
+  # reads whatever is already selected as context (a second click either sets a target
+  # or is a no-op), so it silently mistreated the arrow's source as a *new* target when
+  # another area was already selected, and did nothing at all when the arrow's own
+  # source was already selected. This event instead sets selected/target/amount
+  # directly from the area's own `order`, unconditionally overriding any unrelated
+  # in-progress selection.
+  def handle_event(
+        "select_order",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false}}} = socket
+      ) do
+    case Integer.parse(area_str) do
+      {area_number, ""} ->
+        case find_area(socket.assigns.view, area_number) do
+          %{order: order} = area when not is_nil(order) ->
+            {:noreply,
+             assign(socket,
+               selected_area: area.number,
+               target_area: order.target,
+               order_amount: to_string(order.amount)
+             )}
+
+          _ ->
+            {:noreply, socket}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("select_order", _params, socket), do: {:noreply, socket}
+
   def handle_event("submit_order", %{"amount" => amount_str}, socket) do
     with {:ok, account} <- require_account(socket),
          source when not is_nil(source) <- socket.assigns.selected_area,
@@ -721,7 +756,11 @@ defmodule GlobalCombatWeb.GameLive do
   # Every map is a responsive SVG (`WorldMap`) — the legacy per-owner GIF
   # sprites `Index.cshtml` composited at fixed pixel offsets are gone.
   defp board(assigns) do
-    assigns = assign(assigns, :winner, find_winner(assigns.view.players))
+    assigns =
+      assign(assigns,
+        winner: find_winner(assigns.view.players),
+        my_orders: my_orders(assigns.view)
+      )
 
     ~H"""
     <.game_over :if={@view.ended} view={@view} />
@@ -754,7 +793,7 @@ defmodule GlobalCombatWeb.GameLive do
       </figure>
       <div class="flex flex-wrap items-start gap-[var(--space-4)]">
         <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
-        <.your_orders_card :if={my_orders(@view) != []} orders={my_orders(@view)} />
+        <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
         <.order_panel
           :if={@selected_area && !@view.ended}
           view={@view}
@@ -916,7 +955,7 @@ defmodule GlobalCombatWeb.GameLive do
     assigns = assign(assigns, source: source, target: target, mode: mode)
 
     ~H"""
-    <Card.card class="min-w-[16rem]">
+    <Card.card id="order-panel" class="min-w-[16rem]">
       <:header>{order_panel_title(@mode, @target)}</:header>
       <form id="order-form" phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
         <Input.input
@@ -971,9 +1010,10 @@ defmodule GlobalCombatWeb.GameLive do
   # `view.areas` already dropped every non-owner's `order` to `nil` (`PlayerView`'s
   # fog-of-war boundary), so this needs no owner check of its own.
   defp my_orders(view) do
+    area_names = WorldMap.area_names(view.areas)
+
     for area <- view.areas, area.order do
-      target = find_area(view, area.order.target)
-      WorldMap.order_label(area.name, area.order, target.name)
+      WorldMap.order_label(area.name, area.order, Map.fetch!(area_names, area.order.target))
     end
   end
 
