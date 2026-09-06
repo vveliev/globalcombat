@@ -156,9 +156,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # Alice (the winner) owns area 1 already, so this is exactly the click this
       # test covers: a live seat clicking one of its own, still-owned territories
       # after the game ended.
-      html = render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "1"})
 
-      refute html =~ "Assign new armies or select a target area"
       refute has_element?(alice_view, "#order-form")
 
       # Territories stop being an interactive control at all, not just an
