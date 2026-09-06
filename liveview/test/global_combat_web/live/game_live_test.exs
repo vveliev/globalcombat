@@ -89,8 +89,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(alice_view, "#game-over-heading", "Game Over — Alice wins")
       assert has_element?(alice_view, "#game-over-outcome", "You win!")
-      assert has_element?(alice_view, "#game-over-standings li", "1. Alice")
-      assert has_element?(alice_view, "#game-over-standings li", "2. Bob")
+      # Numbering is a `list-decimal` `::marker` now, not DOM text.
+      assert has_element?(alice_view, "#game-over-standings li", "Alice")
+      assert has_element?(alice_view, "#game-over-standings li", "Bob")
       assert has_element?(alice_view, "#game-over-home")
       refute has_element?(alice_view, "#turn-controls")
       refute has_element?(alice_view, "button", "End Turn")

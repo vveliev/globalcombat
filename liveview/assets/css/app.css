@@ -198,6 +198,16 @@
   --map-fog-a: var(--stone-7);
   --map-fog-b: var(--stone-8);
   --map-owner-0: var(--stone-5);
+  /* Owner 6 (grey, --gray-6) and owner 8 (brown, --orange-7) are both picked
+     for contrast against light mode's pale --map-sea; against dark mode's
+     --gray-8 sea they fall under the 3:1 WCAG 1.4.11 floor for non-text UI
+     (~2.7:1 and ~1.7:1), nearly merging the territory fill into the ocean.
+     Re-aliased one/two steps lighter here, landing them in the same ~4-7:1
+     band the rest of the palette gets against --gray-8 (docs/adr/0003).
+     Owner 3 (--yellow-3) was audited too and already clears 3:1 in both
+     themes, so it's left alone. */
+  --map-owner-6: var(--gray-4);
+  --map-owner-8: var(--orange-3);
 }
 
 /* One owner-slot ladder shared by everything coloured by owner (territory

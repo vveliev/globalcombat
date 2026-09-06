@@ -25,6 +25,8 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
 
   import Phoenix.Controller, only: [get_csrf_token: 0]
 
+  alias GlobalCombatWeb.Layouts
+
   attr :current_account, :any, default: nil
   attr :page_title, :string, default: nil
   slot :inner_block, required: true
@@ -36,29 +38,42 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         <a href="/" class="flex items-center gap-[var(--space-2)] font-semibold text-text">
           GLOBAL COMBAT
         </a>
+        <div class="ml-auto">
+          <Layouts.theme_toggle />
+        </div>
       </:topbar>
       <:sidebar>
-        <nav class="flex flex-col gap-[var(--space-2)] text-sm">
-          <a href="/" class="hover:underline">Home</a>
-          <a href={~p"/Game-Manual"} class="hover:underline">Game Manual</a>
+        <nav id="sidebar-nav" class="flex flex-col gap-[var(--space-2)] text-sm">
+          <a href="/" class={nav_link_class()}>Home</a>
+          <a href={~p"/Game-Manual"} class={nav_link_class()}>Game Manual</a>
           <hr class="border-border my-[var(--space-2)]" />
           <%= if @current_account do %>
-            <a href={~p"/Create-Game"} class="hover:underline">New Game</a>
-            <a href={~p"/Messages"} class="hover:underline">Messages</a>
-            <a href={~p"/account/settings"} class="hover:underline">Settings</a>
+            <a href={~p"/Create-Game"} class={nav_link_class()}>New Game</a>
+            <a href={~p"/Messages"} class={nav_link_class()}>Messages</a>
+            <a href={~p"/account/settings"} class={nav_link_class()}>Settings</a>
             <hr class="border-border my-[var(--space-2)]" />
-            <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
+            <a href={~p"/account/contact"} class={nav_link_class()}>Contact Us</a>
             <hr class="border-border my-[var(--space-2)]" />
             <form method="post" action={~p"/account/log-off"}>
               <input type="hidden" name="_method" value="delete" />
               <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-              <button type="submit" class="hover:underline text-left cursor-pointer">Log Off</button>
+              <button type="submit" class={nav_link_class()}>Log Off</button>
             </form>
           <% else %>
-            <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
-            <a href={~p"/account/register"} class="hover:underline">New Account</a>
+            <a href={~p"/account/log-on"} class={nav_link_class()}>Log On</a>
+            <a href={~p"/account/register"} class={nav_link_class()}>New Account</a>
           <% end %>
         </nav>
+        <script>
+          (() => {
+            const nav = document.getElementById("sidebar-nav");
+            if (!nav) return;
+            const path = window.location.pathname;
+            nav.querySelectorAll("a[href]").forEach((a) => {
+              if (a.pathname === path) a.setAttribute("aria-current", "page");
+            });
+          })();
+        </script>
       </:sidebar>
       <:content>
         <h1 :if={@page_title} class="sr-only">{@page_title}</h1>
@@ -70,5 +85,18 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
       <source src={~p"/Sounds/chime.mp3"} type="audio/mp3" />
     </audio>
     """
+  end
+
+  # Shared by every sidebar `<a>` and the "Log Off" `<button>` (semantically a
+  # form submit, styled as a nav item) so the two element kinds can never
+  # drift apart, and so `aria-current="page"` (set client-side above — the
+  # sidebar has no server-side notion of "current path" across both LiveView
+  # and plain controller-rendered pages) has a visual hook to land on.
+  defp nav_link_class do
+    [
+      "rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-1)] text-left cursor-pointer",
+      "hover:bg-surface-muted hover:underline",
+      "aria-[current=page]:bg-surface-muted aria-[current=page]:font-semibold aria-[current=page]:text-text"
+    ]
   end
 end

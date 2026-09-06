@@ -372,7 +372,7 @@ defmodule GlobalCombatWeb.GameLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.site_chrome current_account={@current_account}>
+    <.site_chrome current_account={@current_account} page_title={"Game #{@game_id}"}>
       <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
         <:status>
           <span id="game-status">{status_line(assigns)}</span>
@@ -449,7 +449,7 @@ defmodule GlobalCombatWeb.GameLive do
   defp lobby(assigns) do
     ~H"""
     <div id="lobby" class="flex flex-col gap-[var(--space-4)]">
-      <h1 class="text-lg font-semibold">Game {@game_id}</h1>
+      <h2 class="text-lg font-semibold">Game {@game_id}</h2>
       <ul id="lobby-players" class="flex flex-col gap-[var(--space-2)]">
         <li :for={p <- @view.players}>Player {p.number}: {p.name}</li>
       </ul>
@@ -479,7 +479,7 @@ defmodule GlobalCombatWeb.GameLive do
           name="login"
           value={@invite_login}
           placeholder="Invite by username or email"
-          class="flex-1 rounded border border-border px-[var(--space-2)]"
+          class="flex-1 rounded-[var(--radius-sm)] border border-border px-[var(--space-2)]"
         />
         <Button.button type="submit">Invite</Button.button>
       </form>
@@ -492,8 +492,8 @@ defmodule GlobalCombatWeb.GameLive do
   defp board(assigns) do
     ~H"""
     <.game_over :if={@view.ended} view={@view} />
-    <div class="flex flex-col gap-[var(--space-4)]">
-      <div class="w-full max-w-[60rem]">
+    <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
+      <div class="w-full max-w-[60rem] xl:flex-1">
         <WorldMap.world_map
           map_name={@view.map_name}
           areas={@view.areas}
@@ -502,14 +502,18 @@ defmodule GlobalCombatWeb.GameLive do
           target_area={@target_area}
         />
       </div>
-      <div class="flex flex-wrap items-start gap-[var(--space-4)]">
-        <.region_bonuses map_name={@view.map_name} />
+      <div class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-64 xl:shrink-0 xl:flex-col">
+        <.region_bonuses
+          map_name={@view.map_name}
+          heading_level={if @view.ended, do: "h3", else: "h2"}
+        />
         <.order_panel
           :if={@selected_area}
           view={@view}
           selected_area={@selected_area}
           target_area={@target_area}
           order_amount={@order_amount}
+          heading_level={if @view.ended, do: "h3", else: "h2"}
         />
       </div>
     </div>
@@ -547,7 +551,7 @@ defmodule GlobalCombatWeb.GameLive do
       id="game-over"
       role="status"
       aria-live="polite"
-      class="mb-[var(--space-4)] rounded border border-divider p-[var(--space-4)] flex flex-col gap-[var(--space-2)]"
+      class="mb-[var(--space-4)] rounded-[var(--radius-md)] border border-divider p-[var(--space-4)] flex flex-col gap-[var(--space-2)]"
     >
       <h2 id="game-over-heading" class="text-lg font-semibold">
         Game Over<span :if={@winner}> — {@winner.name} wins</span>
@@ -556,9 +560,9 @@ defmodule GlobalCombatWeb.GameLive do
       <ol
         :if={@standings != []}
         id="game-over-standings"
-        class="flex flex-wrap gap-[var(--space-3)] text-sm"
+        class="flex flex-wrap gap-[var(--space-3)] text-sm list-decimal list-inside"
       >
-        <li :for={p <- @standings}>{p.place}. {p.name}</li>
+        <li :for={p <- @standings}>{p.name}</li>
       </ol>
       <a id="game-over-home" href={~p"/"} class="hover:underline font-semibold">Back to Home</a>
     </section>
@@ -585,6 +589,7 @@ defmodule GlobalCombatWeb.GameLive do
   attr :selected_area, :integer, required: true
   attr :target_area, :any, required: true
   attr :order_amount, :string, required: true
+  attr :heading_level, :string, default: "h2"
 
   defp order_panel(assigns) do
     source = find_area(assigns.view, assigns.selected_area)
@@ -594,7 +599,7 @@ defmodule GlobalCombatWeb.GameLive do
     assigns = assign(assigns, source: source, target: target, mode: mode)
 
     ~H"""
-    <Card.card class="min-w-[16rem]">
+    <Card.card class="min-w-[16rem]" heading_level={@heading_level}>
       <:header>{order_panel_title(@mode, @target)}</:header>
       <form id="order-form" phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
         <Input.input
@@ -644,12 +649,13 @@ defmodule GlobalCombatWeb.GameLive do
   # come from rather than hardcoded per-map text, so a future map addition
   # doesn't need a matching edit here.
   attr :map_name, :atom, required: true
+  attr :heading_level, :string, default: "h2"
 
   defp region_bonuses(assigns) do
     assigns = assign(assigns, :regions, MapInfo.regions(assigns.map_name))
 
     ~H"""
-    <Card.card class="min-w-[16rem]">
+    <Card.card class="min-w-[16rem]" heading_level={@heading_level}>
       <:header>Region Bonuses</:header>
       <ul class="flex flex-col gap-[var(--space-1)] text-sm">
         <li
@@ -779,7 +785,7 @@ defmodule GlobalCombatWeb.GameLive do
           name="text"
           value={@chat_text}
           placeholder="Send a message."
-          class="flex-1 rounded border border-border px-[var(--space-2)]"
+          class="flex-1 rounded-[var(--radius-sm)] border border-border px-[var(--space-2)]"
         />
         <Button.button type="submit">Send</Button.button>
       </form>
