@@ -338,9 +338,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
     # LiveView tags a function component's root element with `phx-r=""` (visible
     # throughout this render, e.g. the outer `<div phx-r="" id="game-board" ...>`)
-    # ahead of its own attributes — `board_table/1`'s `<table>` is one such root,
-    # so the attribute order isn't `<table class="sr-only">` verbatim.
-    assert html =~ ~r/<table[^>]*class="sr-only"[^>]*>/
+    # ahead of its own attributes — `board_table/1`'s wrapping `<div>` is one such
+    # root, so the attribute order isn't `<div class="sr-only overflow-hidden">`
+    # verbatim.
+    #
+    # `sr-only` lives on the wrapping div, not the `<table>` itself — see
+    # `board_table/1`'s comment for why, and the real-browser
+    # verification that backs it.
+    assert html =~ ~r/<div[^>]*class="sr-only overflow-hidden"[^>]*>\s*<table>/
     assert html =~ ~r/<th scope="row">#{owned_by_alice.name}<\/th>\s*<td>Alice<\/td>/
 
     [first_neighbor | _] = owned_by_alice.adjacent

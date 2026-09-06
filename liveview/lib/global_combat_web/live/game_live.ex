@@ -397,7 +397,11 @@ defmodule GlobalCombatWeb.GameLive do
   def render(assigns) do
     ~H"""
     <.site_chrome current_account={@current_account}>
-      <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
+      <GameLayout.game_layout
+        id="game-board"
+        players_first={@status == :playing && @view.ended}
+        phx-hook=".FocusManager"
+      >
         <:status>
           <span id="game-status">{status_line(assigns)}</span>
         </:status>
@@ -779,6 +783,17 @@ defmodule GlobalCombatWeb.GameLive do
   # what a sighted player sees, no more and no less.
   # Adjacency, unlike owner/armies, is static map topology every viewer already
   # sees rendered on the board regardless of fog, so it's listed in full.
+  # The wrapping div, not the table, carries `sr-only`: a table's
+  # auto layout algorithm ignores an explicit width smaller than its content's
+  # min-content width, so `sr-only` directly on `<table>` still laid it out at
+  # its full intrinsic width (measured 824px) and that box pushed the
+  # document's scrollWidth even though it was visually hidden. A plain `div`
+  # honors the explicit 1px width, and `overflow-hidden` clips the oversized
+  # table inside it, so nothing here contributes to page scroll. Verified with
+  # this fix in place, via a real Chromium session (Playwright) against `mix
+  # phx.server`, logged in and viewing both an active and a finished game:
+  # `document.documentElement.scrollWidth == clientWidth` holds at 375px and
+  # 768px (see game_live_test.exs for the DOM-shape assertion this backs).
   attr :areas, :list, required: true
   attr :players, :list, required: true
 
@@ -789,25 +804,27 @@ defmodule GlobalCombatWeb.GameLive do
       |> assign(:owner_names, WorldMap.owner_names(assigns.players))
 
     ~H"""
-    <table class="sr-only">
-      <caption>Board state: territory, owner, armies, and adjacency</caption>
-      <thead>
-        <tr>
-          <th scope="col">Territory</th>
-          <th scope="col">Owner</th>
-          <th scope="col">Armies</th>
-          <th scope="col">Adjacent to</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr :for={area <- @areas}>
-          <th scope="row">{area.name}</th>
-          <td>{WorldMap.owner_text(area, @owner_names)}</td>
-          <td>{area.armies || "—"}</td>
-          <td>{adjacent_names(area, @area_names)}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="sr-only overflow-hidden">
+      <table>
+        <caption>Board state: territory, owner, armies, and adjacency</caption>
+        <thead>
+          <tr>
+            <th scope="col">Territory</th>
+            <th scope="col">Owner</th>
+            <th scope="col">Armies</th>
+            <th scope="col">Adjacent to</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={area <- @areas}>
+            <th scope="row">{area.name}</th>
+            <td>{WorldMap.owner_text(area, @owner_names)}</td>
+            <td>{area.armies || "—"}</td>
+            <td>{adjacent_names(area, @area_names)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     """
   end
 

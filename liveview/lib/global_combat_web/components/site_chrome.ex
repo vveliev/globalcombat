@@ -24,6 +24,7 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   use GlobalCombatWeb, :verified_routes
 
   import Phoenix.Controller, only: [get_csrf_token: 0]
+  import GlobalCombatWeb.CoreComponents, only: [icon: 1]
 
   attr :current_account, :any, default: nil
   attr :page_title, :string, default: nil
@@ -38,27 +39,39 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
         </a>
       </:topbar>
       <:sidebar>
-        <nav class="flex flex-col gap-[var(--space-2)] text-sm">
-          <a href="/" class="hover:underline">Home</a>
-          <a href={~p"/Game-Manual"} class="hover:underline">Game Manual</a>
-          <hr class="border-border my-[var(--space-2)]" />
-          <%= if @current_account do %>
-            <a href={~p"/Create-Game"} class="hover:underline">New Game</a>
-            <a href={~p"/Messages"} class="hover:underline">Messages</a>
-            <a href={~p"/account/settings"} class="hover:underline">Settings</a>
+        <!-- Below `lg:` this nav used to render at full height (7 links, ~273px)
+        between the topbar and the page content, pushing the game board down a
+        full screen's worth on phone/tablet. A `<details>` disclosure
+        collapses it to a single "Menu" row by default on narrow screens;
+        `group-open:flex` reveals it once tapped. At `lg:` the summary toggle
+        hides and `lg:flex` forces the nav visible regardless of the `open`
+        attribute, so nothing changes for the desktop persistent sidebar. -->
+        <details class="group">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-[var(--space-2)] text-sm font-semibold lg:hidden [&::-webkit-details-marker]:hidden">
+            Menu <.icon name="hero-chevron-down" class="size-4 group-open:rotate-180" />
+          </summary>
+          <nav class="mt-[var(--space-2)] hidden flex-col gap-[var(--space-2)] text-sm group-open:flex lg:mt-0 lg:flex">
+            <a href="/" class="hover:underline">Home</a>
+            <a href={~p"/Game-Manual"} class="hover:underline">Game Manual</a>
             <hr class="border-border my-[var(--space-2)]" />
-            <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
-            <hr class="border-border my-[var(--space-2)]" />
-            <form method="post" action={~p"/account/log-off"}>
-              <input type="hidden" name="_method" value="delete" />
-              <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-              <button type="submit" class="hover:underline text-left cursor-pointer">Log Off</button>
-            </form>
-          <% else %>
-            <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
-            <a href={~p"/account/register"} class="hover:underline">New Account</a>
-          <% end %>
-        </nav>
+            <%= if @current_account do %>
+              <a href={~p"/Create-Game"} class="hover:underline">New Game</a>
+              <a href={~p"/Messages"} class="hover:underline">Messages</a>
+              <a href={~p"/account/settings"} class="hover:underline">Settings</a>
+              <hr class="border-border my-[var(--space-2)]" />
+              <a href={~p"/account/contact"} class="hover:underline">Contact Us</a>
+              <hr class="border-border my-[var(--space-2)]" />
+              <form method="post" action={~p"/account/log-off"}>
+                <input type="hidden" name="_method" value="delete" />
+                <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+                <button type="submit" class="hover:underline text-left cursor-pointer">Log Off</button>
+              </form>
+            <% else %>
+              <a href={~p"/account/log-on"} class="hover:underline">Log On</a>
+              <a href={~p"/account/register"} class="hover:underline">New Account</a>
+            <% end %>
+          </nav>
+        </details>
       </:sidebar>
       <:content>
         <h1 :if={@page_title} class="sr-only">{@page_title}</h1>
