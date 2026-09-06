@@ -50,7 +50,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
     <div
       id={@id}
       class={[
-        "grid bg-background text-text font-body text-[length:var(--font-body-size)] leading-[var(--font-body-leading)]",
+        "grid bg-background text-text body-text",
         "grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto]",
         if(@players_first,
           do: "[grid-template-areas:'status'_'players'_'board']",
