@@ -165,7 +165,7 @@ one-time browser check confirmed that construction actually holds.
 
 | Component | Base | API notes |
 |-----------|------|-----------|
-| `button/1` | plain `<button>` | `intent="primary\|neutral\|danger"`; danger is Tailwind stock `bg-red-600 text-white` — same deliberate exception as React's Button (no `--color-danger-contrast` token yet) |
+| `button/1` | plain `<button>`, or `<.link>` when given `href`/`navigate`/`patch` | `intent="primary\|neutral\|danger"`; danger is Tailwind stock `bg-red-600 text-white` — same deliberate exception as React's Button (no `--color-danger-contrast` token yet); the `<.link>` path is a named C5 deviation — LiveView's Button also renders real navigation (`href`/`navigate`/`patch`/`method`/`download`), which React's Button (click handlers only, navigation is the caller's router) has no equivalent for; `disabled` only applies to the `<button>` branch and raises if combined with a navigable attr |
 | `input/1` | restyles `CoreComponents.input/1` | thin token-class wrap; error state via `border-danger` |
 | `themed_select/1` | wraps generated `NativeSelect` primitive | `:option` slot; React's `stateReducer`/`useThemedSelect()` are client-state ergonomics with no server-rendered-`<select>` equivalent — named, reasoned C5 deviation in the moduledoc, not a silent gap |
 | `card/1` | pure tokens | `:header`/`:inner_block`/`:footer` slots, each only rendered when used |

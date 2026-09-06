@@ -11,7 +11,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Button do
   (identical styling either way) — a "Play again"-style next action is a real
   navigation, not a click handler standing in for one, so it should keep the
   native anchor behavior (open in a new tab, show the destination on hover) a
-  `<button>` can't offer.
+  `<button>` can't offer. `disabled` has no native meaning on an `<a>` (it
+  would still navigate on click), so combining it with `href`/`navigate`/
+  `patch` raises rather than silently rendering a link that looks disabled
+  but isn't.
   """
   use Phoenix.Component
 
@@ -24,7 +27,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Button do
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    assigns = assign(assigns, :navigable?, !!(rest[:href] || rest[:navigate] || rest[:patch]))
+    navigable? = !!(rest[:href] || rest[:navigate] || rest[:patch])
+
+    if navigable? and assigns.disabled do
+      raise ArgumentError,
+            "Button.button/1: `disabled` cannot be combined with href/navigate/patch — a disabled <a> still navigates on click"
+    end
+
+    assigns = assign(assigns, :navigable?, navigable?)
 
     ~H"""
     <.link :if={@navigable?} class={[button_class(@intent), @class]} {@rest}>
