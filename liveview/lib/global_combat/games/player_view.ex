@@ -131,7 +131,11 @@ defmodule GlobalCombat.Games.PlayerView do
       place: player.place,
       areas: player.areas,
       armies: player.armies,
-      unassigned_armies: player.unassigned_armies
+      unassigned_armies: player.unassigned_armies,
+      # The Elo-style score `Engine.end_game/1` computes (`Game.cs`'s legacy
+      # "Score Expected = X, Score = Y, Rating Change = Z" readout) never left the engine —
+      # a returning player finishing a game never saw the number they used to get.
+      score: player.score
     }
   end
 end

@@ -393,6 +393,7 @@ defmodule GlobalCombatWeb.GameLive do
             players={@view.players}
             viewer_number={@view.viewer_number}
             status={@status}
+            ended={@status == :playing and @view.ended}
             map_name={Map.get(@view, :map_name)}
           />
           <.chat
@@ -437,13 +438,28 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   defp status_line(%{status: :playing} = assigns) do
+    assigns = assign(assigns, :ended_pill, ended_pill(assigns.view))
+
     ~H"""
     <span class="font-semibold">Turn {@view.turn}</span>
-    <StatusPill.status_pill tone={if @view.ended, do: "done", else: "active"}>
-      {if @view.ended, do: "Ended", else: "In progress"}
+    <StatusPill.status_pill :if={!@view.ended} tone="active">In progress</StatusPill.status_pill>
+    <StatusPill.status_pill :if={@view.ended} tone={@ended_pill.tone}>
+      {@ended_pill.label}
     </StatusPill.status_pill>
-    <span :if={@view.is_fogged} class="text-text-muted">Fog of war</span>
+    <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
     """
+  end
+
+  # The pill used to be tone "done" (green, terminal-success) for every viewer once a
+  # game ended, so a losing player's own status strip told them they'd succeeded. It now reflects
+  # the *viewer's* outcome, matching `viewer_outcome/2` below — a spectator gets the neutral
+  # "Ended", a seated player gets their own Victory/Defeat.
+  defp ended_pill(view) do
+    case my_player(view) do
+      nil -> %{tone: "new", label: "Ended"}
+      %{place: 1} -> %{tone: "done", label: "Victory"}
+      _ -> %{tone: "blocked", label: "Defeat"}
+    end
   end
 
   defp lobby(assigns) do
@@ -568,13 +584,20 @@ defmodule GlobalCombatWeb.GameLive do
   # The viewer's own line under the banner; `nil` for a spectator.
   defp viewer_outcome(view, winner) do
     cond do
-      winner && winner.number == view.viewer_number -> "You win!"
-      me = my_player(view) -> "You finished in place #{me.place}."
+      winner && winner.number == view.viewer_number -> "You won."
+      me = my_player(view) -> "You placed #{ordinal(me.place)} of #{length(view.players)}."
       true -> nil
     end
   end
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
+
+  # Player-facing ordinal ("1st place"), replacing the engine's bare `place` integer
+  # ("place 1") that used to leak straight into the UI — port of `Player.cs`'s `GetPlace()`.
+  defp ordinal(1), do: "1st"
+  defp ordinal(2), do: "2nd"
+  defp ordinal(3), do: "3rd"
+  defp ordinal(n), do: "#{n}th"
 
   # GIF-111's order-composition panel — LiveView equivalent of `Main.js`'s
   # `EntryForm`/`ActionMessage`/`AmountInput`/`ActionSubmit`. `:assign` (no target
@@ -727,6 +750,10 @@ defmodule GlobalCombatWeb.GameLive do
   attr :viewer_number, :any, required: true
   attr :status, :atom, required: true
 
+  attr :ended, :boolean,
+    default: false,
+    doc: "swaps the Thinking/Done roster for final standings once the game has ended"
+
   attr :map_name, :atom,
     default: nil,
     doc: "the game's map, once known — in play each player's board colour gets a legend dot"
@@ -744,11 +771,17 @@ defmodule GlobalCombatWeb.GameLive do
           />
           <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
         </span>
-        <span class="flex items-center gap-[var(--space-2)]">
+        <span :if={@ended} class="flex items-center gap-[var(--space-2)]">
+          <span :if={p.place == 1} aria-hidden="true">🏆</span>
+          <span class="text-text-muted">{ordinal(p.place)}</span>
+          <span class="text-text-muted">{p.armies} ({p.areas})</span>
+          <span class="text-text-muted">Score {p.score}</span>
+        </span>
+        <span :if={!@ended} class="flex items-center gap-[var(--space-2)]">
           <span :if={!p.eliminated && p.armies} class="text-text-muted">
             {p.armies} ({p.areas})
           </span>
-          <span :if={p.eliminated} class="text-text-muted">place {p.place}</span>
+          <span :if={p.eliminated} class="text-text-muted">{ordinal(p.place)}</span>
           <StatusPill.status_pill :if={!p.eliminated} tone={if p.done, do: "done", else: "waiting"}>
             {if p.done, do: "Done", else: "Thinking"}
           </StatusPill.status_pill>
