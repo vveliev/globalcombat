@@ -3,6 +3,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
 
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Games.PlayerView
+  alias GlobalCombat.Games.TurnLog
 
   # Map :original: area 1 (Alaska) links to [2, 3, 37]; area 5 (Quebec) links to
   # [2, 4, 6, 7, 9] — not adjacent to area 1. Used throughout to exercise both the
@@ -228,8 +229,11 @@ defmodule GlobalCombat.Games.PlayerViewTest do
         PlayerView.build(engine, 1,
           game_id: 1,
           is_fogged: true,
-          last_turn_events: [{:attack, 5, 9, 10, 1, 5, true}],
-          last_turn_before_owners: before_owners
+          last_turn_log: %TurnLog{
+            turn: 3,
+            events: [{:attack, 5, 9, 10, 1, 5, true}],
+            before_owners: before_owners
+          }
         )
 
       assert view.last_turn_events == []
@@ -249,8 +253,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
         PlayerView.build(engine, 1,
           game_id: 1,
           is_fogged: true,
-          last_turn_events: [event],
-          last_turn_before_owners: before_owners
+          last_turn_log: %TurnLog{turn: 3, events: [event], before_owners: before_owners}
         )
 
       assert view.last_turn_events == [event]
@@ -258,7 +261,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
 
     test "an event visible only through pre-turn ownership (an adjacency lost this turn) is still exposed" do
       # Player 1 owned area 4 (adjacent to area 5) going into the turn but not anymore by the
-      # time this render reads `engine` — `last_turn_before_owners` is what still remembers it.
+      # time this render reads `engine` — the log's `before_owners` is what still remembers it.
       engine = engine_with(%{5 => %Engine.Area{number: 5, owner_number: 2, armies: 5}})
       before_owners = engine.areas |> owners() |> Map.put(4, 1)
       event = {:assign, 5, 3}
@@ -267,8 +270,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
         PlayerView.build(engine, 1,
           game_id: 1,
           is_fogged: true,
-          last_turn_events: [event],
-          last_turn_before_owners: before_owners
+          last_turn_log: %TurnLog{turn: 3, events: [event], before_owners: before_owners}
         )
 
       assert view.last_turn_events == [event]
@@ -288,8 +290,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
         PlayerView.build(engine, 1,
           game_id: 1,
           is_fogged: true,
-          last_turn_events: [event],
-          last_turn_before_owners: before_owners
+          last_turn_log: %TurnLog{turn: 3, events: [event], before_owners: before_owners}
         )
 
       assert view.last_turn_events == [event]
@@ -304,8 +305,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
         PlayerView.build(engine, nil,
           game_id: 1,
           is_fogged: true,
-          last_turn_events: events,
-          last_turn_before_owners: before_owners
+          last_turn_log: %TurnLog{turn: 3, events: events, before_owners: before_owners}
         )
 
       assert view.last_turn_events == events
@@ -324,11 +324,77 @@ defmodule GlobalCombat.Games.PlayerViewTest do
         PlayerView.build(engine, 1,
           game_id: 1,
           is_fogged: false,
-          last_turn_events: [event],
-          last_turn_before_owners: %{}
+          last_turn_log: %TurnLog{turn: 3, events: [event], before_owners: %{}}
         )
 
       assert view.last_turn_events == [event]
+    end
+
+    test "a log stamped for a different turn than the engine's current one is dropped entirely" do
+      # Simulates a stale log surviving a partial write or a pre-column rehydrate — the events
+      # would otherwise pass the fog rule below (viewer 1 owns both endpoints), so only the
+      # turn-stamp check protects against describing the wrong turn.
+      engine =
+        engine_with(%{
+          1 => %Engine.Area{number: 1, owner_number: 1, armies: 5},
+          3 => %Engine.Area{number: 3, owner_number: 1, armies: 5}
+        })
+
+      before_owners = owners(engine.areas)
+      event = {:transfer, 1, 3, 2}
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_log: %TurnLog{turn: 2, events: [event], before_owners: before_owners}
+        )
+
+      assert view.last_turn_events == []
+    end
+
+    test "a fogged game with an empty before_owners snapshot omits rather than raises" do
+      # Guards `before_owners_lookup/1`'s `Map.get/3` default: a log whose turn does match (so it
+      # isn't dropped by the check above) but whose `before_owners` has no entry for an event's
+      # area used to `Map.fetch!/2` and crash instead of just hiding the event.
+      engine =
+        engine_with(%{
+          5 => %Engine.Area{number: 5, owner_number: 2, armies: 5},
+          9 => %Engine.Area{number: 9, owner_number: 2, armies: 5}
+        })
+
+      event = {:attack, 5, 9, 10, 1, 5, true}
+
+      view =
+        PlayerView.build(engine, 1,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_log: %TurnLog{turn: 3, events: [event], before_owners: %{}}
+        )
+
+      assert view.last_turn_events == []
+    end
+
+    test "a spectator's fogged, empty-before_owners log omits an owned hidden area's event rather than raising" do
+      # Same guard as above, but for `viewer_number: nil` (a spectator) specifically — the
+      # sentinel `before_owners_lookup/1` defaults to must not compare equal to `nil`, or a
+      # spectator would spuriously "match" every area missing from `before_owners`.
+      engine =
+        engine_with(%{
+          5 => %Engine.Area{number: 5, owner_number: 2, armies: 5},
+          9 => %Engine.Area{number: 9, owner_number: 2, armies: 5}
+        })
+
+      event = {:attack, 5, 9, 10, 1, 5, true}
+
+      view =
+        PlayerView.build(engine, nil,
+          game_id: 1,
+          is_fogged: true,
+          last_turn_log: %TurnLog{turn: 3, events: [event], before_owners: %{}}
+        )
+
+      assert view.last_turn_events == []
     end
   end
 end

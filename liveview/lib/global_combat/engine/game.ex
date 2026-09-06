@@ -257,41 +257,42 @@ defmodule GlobalCombat.Engine.Game do
   end
 
   defp assign_armies(game) do
-    Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
-      events =
-        if area.assigned_armies > 0,
-          do: events ++ [{:assign, area.number, area.assigned_armies}],
-          else: events
+    {game, events} =
+      Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
+        events =
+          if area.assigned_armies > 0,
+            do: [{:assign, area.number, area.assigned_armies} | events],
+            else: events
 
-      game =
-        update_area(
-          game,
-          area.number,
-          &%{&1 | armies: &1.armies + &1.assigned_armies, assigned_armies: 0}
-        )
+        game =
+          update_area(
+            game,
+            area.number,
+            &%{&1 | armies: &1.armies + &1.assigned_armies, assigned_armies: 0}
+          )
 
-      {game, events}
-    end)
+        {game, events}
+      end)
+
+    {game, Enum.reverse(events)}
   end
 
   defp do_transfers(game) do
-    Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
-      if area.command == :transfer do
-        {game, event} = do_transfer_and_event(game, area.number)
-        {game, events ++ [event]}
-      else
-        {game, events}
-      end
-    end)
+    {game, events} =
+      Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
+        if area.command == :transfer do
+          {game, event} = do_transfer(game, area.number)
+          {game, [event | events]}
+        else
+          {game, events}
+        end
+      end)
+
+    {game, Enum.reverse(events)}
   end
 
-  @doc "Port of `Game.DoTransfer`."
-  def do_transfer(game, area_number) do
-    {game, _event} = do_transfer_and_event(game, area_number)
-    game
-  end
-
-  defp do_transfer_and_event(game, area_number) do
+  # Port of `Game.DoTransfer`.
+  defp do_transfer(game, area_number) do
     area = area!(game, area_number)
 
     game =
@@ -314,19 +315,22 @@ defmodule GlobalCombat.Engine.Game do
       areas_in_order(game)
       |> Enum.sort_by(& &1.amount, order)
 
-    Enum.reduce(sorted, {game, []}, fn area, {game, events} ->
-      # Re-fetch: an earlier attack in this same pass may have overwritten
-      # this area's Command (see do_attack/2's defender-command-cancel).
-      current = area!(game, area.number)
+    {game, events} =
+      Enum.reduce(sorted, {game, []}, fn area, {game, events} ->
+        # Re-fetch: an earlier attack in this same pass may have overwritten
+        # this area's Command (see do_attack/2's defender-command-cancel).
+        current = area!(game, area.number)
 
-      if current.command == :attack do
-        {game, event} = do_attack_and_event(game, area.number)
-        events = if event, do: events ++ [event], else: events
-        {game, events}
-      else
-        {game, events}
-      end
-    end)
+        if current.command == :attack do
+          {game, event} = do_attack_and_event(game, area.number)
+          events = if event, do: [event | events], else: events
+          {game, events}
+        else
+          {game, events}
+        end
+      end)
+
+    {game, Enum.reverse(events)}
   end
 
   @doc "Port of `Game.DoAttack`. Returns the updated game (the original's narrated message string is not ported — see moduledoc)."
@@ -448,12 +452,14 @@ defmodule GlobalCombat.Engine.Game do
 
           player.areas == 0 ->
             {game, new_events} = eliminate_player_and_events(game, player.number)
-            {game, alive_players, events ++ new_events}
+            {game, alive_players, Enum.reverse(new_events, events)}
 
           true ->
             {reinforce(game, player.number), alive_players + 1, events}
         end
       end)
+
+    events = Enum.reverse(events)
 
     if alive_players <= 1 do
       {game, end_events} = end_game_and_events(game)
@@ -521,12 +527,9 @@ defmodule GlobalCombat.Engine.Game do
     end
   end
 
-  @doc "Port of `Game.End`. A no-op once already ended, matching the original's guard (so a mid-loop early end from `eliminate_player/2` doesn't get recomputed by the trailing alive_players<=1 check)."
-  def end_game(game) do
-    {game, _events} = end_game_and_events(game)
-    game
-  end
-
+  # Port of `Game.End`. A no-op once already ended, matching the original's guard (so a mid-loop
+  # early end from `eliminate_player_and_events/2` doesn't get recomputed by the trailing
+  # alive_players<=1 check).
   defp end_game_and_events(%__MODULE__{ended: true} = game), do: {game, []}
 
   defp end_game_and_events(%__MODULE__{} = game) do

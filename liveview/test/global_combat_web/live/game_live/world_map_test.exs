@@ -30,7 +30,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       owner_number: 1,
       armies: nil,
       pending_armies: 0,
-      adjacent: []
+      adjacent: [],
+      order: nil
     }
     |> Map.merge(Map.new(opts))
   end
