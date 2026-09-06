@@ -411,7 +411,11 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp render_game(assigns) do
     ~H"""
-    <.site_chrome current_account={@current_account}>
+    <.site_chrome
+      current_account={@current_account}
+      current_path={assigns[:current_path]}
+      page_title={"Game #{@game_id}"}
+    >
       <GameLayout.game_layout
         id="game-board"
         players_first={@status == :playing && @view.ended}
@@ -678,9 +682,9 @@ defmodule GlobalCombatWeb.GameLive do
   defp lobby(assigns) do
     ~H"""
     <div id="lobby" class="flex flex-col gap-[var(--space-4)]">
-      <h1 class="heading-3">
+      <h2 class="heading-3">
         Game {@game_id}
-      </h1>
+      </h2>
       <ul id="lobby-players" class="flex flex-col gap-[var(--space-2)]">
         <li :for={p <- @view.players}>Player {p.number}: {p.name}</li>
       </ul>
@@ -705,12 +709,13 @@ defmodule GlobalCombatWeb.GameLive do
         </Button.button>
       </div>
       <form :if={@view.viewer_number != nil} phx-submit="invite" class="flex gap-[var(--space-2)]">
-        <input
-          type="text"
+        <Input.input
+          id="invite-login"
           name="login"
           value={@invite_login}
-          placeholder="Invite by username or email"
-          class="flex-1 rounded border border-border px-[var(--space-2)]"
+          label="Invite a player"
+          placeholder="Username or email"
+          class="min-w-0"
         />
         <Button.button type="submit">Invite</Button.button>
       </form>
@@ -725,34 +730,36 @@ defmodule GlobalCombatWeb.GameLive do
 
     ~H"""
     <.game_over :if={@view.ended} view={@view} />
-    <div class="flex flex-col gap-[var(--space-4)]">
-      <form id="lens-form" phx-change="set_lens">
-        <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
-          <:option value="owner">Owner</:option>
-          <:option value="region">Region control</:option>
-          <:option value="frontier">Frontier</:option>
-        </SegmentedControl.segmented_control>
-      </form>
-      <figure class="m-0 w-full max-w-[60rem]">
-        <WorldMap.world_map
-          map_name={@view.map_name}
-          areas={@view.areas}
-          players={@view.players}
-          selected_area={@selected_area}
-          target_area={@target_area}
-          lens={@lens}
-          viewer_number={@view.viewer_number}
-          interactive={!@view.ended}
-          replay_steps={@replay_steps}
-        />
-        <figcaption
-          :if={@view.ended && @winner}
-          class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
-        >
-          {@winner.name} holds all {length(@view.areas)} territories.
-        </figcaption>
-      </figure>
-      <div class="flex flex-wrap items-start gap-[var(--space-4)]">
+    <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
+      <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] xl:flex-1">
+        <form id="lens-form" phx-change="set_lens">
+          <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
+            <:option value="owner">Owner</:option>
+            <:option value="region">Region control</:option>
+            <:option value="frontier">Frontier</:option>
+          </SegmentedControl.segmented_control>
+        </form>
+        <figure class="m-0 w-full">
+          <WorldMap.world_map
+            map_name={@view.map_name}
+            areas={@view.areas}
+            players={@view.players}
+            selected_area={@selected_area}
+            target_area={@target_area}
+            lens={@lens}
+            viewer_number={@view.viewer_number}
+            interactive={!@view.ended}
+            replay_steps={@replay_steps}
+          />
+          <figcaption
+            :if={@view.ended && @winner}
+            class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
+          >
+            {@winner.name} holds all {length(@view.areas)} territories.
+          </figcaption>
+        </figure>
+      </div>
+      <div class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-[var(--size-rail-lg)] xl:shrink-0 xl:flex-col">
         <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
         <.your_orders_card :if={my_orders(@view) != []} orders={my_orders(@view)} />
         <.order_panel
