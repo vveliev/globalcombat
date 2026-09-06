@@ -13,6 +13,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.ConsoleLayout do
   stage first, then focus, queue, strip, mirroring robo-hub's own
   stacking order. The no-page-scroll rule (fixed 100vh, every region
   scrolls itself) holds only at `lg:` and above.
+
+  Root uses `text-[length:var(--text-sm)]` rather than the `body-text`
+  utility's `--font-body-size` — this shell's density contract (above)
+  predates the brand-typography wiring below it and is deliberately one
+  step tighter than the other five shells (`LAYOUTS.md`,
+  `DESIGN-CONTRACTS.md` C7); `font-body` and `--font-body-leading` still
+  apply so the brand typeface and rhythm carry through, only the size is
+  denser.
   """
   use Phoenix.Component
 

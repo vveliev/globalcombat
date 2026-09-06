@@ -465,7 +465,7 @@ defmodule GlobalCombatWeb.GameLive do
     assigns = assign(assigns, :ended_pill, ended_pill(assigns.view))
 
     ~H"""
-    <span class="font-heading font-[var(--font-heading-weight)] text-[length:var(--heading-3)] tabular-nums">
+    <span class="heading-3 tabular-nums">
       Turn {@view.turn}
     </span>
     <StatusPill.status_pill :if={!@view.ended} tone="active">In progress</StatusPill.status_pill>
@@ -491,7 +491,7 @@ defmodule GlobalCombatWeb.GameLive do
   defp lobby(assigns) do
     ~H"""
     <div id="lobby" class="flex flex-col gap-[var(--space-4)]">
-      <h1 class="font-heading font-[var(--font-heading-weight)] text-[length:var(--heading-3)]">
+      <h1 class="heading-3">
         Game {@game_id}
       </h1>
       <ul id="lobby-players" class="flex flex-col gap-[var(--space-2)]">
@@ -606,7 +606,7 @@ defmodule GlobalCombatWeb.GameLive do
     >
       <h2
         id="game-over-heading"
-        class="font-heading font-[var(--font-heading-weight)] text-[length:var(--heading-3)]"
+        class="heading-3"
       >
         Game Over<span :if={@winner}> — {@winner.name} wins</span>
       </h2>

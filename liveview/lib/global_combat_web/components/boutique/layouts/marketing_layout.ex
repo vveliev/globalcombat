@@ -32,7 +32,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.MarketingLayout do
     <div
       id={@id}
       class={[
-        "min-h-screen flex flex-col bg-background text-text font-body text-[length:var(--font-body-size)] leading-[var(--font-body-leading)]",
+        "min-h-screen flex flex-col bg-background text-text body-text",
         @class
       ]}
       {@rest}
