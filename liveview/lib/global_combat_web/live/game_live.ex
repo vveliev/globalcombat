@@ -54,7 +54,7 @@ defmodule GlobalCombatWeb.GameLive do
       {:ok,
        socket
        |> assign(:game_id, game_id)
-       |> assign(:chat_text, "")
+       |> assign(:chat_form, to_form(%{"text" => ""}))
        |> assign(:invite_login, "")
        |> assign(:selected_area, nil)
        |> assign(:target_area, nil)
@@ -221,7 +221,7 @@ defmodule GlobalCombatWeb.GameLive do
 
       {_text, {:ok, account}} ->
         Games.send_chat(socket.assigns.game_id, account.id, account.name, text)
-        {:noreply, assign(socket, :chat_text, "")}
+        {:noreply, assign(socket, :chat_form, to_form(%{"text" => ""}))}
 
       {_text, :error} ->
         {:noreply, socket}
@@ -412,7 +412,7 @@ defmodule GlobalCombatWeb.GameLive do
           />
           <.chat
             messages={Map.get(@view, :messages, [])}
-            chat_text={@chat_text}
+            chat_form={@chat_form}
             logged_in={!!@current_account}
           />
         </:players>
@@ -830,23 +830,30 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   attr :messages, :list, required: true
-  attr :chat_text, :string, required: true
+  attr :chat_form, Phoenix.HTML.Form, required: true
   attr :logged_in, :boolean, required: true
 
   defp chat(assigns) do
     ~H"""
     <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)]">
-      <form :if={@logged_in} phx-submit="send_chat" class="flex gap-[var(--space-2)]">
-        <input
-          type="text"
-          name="text"
-          value={@chat_text}
-          placeholder="Send a message."
-          class="flex-1 rounded border border-border px-[var(--space-2)]"
+      <.form
+        :if={@logged_in}
+        for={@chat_form}
+        id="chat-form"
+        phx-submit="send_chat"
+        class="flex flex-col gap-[var(--space-2)]"
+      >
+        <Input.input
+          id="chat-message"
+          field={@chat_form[:text]}
+          label="Message"
+          placeholder="Send a message"
+          class="min-w-0"
         />
-        <Button.button type="submit">Send</Button.button>
-      </form>
+        <Button.button type="submit" intent="neutral" class="self-end">Send</Button.button>
+      </.form>
       <ul aria-live="polite" class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
+        <li :if={@messages == []} class="text-text-muted">No messages yet.</li>
         <li :for={m <- @messages}>
           <span class="font-semibold">{m.source_name}:</span> {m.text}
         </li>
