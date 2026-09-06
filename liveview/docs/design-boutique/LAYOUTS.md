@@ -115,6 +115,17 @@ absorbing an empty React slot's area.
 
 \* optional — same absorbed-empty-area behavior as the React table above.
 
+Every shell root sets `font-body` (brand body typeface) plus the app-level
+`heading-3`/`body-text` Tailwind utilities (`assets/css/app.css`) so headings
+and body copy pick up the active theme's `--font-heading`/`--font-body`
+instead of Tailwind's generic `font-sans` stack. `console_layout`
+and `management_layout` are the one deviation: per this doc's "dense" density
+contract (their own sections above) they keep `text-[length:var(--text-sm)]`
+instead of `body-text`'s `--font-body-size` — one step tighter than the other
+four shells, same as their existing padding/type density call
+(`DESIGN-CONTRACTS.md` C7). `font-body` and `--font-body-leading` still apply
+to both, so only the size deviates.
+
 Responsive collapse (all shells except Marketing, which has no grid to
 collapse): at `lg:` — Tailwind's default 64rem breakpoint is the same
 value as `--size-collapse` (`tokens/scales.json`), so the built-in `lg:`

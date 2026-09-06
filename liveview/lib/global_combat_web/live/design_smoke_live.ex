@@ -30,7 +30,7 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
     ~H"""
     <GameLayout.game_layout class="min-h-screen">
       <:status>
-        <span class="font-heading font-[var(--font-heading-weight)] text-[length:var(--heading-3)] tabular-nums">
+        <span class="heading-3 tabular-nums">
           Turn {@turn}
         </span>
         <StatusPill.status_pill tone="active">Resolving</StatusPill.status_pill>

@@ -27,7 +27,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.BlogLayout do
     <div
       id={@id}
       class={[
-        "grid min-h-screen bg-background text-text font-body text-[length:var(--font-body-size)] leading-[var(--font-body-leading)]",
+        "grid min-h-screen bg-background text-text body-text",
         "grid-cols-1 grid-rows-[auto_auto_1fr_auto]",
         "[grid-template-areas:'header'_'toc'_'content'_'footer']",
         "lg:grid-cols-[1fr_min(var(--size-content),100%)_minmax(0,1fr)] lg:grid-rows-[auto_1fr_auto]",
