@@ -105,6 +105,26 @@ defmodule GlobalCombat.GamesTest do
     end
   end
 
+  describe "persist_turn/3" do
+    test "overwrites serialized and last_turn_events on the given row together, in one statement" do
+      # A single `UPDATE ... SET serialized = ?, last_turn_events = ?` can't land one column
+      # without the other the way two separate `persist_serialized/2` + a hypothetical
+      # `persist_last_turn_events/2` calls could -- this is the pairing review item 1 asks for.
+      game = game_fixture()
+      other = game_fixture()
+
+      assert :ok = Games.persist_turn(game.id, "new-blob", "new-events")
+
+      updated = Games.get_game!(game.id)
+      assert updated.serialized == "new-blob"
+      assert updated.last_turn_events == "new-events"
+
+      untouched = Games.get_game!(other.id)
+      assert untouched.serialized != "new-blob"
+      assert untouched.last_turn_events != "new-events"
+    end
+  end
+
   describe "advance_turn/4" do
     test "sets turn/prev_turn_time/last_turn_time on the given row" do
       game = game_fixture(%{db_turn: 1, last_turn_time: minutes_ago(10)})

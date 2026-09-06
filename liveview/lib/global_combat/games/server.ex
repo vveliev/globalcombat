@@ -35,6 +35,7 @@ defmodule GlobalCombat.Games.Server do
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.PlayerView
   alias GlobalCombat.Games.PubSub, as: GamePubSub
+  alias GlobalCombat.Games.TurnLog
   alias GlobalCombat.GrpcHost
   alias GlobalCombat.Tourneys
 
@@ -59,8 +60,7 @@ defmodule GlobalCombat.Games.Server do
     invites: [],
     engine: nil,
     messages: [],
-    last_turn_events: [],
-    last_turn_before_owners: %{}
+    last_turn_log: %TurnLog{}
   ]
 
   # --- client API --------------------------------------------------------
@@ -289,19 +289,9 @@ defmodule GlobalCombat.Games.Server do
       db_last_turn_time: Keyword.fetch!(opts, :last_turn_time),
       status: :playing,
       engine: engine,
-      players: rehydrated_players(engine)
+      players: rehydrated_players(engine),
+      last_turn_log: TurnLog.decode(Keyword.get(opts, :last_turn_events))
     }
-    |> Map.merge(decode_last_turn_events(Keyword.get(opts, :last_turn_events)))
-  end
-
-  # `nil` covers both a game rehydrated before this column existed (no `last_turn_events` value
-  # yet) and one no turn has resolved for since — `:erlang.binary_to_term/1` has no representation for
-  # "nothing yet" to decode, so this is handled before ever reaching it.
-  defp decode_last_turn_events(nil), do: %{last_turn_events: [], last_turn_before_owners: %{}}
-
-  defp decode_last_turn_events(binary) do
-    {events, before_owners} = :erlang.binary_to_term(binary)
-    %{last_turn_events: events, last_turn_before_owners: before_owners}
   end
 
   defp rehydrated_players(engine) do
@@ -344,8 +334,7 @@ defmodule GlobalCombat.Games.Server do
         game_id: state.game_id,
         is_fogged: state.is_fogged,
         messages: state.messages,
-        last_turn_events: state.last_turn_events,
-        last_turn_before_owners: state.last_turn_before_owners
+        last_turn_log: state.last_turn_log
       )
 
     {:reply, {:playing, view}, state}
@@ -844,25 +833,17 @@ defmodule GlobalCombat.Games.Server do
   defp run_turn(state, opts \\ []) do
     advance_clock? = Keyword.get(opts, :advance_clock, true)
     old_engine = state.engine
-    # Ownership as of the instant this turn started resolving (queued orders applied, nothing
-    # resolved yet) — assign/transfer never change an area's owner, so this is also each area's
-    # owner going into the attack phase. Kept only as owner numbers, not full `old_engine`: that's
-    # all `PlayerView`'s fog rule needs to tell "was this area's neighborhood visible before the
-    # attack that flipped it" from "only after" (see PlayerView moduledoc), without holding onto
-    # (or ever exposing) last turn's army counts.
-    before_owners =
-      Map.new(old_engine.areas, fn {number, area} -> {number, area.owner_number} end)
 
-    {engine, events} = Engine.resolve_turn(old_engine)
-    engine = run_ai_turns(engine)
+    {resolved_engine, events} = Engine.resolve_turn(old_engine)
+    turn_log = TurnLog.snapshot(old_engine, resolved_engine, events)
+    engine = run_ai_turns(resolved_engine)
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     state = %{
       state
       | engine: engine,
         turn_started_at: now,
-        last_turn_events: events,
-        last_turn_before_owners: before_owners
+        last_turn_log: turn_log
     }
 
     state =
@@ -873,12 +854,7 @@ defmodule GlobalCombat.Games.Server do
         state
       end
 
-    persist_snapshot(state)
-
-    GamesDb.persist_last_turn_events(
-      state.game_id,
-      :erlang.term_to_binary({events, before_owners})
-    )
+    GamesDb.persist_turn(state.game_id, build_wire(state), TurnLog.encode(turn_log))
 
     record_game_results(old_engine, engine)
 
@@ -962,6 +938,10 @@ defmodule GlobalCombat.Games.Server do
   end
 
   defp persist_snapshot(state) do
+    GamesDb.persist_serialized(state.game_id, build_wire(state))
+  end
+
+  defp build_wire(state) do
     wire =
       Wire.to_wire_game(state.engine,
         game_id: state.game_id,
@@ -970,7 +950,7 @@ defmodule GlobalCombat.Games.Server do
         is_fogged: state.is_fogged
       )
 
-    GamesDb.persist_serialized(state.game_id, GrpcHost.Game.encode(wire))
+    GrpcHost.Game.encode(wire)
   end
 
   defp notifiable_accounts(state) do
@@ -984,7 +964,7 @@ defmodule GlobalCombat.Games.Server do
 
   # `Tourneys.finish_game/2`'s `results` shape: `[{account_id, place}]`. Every player has a
   # nonzero `place` by the time `engine.ended` is true (`Engine.eliminate_player/2` assigns it
-  # on the way out, `Engine.end_game/1` backfills the last survivor's place as 1).
+  # on the way out, the engine's own end-game path backfills the last survivor's place as 1).
   defp tourney_results(engine) do
     Enum.map(Engine.players_in_order(engine), fn p -> {p.account_id, p.place} end)
   end

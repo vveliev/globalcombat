@@ -42,29 +42,37 @@ defmodule GlobalCombat.Games.PlayerView do
 
   ## Turn-resolution event visibility
 
-  `last_turn_events` (the previous turn's `GlobalCombat.Engine.Game.resolve_turn/1` log) is
-  filtered by the *same* rule as the board above, applied per event rather than per area — an
-  event is exposed only if every area it touches (`{:assign, area, _}`'s one area; `{:transfer,
-  from, to, _}`/`{:attack, from, to, ...}`'s two) was visible to this viewer (owned, or adjacent
-  to an owned area) at *either* endpoint of the turn: right before it resolved, or right after.
-  Checking only "after" would leak a hidden area's fate the instant it changes hands (an attack
-  into fog the viewer had no way to see coming); checking only "before" would keep hiding an
-  attack the viewer's own troops just captured visibility into. Both instants have to be checked
-  independently — `owns_adjacent?/3` depends on a *neighboring* area's owner, which can itself
-  flip mid-turn, so "visible before" and "visible after" are genuinely different computations,
-  not the same check run twice. `{:eliminated, _}`/`{:ended, _}` touch no area and are never
-  filtered, matching the player-roll-up rule above (elimination/game-end is public information,
-  not a board detail).
+  `last_turn_log` (a `GlobalCombat.Games.TurnLog` wrapping the previous turn's
+  `GlobalCombat.Engine.Game.resolve_turn/1` log) is filtered by the *same* rule as the board
+  above, applied per event rather than per area — an event is exposed only if every area it
+  touches (`{:assign, area, _}`'s one area; `{:transfer, from, to, _}`/`{:attack, from, to,
+  ...}`'s two) was visible to this viewer (owned, or adjacent to an owned area) at *either*
+  endpoint of the turn: right before it resolved, or right after. Checking only "after" would
+  leak a hidden area's fate the instant it changes hands (an attack into fog the viewer had no
+  way to see coming); checking only "before" would keep hiding an attack the viewer's own troops
+  just captured visibility into. Both instants have to be checked independently —
+  `owns_adjacent?/3` depends on a *neighboring* area's owner, which can itself flip mid-turn, so
+  "visible before" and "visible after" are genuinely different computations, not the same check
+  run twice. `{:eliminated, _}`/`{:ended, _}` touch no area and are never filtered, matching the
+  player-roll-up rule above (elimination/game-end is public information, not a board detail).
 
   The "before" ownership snapshot has no equivalent already sitting in `Engine.Game` — the engine
   is pure and only ever hands back the *resolved* state (see its moduledoc's "old state is
   discarded" framing) — so `GlobalCombat.Games.Server` captures owner numbers only (never army
-  counts, which this rule never needs) just before calling `resolve_turn/1`, and threads them
-  through as `last_turn_before_owners`.
+  counts, which this rule never needs) just before calling `resolve_turn/1`, via
+  `TurnLog.snapshot/3`'s `before_owners`.
+
+  `last_turn_log.turn` is checked against `engine.turn` before any of the above runs at all: a
+  log whose stamped turn doesn't match the state it's paired with (a rehydrate that landed one
+  half of `GlobalCombat.Games.persist_turn/3`'s atomic pair without the other would still be a
+  bug, but this is a second, structural line of defense against it; a game rehydrated before the
+  `last_turn_events` column existed, decoding to `turn: nil`, hits the same path) drops the whole
+  log rather than risk a plausible-looking but wrong replay.
   """
 
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.MapInfo
+  alias GlobalCombat.Games.TurnLog
 
   defstruct [
     :game_id,
@@ -88,8 +96,7 @@ defmodule GlobalCombat.Games.PlayerView do
     game_id = Keyword.fetch!(opts, :game_id)
     is_fogged = Keyword.fetch!(opts, :is_fogged)
     messages = Keyword.get(opts, :messages, [])
-    last_turn_events = Keyword.get(opts, :last_turn_events, [])
-    last_turn_before_owners = Keyword.get(opts, :last_turn_before_owners, %{})
+    last_turn_log = Keyword.get(opts, :last_turn_log, %TurnLog{})
 
     %__MODULE__{
       game_id: game_id,
@@ -102,12 +109,21 @@ defmodule GlobalCombat.Games.PlayerView do
         Enum.map(Engine.areas_in_order(engine), &area_view(engine, &1, viewer_number, is_fogged)),
       players: Enum.map(Engine.players_in_order(engine), &player_summary/1),
       messages: messages,
-      last_turn_events:
-        Enum.filter(
-          last_turn_events,
-          &event_visible?(&1, engine, last_turn_before_owners, viewer_number, is_fogged)
-        )
+      last_turn_events: visible_events(engine, viewer_number, is_fogged, last_turn_log)
     }
+  end
+
+  # See the moduledoc's turn-stamp paragraph — a log stamped for some turn other than the one
+  # this render shows is dropped outright, not partially trusted.
+  defp visible_events(engine, viewer_number, is_fogged, %TurnLog{turn: turn} = log) do
+    if turn == engine.turn do
+      Enum.filter(
+        log.events,
+        &event_visible?(&1, engine, log.before_owners, viewer_number, is_fogged)
+      )
+    else
+      []
+    end
   end
 
   defp area_view(engine, %Engine.Area{} = area, viewer_number, is_fogged) do
@@ -196,12 +212,27 @@ defmodule GlobalCombat.Games.PlayerView do
   defp event_area_numbers({:eliminated, _player}), do: []
   defp event_area_numbers({:ended, _winner}), do: []
 
-  defp before_owners_lookup(before_owners), do: fn number -> Map.fetch!(before_owners, number) end
+  # `Map.get/3` with a sentinel, not `Map.fetch!/2`: a turn-mismatched log is already dropped
+  # before this runs (see `visible_events/4`), but `before_owners` still shouldn't be trusted to
+  # have an entry for every area an event names — a missing key is treated as "not visible",
+  # never as a match, which is why the sentinel can't be `nil` (a real, valid owner_number for an
+  # unowned area, and `viewer_number` itself for a spectator).
+  defp before_owners_lookup(before_owners) do
+    fn number -> Map.get(before_owners, number, :area_not_in_before_owners) end
+  end
 
   defp current_owner_lookup(engine),
     do: fn number -> Engine.area!(engine, number).owner_number end
 
   defp area_visible_at?(_owner_of, _engine, _viewer_number, false, _area_number), do: true
+
+  # A spectator (`viewer_number: nil`) never expands visibility through adjacency — same guard
+  # as `owns_adjacent?/3` above, and for the same reason: `owner_number` is `nil` for every
+  # unowned area, which would otherwise equal a spectator's `nil` viewer_number and spuriously
+  # "match" as ownership, making almost any area (adjacent to at least one unowned neighbor)
+  # look visible to a spectator regardless of who actually holds it.
+  defp area_visible_at?(owner_of, _engine, nil, true, area_number),
+    do: owner_of.(area_number) == nil
 
   defp area_visible_at?(owner_of, engine, viewer_number, true, area_number) do
     owner_of.(area_number) == viewer_number or
@@ -220,7 +251,7 @@ defmodule GlobalCombat.Games.PlayerView do
       areas: player.areas,
       armies: player.armies,
       unassigned_armies: player.unassigned_armies,
-      # The Elo-style score `Engine.end_game/1` computes (`Game.cs`'s legacy
+      # The Elo-style score the engine's own end-game path computes (`Game.cs`'s legacy
       # "Score Expected = X, Score = Y, Rating Change = Z" readout) never left the engine —
       # a returning player finishing a game never saw the number they used to get.
       score: player.score

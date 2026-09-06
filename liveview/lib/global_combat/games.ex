@@ -55,13 +55,15 @@ defmodule GlobalCombat.Games do
   def list_active_games, do: Repo.all(from(g in Game, where: g.status == :active))
 
   @doc """
-  Overwrites `serialized` for `game_id` (GIF-74) — `GlobalCombat.Games.Server` calls this after
-  every turn it runs, win or claimed, so `games.serialized` always holds the live board's latest
-  snapshot for boot-time rehydration/offline resolution to read back. A plain `update_all` by id
-  rather than a fetch-then-update: the caller (`Games.Server`) is the sole writer for its own
-  `game_id` by construction (one GenServer per game, `GlobalCombat.Games.TurnScheduler`'s live-
-  process resolve path also routes through it rather than writing directly), so there is no
-  concurrent writer to race.
+  Overwrites `serialized` for `game_id` — every lobby/order mutation
+  (`GlobalCombat.Games.Server`'s `persist_lobby/1`/`apply_order/2`/`eliminate_and_broadcast/2`)
+  calls this so `games.serialized` always holds the live board's latest snapshot for boot-time
+  rehydration/offline resolution to read back. Turn resolution itself goes through
+  `persist_turn/3` instead, which also stamps `last_turn_events` — see its moduledoc. A plain
+  `update_all` by id rather than a fetch-then-update: the caller (`Games.Server`) is the sole
+  writer for its own `game_id` by construction (one GenServer per game,
+  `GlobalCombat.Games.TurnScheduler`'s live-process resolve path also routes through it rather
+  than writing directly), so there is no concurrent writer to race.
   """
   def persist_serialized(game_id, serialized) do
     from(g in Game, where: g.id == ^game_id)
@@ -71,15 +73,17 @@ defmodule GlobalCombat.Games do
   end
 
   @doc """
-  Overwrites `last_turn_events` for `game_id` — `GlobalCombat.Games.Server` calls this
-  every time it resolves a turn, right alongside `persist_serialized/2`, so a crash/rehydrate
-  never leaves the resolution log stale relative to the state it describes. `events` is any
-  `:erlang.term_to_binary/1`-encoded blob; see `GlobalCombat.Games.Game`'s schema moduledoc for
-  why this is a plain column rather than a `serialized`/ProtoBuf field.
+  Overwrites both `serialized` and `last_turn_events` for `game_id` in a single statement —
+  `GlobalCombat.Games.Server` and `GlobalCombat.Games.LiveResolver`'s offline path call this
+  every time a turn resolves, so a crash/rehydrate never leaves the resolution log stale
+  relative to the state it describes. A single `UPDATE ... SET serialized = ?, last_turn_events
+  = ?` on one row lands both columns or neither — unlike two separate `update_all` calls, which
+  could persist one and crash before the other. `turn_log` is a
+  `GlobalCombat.Games.TurnLog.encode/1`-produced blob.
   """
-  def persist_last_turn_events(game_id, events) do
+  def persist_turn(game_id, serialized, turn_log) do
     from(g in Game, where: g.id == ^game_id)
-    |> Repo.update_all(set: [last_turn_events: events])
+    |> Repo.update_all(set: [serialized: serialized, last_turn_events: turn_log])
 
     :ok
   end
