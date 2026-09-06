@@ -35,6 +35,7 @@ defmodule GlobalCombat.Games.Server do
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.PlayerView
   alias GlobalCombat.Games.PubSub, as: GamePubSub
+  alias GlobalCombat.Games.TurnLog
   alias GlobalCombat.GrpcHost
   alias GlobalCombat.Tourneys
 
@@ -58,7 +59,8 @@ defmodule GlobalCombat.Games.Server do
     players: [],
     invites: [],
     engine: nil,
-    messages: []
+    messages: [],
+    last_turn_log: %TurnLog{}
   ]
 
   # --- client API --------------------------------------------------------
@@ -287,7 +289,8 @@ defmodule GlobalCombat.Games.Server do
       db_last_turn_time: Keyword.fetch!(opts, :last_turn_time),
       status: :playing,
       engine: engine,
-      players: rehydrated_players(engine)
+      players: rehydrated_players(engine),
+      last_turn_log: TurnLog.decode(Keyword.get(opts, :last_turn_events))
     }
   end
 
@@ -330,7 +333,8 @@ defmodule GlobalCombat.Games.Server do
       PlayerView.build(state.engine, viewer_number,
         game_id: state.game_id,
         is_fogged: state.is_fogged,
-        messages: state.messages
+        messages: state.messages,
+        last_turn_log: state.last_turn_log
       )
 
     {:reply, {:playing, view}, state}
@@ -829,9 +833,18 @@ defmodule GlobalCombat.Games.Server do
   defp run_turn(state, opts \\ []) do
     advance_clock? = Keyword.get(opts, :advance_clock, true)
     old_engine = state.engine
-    engine = state.engine |> Engine.run_turn() |> run_ai_turns()
+
+    {resolved_engine, events} = Engine.resolve_turn(old_engine)
+    turn_log = TurnLog.snapshot(old_engine, resolved_engine, events)
+    engine = run_ai_turns(resolved_engine)
     now = DateTime.utc_now() |> DateTime.truncate(:second)
-    state = %{state | engine: engine, turn_started_at: now}
+
+    state = %{
+      state
+      | engine: engine,
+        turn_started_at: now,
+        last_turn_log: turn_log
+    }
 
     state =
       if advance_clock? do
@@ -841,7 +854,8 @@ defmodule GlobalCombat.Games.Server do
         state
       end
 
-    persist_snapshot(state)
+    GamesDb.persist_turn(state.game_id, build_wire(state), TurnLog.encode(turn_log))
+
     record_game_results(old_engine, engine)
 
     if engine.ended do
@@ -924,6 +938,10 @@ defmodule GlobalCombat.Games.Server do
   end
 
   defp persist_snapshot(state) do
+    GamesDb.persist_serialized(state.game_id, build_wire(state))
+  end
+
+  defp build_wire(state) do
     wire =
       Wire.to_wire_game(state.engine,
         game_id: state.game_id,
@@ -932,7 +950,7 @@ defmodule GlobalCombat.Games.Server do
         is_fogged: state.is_fogged
       )
 
-    GamesDb.persist_serialized(state.game_id, GrpcHost.Game.encode(wire))
+    GrpcHost.Game.encode(wire)
   end
 
   defp notifiable_accounts(state) do
@@ -946,7 +964,7 @@ defmodule GlobalCombat.Games.Server do
 
   # `Tourneys.finish_game/2`'s `results` shape: `[{account_id, place}]`. Every player has a
   # nonzero `place` by the time `engine.ended` is true (`Engine.eliminate_player/2` assigns it
-  # on the way out, `Engine.end_game/1` backfills the last survivor's place as 1).
+  # on the way out, the engine's own end-game path backfills the last survivor's place as 1).
   defp tourney_results(engine) do
     Enum.map(Engine.players_in_order(engine), fn p -> {p.account_id, p.place} end)
   end

@@ -29,7 +29,9 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.Components.Boutique.Card
   alias GlobalCombatWeb.Components.Boutique.Input
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
+  alias GlobalCombatWeb.Components.Boutique.SegmentedControl
   alias GlobalCombatWeb.Components.Boutique.StatusPill
+  alias GlobalCombatWeb.GameLive.Replay
   alias GlobalCombatWeb.GameLive.WorldMap
 
   @impl true
@@ -53,11 +55,12 @@ defmodule GlobalCombatWeb.GameLive do
       {:ok,
        socket
        |> assign(:game_id, game_id)
-       |> assign(:chat_text, "")
+       |> assign(:chat_form, to_form(%{"text" => ""}))
        |> assign(:invite_login, "")
        |> assign(:selected_area, nil)
        |> assign(:target_area, nil)
        |> assign(:order_amount, "")
+       |> assign(:lens, :owner)
        |> refresh_view()}
     else
       {:ok, socket |> put_flash(:error, "Game not found.") |> push_navigate(to: ~p"/")}
@@ -74,6 +77,12 @@ defmodule GlobalCombatWeb.GameLive do
         socket
         |> put_flash(:info, "That game is no longer open.")
         |> push_navigate(to: ~p"/")
+
+      {:playing, %{ended: true} = view} ->
+        # A game that just ended can't leave a stale click-to-select in progress —
+        # without this, `order_panel` (guarded on `@selected_area`) could still be
+        # showing "Assign new armies" over a board with no more turns to take.
+        socket |> assign(status: :playing, view: view) |> clear_selection()
 
       {status, view} ->
         assign(socket, status: status, view: view)
@@ -219,7 +228,7 @@ defmodule GlobalCombatWeb.GameLive do
 
       {_text, {:ok, account}} ->
         Games.send_chat(socket.assigns.game_id, account.id, account.name, text)
-        {:noreply, assign(socket, :chat_text, "")}
+        {:noreply, assign(socket, :chat_form, to_form(%{"text" => ""}))}
 
       {_text, :error} ->
         {:noreply, socket}
@@ -250,7 +259,11 @@ defmodule GlobalCombatWeb.GameLive do
   # Every other click (unowned first click, non-adjacent or hidden second click) is a
   # no-op, same as the original hiding non-adjacent territories entirely while a
   # source is active.
-  def handle_event("select_area", %{"area" => area_str}, %{assigns: %{status: :playing}} = socket) do
+  def handle_event(
+        "select_area",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false}}} = socket
+      ) do
     case Integer.parse(area_str) do
       {area_number, ""} ->
         case find_area(socket.assigns.view, area_number) do
@@ -287,6 +300,18 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
+
+  # The map lens is a per-viewer display preference, not game state —
+  # it lives only in this socket's assigns, same as :selected_area/:target_area,
+  # never touching `PlayerView`.
+  def handle_event("set_lens", %{"lens" => lens}, socket) do
+    case lens do
+      "owner" -> {:noreply, assign(socket, :lens, :owner)}
+      "region" -> {:noreply, assign(socket, :lens, :region)}
+      "frontier" -> {:noreply, assign(socket, :lens, :frontier)}
+      _ -> {:noreply, socket}
+    end
+  end
 
   defp handle_area_click(socket, area) do
     view = socket.assigns.view
@@ -369,8 +394,21 @@ defmodule GlobalCombatWeb.GameLive do
 
   # --- rendering -------------------------------------------------------------
 
+  # Computed once per render (not per sub-template) so `status_line/1`'s replay
+  # controls and `board/1`'s WorldMap + results list always agree on the same
+  # steps — see `GameLive.Replay.steps/4` for the shape.
   @impl true
-  def render(assigns) do
+  def render(%{status: :playing} = assigns) do
+    assigns = assign(assigns, :replay_steps, replay_steps(assigns.view))
+    render_game(assigns)
+  end
+
+  def render(assigns), do: render_game(assigns)
+
+  defp replay_steps(view),
+    do: Replay.steps(view.last_turn_events, view.areas, view.players, view.map_name)
+
+  defp render_game(assigns) do
     ~H"""
     <.site_chrome current_account={@current_account} page_title={"Game #{@game_id}"}>
       <GameLayout.game_layout id="game-board" phx-hook=".FocusManager">
@@ -393,11 +431,12 @@ defmodule GlobalCombatWeb.GameLive do
             players={@view.players}
             viewer_number={@view.viewer_number}
             status={@status}
+            ended={@status == :playing and @view.ended}
             map_name={Map.get(@view, :map_name)}
           />
           <.chat
             messages={Map.get(@view, :messages, [])}
-            chat_text={@chat_text}
+            chat_form={@chat_form}
             logged_in={!!@current_account}
           />
         </:players>
@@ -423,6 +462,139 @@ defmodule GlobalCombatWeb.GameLive do
           }
         }
       </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".TurnReplay">
+        // Replays the last resolved turn from the JSON payload LiveView
+        // put in `data-steps` (`GameLive.Replay.steps/4`, already fog-filtered) —
+        // every play/step/back afterwards is pure client-side timing, no
+        // `pushEvent` round trip ("the hook owns the timing"). Mounted on a
+        // wrapper that renders every turn regardless of whether there's anything
+        // to replay, so `updated()` reliably fires exactly once per resolved
+        // turn (comparing `data-turn`) whether or not the *previous* turn had
+        // any visible events of its own.
+        //
+        // Delegates clicks from the wrapper rather than binding the buttons
+        // directly: the buttons themselves come and go (rendered only when
+        // `@steps != []`), but this element's `id` never does, so LiveView
+        // never remounts the hook — only a plain `updated()` patch.
+        export default {
+          mounted() {
+            this.current = -1
+            this.timer = null
+            this.seenTurn = this.el.dataset.turn
+            this.el.addEventListener("click", (e) => this.onClick(e))
+            this.render()
+          },
+
+          updated() {
+            const turn = this.el.dataset.turn
+            const isNewTurn = turn !== this.seenTurn
+            this.seenTurn = turn
+
+            if (!isNewTurn) {
+              // Some *other* part of this LiveView patched (a chat message, a
+              // player's status pill) and happened to touch this subtree —
+              // must not wipe a viewer's in-progress replay position.
+              this.render()
+              return
+            }
+
+            this.stop()
+            this.current = -1
+
+            if (!this.reducedMotion() && this.steps().length > 0) {
+              this.play()
+            } else {
+              this.render()
+            }
+          },
+
+          destroyed() {
+            this.stop()
+          },
+
+          onClick(e) {
+            if (e.target.closest("[data-replay-play]")) this.play()
+            else if (e.target.closest("[data-replay-back]")) { this.stop(); this.show(this.current - 1) }
+            else if (e.target.closest("[data-replay-forward]")) { this.stop(); this.show(this.current + 1) }
+          },
+
+          steps() {
+            return JSON.parse(this.el.dataset.steps)
+          },
+
+          reducedMotion() {
+            return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          },
+
+          play() {
+            this.stop()
+            this.show(-1)
+            this.timer = setInterval(() => {
+              if (this.current >= this.steps().length - 1) { this.stop(); return }
+              this.show(this.current + 1)
+            }, 900)
+          },
+
+          stop() {
+            if (this.timer) clearInterval(this.timer)
+            this.timer = null
+          },
+
+          show(index) {
+            const steps = this.steps()
+            this.current = Math.max(-1, Math.min(index, steps.length - 1))
+            this.render()
+          },
+
+          render() {
+            const steps = this.steps()
+            const animate = !this.reducedMotion()
+            const board = document.getElementById("world-map-replay")
+
+            if (board) {
+              board.classList.toggle("world-map-replay--js", animate)
+
+              board.querySelectorAll("[data-step]").forEach((el) => {
+                const step = Number(el.dataset.step)
+                el.classList.toggle("is-revealed", step <= this.current)
+
+                if (el.classList.contains("world-map-replay-pulse")) {
+                  // Landing on the capture step always shows *some* indicator —
+                  // reduced motion (media query, `app.css`) drops the animating
+                  // keyframe but keeps a static ring rather than suppressing it
+                  // outright, so "no animation" doesn't also mean "no signal".
+                  el.classList.remove("is-active")
+                  if (step === this.current) { void el.offsetWidth; el.classList.add("is-active") }
+                }
+              })
+            }
+
+            document.querySelectorAll("#turn-results-list [data-step]").forEach((el) => {
+              const step = Number(el.dataset.step)
+              el.classList.toggle("is-current", step === this.current)
+              if (step === this.current) el.setAttribute("aria-current", "step")
+              else el.removeAttribute("aria-current")
+            })
+
+            const counts = {}
+            for (let i = 0; i <= this.current; i++) {
+              (steps[i]?.counts || []).forEach(({area, value}) => { counts[area] = value })
+            }
+            Object.entries(counts).forEach(([area, value]) => {
+              const el = document.querySelector(`#territory-${area} .world-map-count`)
+              if (el?.firstChild) el.firstChild.textContent = value
+            })
+
+            const announce = document.getElementById("turn-replay-announce")
+            if (announce) announce.textContent = this.current >= 0 ? (steps[this.current]?.text || "") : ""
+
+            const back = this.el.querySelector("[data-replay-back]")
+            const forward = this.el.querySelector("[data-replay-forward]")
+            if (back) back.disabled = this.current <= -1
+            if (forward) forward.disabled = this.current >= steps.length - 1
+          }
+        }
+      </script>
     </.site_chrome>
     """
   end
@@ -437,19 +609,71 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   defp status_line(%{status: :playing} = assigns) do
+    assigns = assign(assigns, :ended_pill, ended_pill(assigns.view))
+
     ~H"""
-    <span class="font-semibold">Turn {@view.turn}</span>
-    <StatusPill.status_pill tone={if @view.ended, do: "done", else: "active"}>
-      {if @view.ended, do: "Ended", else: "In progress"}
+    <span class="heading-3 tabular-nums">
+      Turn {@view.turn}
+    </span>
+    <StatusPill.status_pill :if={!@view.ended} tone="active">In progress</StatusPill.status_pill>
+    <StatusPill.status_pill :if={@view.ended} tone={@ended_pill.tone}>
+      {@ended_pill.label}
     </StatusPill.status_pill>
-    <span :if={@view.is_fogged} class="text-text-muted">Fog of war</span>
+    <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
+    <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
+    """
+  end
+
+  # The pill used to be tone "done" (green, terminal-success) for every viewer once a
+  # game ended, so a losing player's own status strip told them they'd succeeded. It now reflects
+  # the *viewer's* outcome, matching `viewer_outcome/2` below — a spectator gets the neutral
+  # "Ended", a seated player gets their own Victory/Defeat.
+  defp ended_pill(view) do
+    case my_player(view) do
+      nil -> %{tone: "new", label: "Ended"}
+      %{place: 1} -> %{tone: "done", label: "Victory"}
+      _ -> %{tone: "blocked", label: "Defeat"}
+    end
+  end
+
+  # Play/back/forward for the last-turn replay, plus the live-region
+  # announcement span the `.TurnReplay` hook narrates each step into (picked up by
+  # `GameLayout`'s already-`aria-live="polite"` `:status` section — see that
+  # module's moduledoc). The wrapper itself renders every turn regardless of
+  # whether there's anything to replay, and only its *contents* are conditional —
+  # `data-turn` has to change on an element the hook stays mounted on the whole
+  # time for `updated/0` to reliably tell "a new turn resolved" from "this turn
+  # simply had no visible events", including the very next turn that does.
+  # Stepping/announcing here is otherwise plain client-side JS (no phx-click):
+  # "the hook owns the timing", not the server.
+  attr :turn, :integer, required: true
+  attr :steps, :list, required: true
+
+  defp turn_replay_controls(assigns) do
+    assigns = assign(assigns, :steps_json, Jason.encode!(assigns.steps))
+
+    ~H"""
+    <div
+      id="turn-replay-controls"
+      phx-hook=".TurnReplay"
+      data-turn={@turn}
+      data-steps={@steps_json}
+      class="flex items-center gap-[var(--space-2)]"
+    >
+      <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
+        <Button.button type="button" data-replay-play>Turn {@turn} results ▶</Button.button>
+        <Button.button type="button" intent="neutral" data-replay-back>◀ Step</Button.button>
+        <Button.button type="button" intent="neutral" data-replay-forward>Step ▶</Button.button>
+      </span>
+      <span id="turn-replay-announce" class="sr-only"></span>
+    </div>
     """
   end
 
   defp lobby(assigns) do
     ~H"""
     <div id="lobby" class="flex flex-col gap-[var(--space-4)]">
-      <h2 class="text-lg font-semibold">Game {@game_id}</h2>
+      <h2 class="heading-3">Game {@game_id}</h2>
       <ul id="lobby-players" class="flex flex-col gap-[var(--space-2)]">
         <li :for={p <- @view.players}>Player {p.number}: {p.name}</li>
       </ul>
@@ -494,12 +718,23 @@ defmodule GlobalCombatWeb.GameLive do
     <.game_over :if={@view.ended} view={@view} />
     <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
       <div class="w-full max-w-[60rem] xl:flex-1">
+        <form id="lens-form" phx-change="set_lens">
+          <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
+            <:option value="owner">Owner</:option>
+            <:option value="region">Region control</:option>
+            <:option value="frontier">Frontier</:option>
+          </SegmentedControl.segmented_control>
+        </form>
         <WorldMap.world_map
           map_name={@view.map_name}
           areas={@view.areas}
           players={@view.players}
           selected_area={@selected_area}
           target_area={@target_area}
+          lens={@lens}
+          viewer_number={@view.viewer_number}
+          interactive={!@view.ended}
+          replay_steps={@replay_steps}
         />
       </div>
       <div class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-64 xl:shrink-0 xl:flex-col">
@@ -507,14 +742,16 @@ defmodule GlobalCombatWeb.GameLive do
           map_name={@view.map_name}
           heading_level={if @view.ended, do: "h3", else: "h2"}
         />
+        <.your_orders_card :if={my_orders(@view) != []} orders={my_orders(@view)} />
         <.order_panel
-          :if={@selected_area}
+          :if={@selected_area && !@view.ended}
           view={@view}
           selected_area={@selected_area}
           target_area={@target_area}
           order_amount={@order_amount}
           heading_level={if @view.ended, do: "h3", else: "h2"}
         />
+        <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
       </div>
     </div>
     <.board_table areas={@view.areas} players={@view.players} />
@@ -553,7 +790,10 @@ defmodule GlobalCombatWeb.GameLive do
       aria-live="polite"
       class="mb-[var(--space-4)] rounded-[var(--radius-md)] border border-divider p-[var(--space-4)] flex flex-col gap-[var(--space-2)]"
     >
-      <h2 id="game-over-heading" class="text-lg font-semibold">
+      <h2
+        id="game-over-heading"
+        class="heading-3"
+      >
         Game Over<span :if={@winner}> — {@winner.name} wins</span>
       </h2>
       <p :if={@outcome} id="game-over-outcome" class="text-text-muted">{@outcome}</p>
@@ -572,13 +812,20 @@ defmodule GlobalCombatWeb.GameLive do
   # The viewer's own line under the banner; `nil` for a spectator.
   defp viewer_outcome(view, winner) do
     cond do
-      winner && winner.number == view.viewer_number -> "You win!"
-      me = my_player(view) -> "You finished in place #{me.place}."
+      winner && winner.number == view.viewer_number -> "You won."
+      me = my_player(view) -> "You placed #{ordinal(me.place)} of #{length(view.players)}."
       true -> nil
     end
   end
 
   defp my_player(view), do: Enum.find(view.players, &(&1.number == view.viewer_number))
+
+  # Player-facing ordinal ("1st place"), replacing the engine's bare `place` integer
+  # ("place 1") that used to leak straight into the UI — port of `Player.cs`'s `GetPlace()`.
+  defp ordinal(1), do: "1st"
+  defp ordinal(2), do: "2nd"
+  defp ordinal(3), do: "3rd"
+  defp ordinal(n), do: "#{n}th"
 
   # GIF-111's order-composition panel — LiveView equivalent of `Main.js`'s
   # `EntryForm`/`ActionMessage`/`AmountInput`/`ActionSubmit`. `:assign` (no target
@@ -643,6 +890,57 @@ defmodule GlobalCombatWeb.GameLive do
   defp order_submit_label(:assign), do: "Assign"
   defp order_submit_label(:transfer), do: "Transfer"
   defp order_submit_label(:attack), do: "Attack"
+
+  # The same queued transfers/attacks the board draws as arrows, worded as
+  # plain text — an "error prevention" review surface for all five queued orders at
+  # once without re-clicking every source territory, and the accessible equivalent of
+  # the arrows for anyone who can't see the board (an arrow's own `aria-label` covers
+  # it in isolation, but this list is what makes "did I queue everything I meant to"
+  # answerable in one place). `WorldMap.order_label/3` words each line so this list and
+  # an arrow's `aria-label` can never describe the same order differently.
+  # `view.areas` already dropped every non-owner's `order` to `nil` (`PlayerView`'s
+  # fog-of-war boundary), so this needs no owner check of its own.
+  defp my_orders(view) do
+    for area <- view.areas, area.order do
+      target = find_area(view, area.order.target)
+      WorldMap.order_label(area.name, area.order, target.name)
+    end
+  end
+
+  attr :orders, :list, required: true
+
+  defp your_orders_card(assigns) do
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>Your orders</:header>
+      <ul id="your-orders" class="flex flex-col gap-[var(--space-1)] text-sm">
+        <li :for={order <- @orders}>{order}</li>
+      </ul>
+    </Card.card>
+    """
+  end
+
+  # The accessible equivalent of the board's replay arrows/counts — every
+  # `GameLive.Replay.steps/4` line as ordinary, always-present text next to the
+  # board (works with no JS, and is exactly what `prefers-reduced-motion` falls
+  # back to). The `.TurnReplay` hook toggles `aria-current`/`.is-current` on each
+  # `<li>` as the sighted replay steps through them; nothing here depends on it.
+  attr :turn, :integer, required: true
+  attr :steps, :list, required: true
+
+  defp turn_results(assigns) do
+    ~H"""
+    <Card.card class="min-w-[16rem]">
+      <:header>Turn {@turn} results</:header>
+      <ol
+        id="turn-results-list"
+        class="flex flex-col gap-[var(--space-1)] text-sm list-decimal pl-[var(--space-4)]"
+      >
+        <li :for={step <- @steps} data-step={step.index}>{step.text}</li>
+      </ol>
+    </Card.card>
+    """
+  end
 
   # Player-facing rule info (GIF-103): every region's control bonus, sourced
   # from the same `MapInfo.regions/1` the board's areas/adjacency already
@@ -733,6 +1031,10 @@ defmodule GlobalCombatWeb.GameLive do
   attr :viewer_number, :any, required: true
   attr :status, :atom, required: true
 
+  attr :ended, :boolean,
+    default: false,
+    doc: "swaps the Thinking/Done roster for final standings once the game has ended"
+
   attr :map_name, :atom,
     default: nil,
     doc: "the game's map, once known — in play each player's board colour gets a legend dot"
@@ -750,11 +1052,17 @@ defmodule GlobalCombatWeb.GameLive do
           />
           <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
         </span>
-        <span class="flex items-center gap-[var(--space-2)]">
+        <span :if={@ended} class="flex items-center gap-[var(--space-2)]">
+          <span :if={p.place == 1} aria-hidden="true">🏆</span>
+          <span class="text-text-muted">{ordinal(p.place)}</span>
+          <span class="text-text-muted">{p.armies} ({p.areas})</span>
+          <span class="text-text-muted">Score {p.score}</span>
+        </span>
+        <span :if={!@ended} class="flex items-center gap-[var(--space-2)]">
           <span :if={!p.eliminated && p.armies} class="text-text-muted">
             {p.armies} ({p.areas})
           </span>
-          <span :if={p.eliminated} class="text-text-muted">place {p.place}</span>
+          <span :if={p.eliminated} class="text-text-muted">{ordinal(p.place)}</span>
           <StatusPill.status_pill :if={!p.eliminated} tone={if p.done, do: "done", else: "waiting"}>
             {if p.done, do: "Done", else: "Thinking"}
           </StatusPill.status_pill>
@@ -773,23 +1081,30 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   attr :messages, :list, required: true
-  attr :chat_text, :string, required: true
+  attr :chat_form, Phoenix.HTML.Form, required: true
   attr :logged_in, :boolean, required: true
 
   defp chat(assigns) do
     ~H"""
     <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)]">
-      <form :if={@logged_in} phx-submit="send_chat" class="flex gap-[var(--space-2)]">
-        <input
-          type="text"
-          name="text"
-          value={@chat_text}
-          placeholder="Send a message."
-          class="flex-1 rounded-[var(--radius-sm)] border border-border px-[var(--space-2)]"
+      <.form
+        :if={@logged_in}
+        for={@chat_form}
+        id="chat-form"
+        phx-submit="send_chat"
+        class="flex flex-col gap-[var(--space-2)]"
+      >
+        <Input.input
+          id="chat-message"
+          field={@chat_form[:text]}
+          label="Message"
+          placeholder="Send a message"
+          class="min-w-0"
         />
-        <Button.button type="submit">Send</Button.button>
-      </form>
+        <Button.button type="submit" intent="neutral" class="self-end">Send</Button.button>
+      </.form>
       <ul aria-live="polite" class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
+        <li :if={@messages == []} class="text-text-muted">No messages yet.</li>
         <li :for={m <- @messages}>
           <span class="font-semibold">{m.source_name}:</span> {m.text}
         </li>

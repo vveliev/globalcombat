@@ -88,7 +88,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       sync_game(game_id, bob_view)
 
       assert has_element?(alice_view, "#game-over-heading", "Game Over — Alice wins")
-      assert has_element?(alice_view, "#game-over-outcome", "You win!")
+      assert has_element?(alice_view, "#game-over-outcome", "You won.")
       # Numbering is a `list-decimal` `::marker` now, not DOM text.
       assert has_element?(alice_view, "#game-over-standings li", "Alice")
       assert has_element?(alice_view, "#game-over-standings li", "Bob")
@@ -97,8 +97,41 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "button", "End Turn")
       refute has_element?(alice_view, "button", "Force Turn")
 
-      assert has_element?(bob_view, "#game-over-outcome", "You finished in place 2.")
+      # No green "Ended"/"Done" success signal for the loser, and the winner is
+      # named through the finished roster's rank marker, not the elimination "place N" path.
+      assert render(alice_view) =~ "Victory"
+      refute render(alice_view) =~ "Defeat"
+      assert render(bob_view) =~ "Defeat"
+
+      assert has_element?(bob_view, "#game-over-outcome", "You placed 2nd of 2.")
       refute has_element?(bob_view, "button", "Force Turn")
+    end
+
+    test "the finished roster shows rank, totals and score instead of the elimination path",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+
+      html = render(alice_view)
+
+      # The winner is named through the roster's ordinal rank, not "place 1" — the
+      # elimination-branch label that used to hide the winner's own totals.
+      assert html =~ "1st"
+      assert html =~ "2nd"
+      refute html =~ "place 1"
+      refute html =~ "place 2"
+
+      # Totals stay visible for every player once the game ends, including the winner
+      # (previously hidden behind the eliminated-player branch), and the final score
+      # (`Engine.Game.end_game/1`'s `gen_score`) now reaches the UI.
+      assert html =~ "Score"
+      refute html =~ "Thinking"
+      refute has_element?(alice_view, "li span", "Done")
     end
 
     test "a spectator sees the banner without a personal outcome line", %{conn: conn1} do
@@ -109,6 +142,32 @@ defmodule GlobalCombatWeb.GameLiveTest do
       {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
       assert has_element?(spectator, "#game-over-heading", "Game Over — Alice wins")
       refute has_element?(spectator, "#game-over-outcome")
+    end
+
+    test "clicking a territory on a finished game is a no-op — no order panel, no focusable/clickable territory",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+
+      # Alice (the winner) owns area 1 already, so this is exactly the click this
+      # test covers: a live seat clicking one of its own, still-owned territories
+      # after the game ended.
+      html = render_click(alice_view, "select_area", %{"area" => "1"})
+
+      refute html =~ "Assign new armies or select a target area"
+      refute has_element?(alice_view, "#order-form")
+
+      # Territories stop being an interactive control at all, not just an
+      # unresponsive one — no role/tabindex/click/keyboard hook survives.
+      refute has_element?(alice_view, ~s(g#territory-1[role]))
+      refute has_element?(alice_view, ~s(g#territory-1[tabindex]))
+      refute has_element?(alice_view, ~s(g#territory-1[phx-click]))
+      refute has_element?(alice_view, ~s(g#territory-1[phx-hook]))
     end
   end
 
@@ -166,6 +225,34 @@ defmodule GlobalCombatWeb.GameLiveTest do
     render_submit(alice_view, "send_chat", %{"text" => "good luck!"})
 
     assert wait_for(bob_view, "good luck!") =~ "Alice"
+  end
+
+  test "the chat input carries a label and stays inside the players rail (WCAG 3.3.2)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    # A placeholder alone isn't an accessible name (WCAG 3.3.2) — the input
+    # needs a real <label>.
+    assert has_element?(alice_view, "label[for=chat-message]", "Message")
+
+    # The rail is a fixed `--size-rail` (15rem); without `min-w-0` the input's
+    # intrinsic content width won the flex layout and pushed the Send button
+    # past the rail's right edge. Assert the class survives on the
+    # rendered <input>, not just in the component source.
+    assert has_element?(alice_view, "input#chat-message.min-w-0")
+
+    # The exact-match selector also proves the placeholder has no trailing
+    # period (WCAG 3.3.2 phrasing nit fixed alongside the layout bug).
+    assert has_element?(alice_view, "input#chat-message[placeholder='Send a message']")
+  end
+
+  test "an empty chat log shows a muted empty state instead of nothing",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, "li.text-text-muted", "No messages yet.")
   end
 
   test "one player marking done shows up on the other session without a full reload (GameHub.SetDone -> setDone)",
@@ -471,6 +558,131 @@ defmodule GlobalCombatWeb.GameLiveTest do
                alice_view,
                ~r/<th scope="row">Alaska<\/th>\s*<td>Alice<\/td>\s*<td>5<\/td>/
              )
+    end
+  end
+
+  describe "pending-orders overlay" do
+    test "a queued attack draws a labelled, clickable arrow that re-opens the order panel", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(
+               alice_view,
+               ~s(g.world-map-order[data-area="1"][aria-label="Attack #{area_two_name} with 4 armies from Alaska"])
+             )
+
+      assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
+
+      # The panel closed on submit — clicking the arrow re-selects area 1, same as
+      # clicking the territory itself, so the player can review/edit the order
+      # instead of only being able to see that it exists.
+      refute has_element?(alice_view, "#order-form")
+      html = render_click(alice_view, "select_area", %{"area" => "1"})
+      assert html =~ "Assign new armies or select a target area"
+    end
+
+    test "a queued transfer draws the primary-hued arrow, not the attack/danger one", %{
+      conn: conn1
+    } do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--transfer))
+      refute has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
+    end
+
+    test "an assign-only order (no target) draws no arrow", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_submit(alice_view, "submit_order", %{"amount" => "5"})
+      sync_game(game_id, alice_view)
+
+      refute has_element?(alice_view, "g.world-map-order")
+    end
+
+    test "the viewer's own orders are also listed as text in a Your orders card", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      refute has_element?(alice_view, "#your-orders")
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(
+               alice_view,
+               "#your-orders li",
+               "Attack #{area_two_name} with 4 armies from Alaska"
+             )
+    end
+
+    test "an opponent never sees another player's queued order — not as an arrow, not in their own Your orders card",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      # Positive control: Alice, the order's owner, does see it — so the assertions
+      # below are actually exercising the fog boundary, not a broken feature.
+      assert has_element?(alice_view, "g.world-map-order")
+
+      refute render(bob_view) =~ "world-map-order"
+      refute has_element?(bob_view, "#your-orders")
+    end
+
+    test "the arrow disappears once the turn resolves", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+      sync_game(game_id, alice_view)
+
+      assert has_element?(alice_view, "g.world-map-order")
+
+      render_click(alice_view, "done")
+      render_click(bob_view, "done")
+      wait_for(alice_view, "Turn 2")
+
+      refute has_element?(alice_view, "g.world-map-order")
+      refute has_element?(alice_view, "#your-orders")
     end
   end
 
@@ -789,8 +1001,64 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       render_click(bob_view, "quit")
 
-      assert wait_for(alice_view, "place") =~ "place"
+      assert wait_for(alice_view, "Game Over") =~ "Game Over"
       assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+    end
+  end
+
+  describe "last-turn replay layer" do
+    # Area 1 (Alaska) -> 3 (Alberta) is Alice's own owned-adjacent pair (transfer
+    # mode, see the click-to-order describe block above) — deterministic (no
+    # combat RNG), unlike an attack, so the resulting event and its army-count
+    # math are exact.
+    test "a resolved transfer plays back as an arrow, a results line, and replay controls",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+      # Every area starts with 5 armies (`Server.new_engine/1`) and a transfer always
+      # leaves at least 1 behind (`Engine.set_transfer/3`), so 4 is the most this
+      # transfer can move — matching the order panel's own prefill for this exact
+      # selection.
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+
+      render_click(alice_view, "done")
+      render_click(bob_view, "done")
+
+      html = wait_for(alice_view, "Turn 2")
+
+      assert html =~ "Alaska sent 4 armies to Alberta."
+      assert has_element?(alice_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
+      assert has_element?(alice_view, ~s(line.world-map-replay-arrow--transfer[data-step="0"]))
+      assert has_element?(alice_view, "button", "Turn 2 results ▶")
+
+      # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name at
+      # compile time, same as `.FocusManager` (see the focus-management test above) —
+      # asserting the literal dot-name here would never match the real output.
+      assert html =~
+               ~r/id="turn-replay-controls"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.TurnReplay"/
+
+      # This game isn't fogged (`is_fogged: false` default) — Bob's own results
+      # list, independently rendered from his own `PlayerView`, carries the same
+      # line rather than being empty or diverging.
+      assert wait_for(bob_view, "Alaska sent 4 armies to Alberta.") =~
+               "Alaska sent 4 armies to Alberta."
+    end
+
+    test "a turn with no orders queued shows neither replay controls nor a results list",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "done")
+      render_click(bob_view, "done")
+
+      wait_for(alice_view, "Turn 2")
+
+      refute has_element?(alice_view, "#turn-results-list")
+      refute has_element?(alice_view, "button", "Turn 2 results ▶")
     end
   end
 end

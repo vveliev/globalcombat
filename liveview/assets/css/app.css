@@ -1,13 +1,19 @@
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 
+/* fonts.css must be imported above the Tailwind entrypoint below: Tailwind
+   expands that entrypoint in place into thousands of lines of generated
+   output, and CSS requires @import to precede all other rules — an
+   @import url(...) landing after regular rules is invalid and browsers
+   silently drop it, which meant every brand's Google Fonts request never
+   fired despite the font-family wiring being correct. */
+@import "../vendor/design-boutique/fonts.css";
 @import "tailwindcss" source(none);
 
 /* design-boutique Layer 1 — the shared token source (generated, do not edit;
    see assets/vendor/design-boutique/PROVENANCE.md): runtime CSS variables for
    every theme (switched by `data-theme`) plus the Tailwind v4 @theme fragment
    mapping them to utilities (bg-primary, text-text-muted, border-border, …). */
-@import "../vendor/design-boutique/fonts.css";
 @import "../vendor/design-boutique/variables.css";
 @import "../vendor/design-boutique/theme.css";
 
@@ -113,6 +119,23 @@
 
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* Layer 3 shell roots and the app's heading-weight elements (Card header,
+   GameLive's lobby h1/game-over h2/turn number) each repeated the same
+   var()-heavy arbitrary-value strings verbatim; these two utilities are
+   the single source of truth for that pairing so every call site tracks
+   the token names together. */
+@utility heading-3 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: var(--heading-3);
+}
+
+@utility body-text {
+  font-family: var(--font-body);
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-leading);
+}
 
 /* This file is for your main application CSS */
 
@@ -276,8 +299,11 @@
 }
 
 .world-map-territory {
-  cursor: pointer;
   outline: none;
+}
+
+.world-map-territory--interactive {
+  cursor: pointer;
 }
 
 .world-map-territory:focus-visible {
@@ -299,6 +325,36 @@
 .world-map-territory[data-fog] .world-map-area {
   fill: url(#gc-fog);
   stroke-opacity: 0.25;
+}
+
+/* :frontier lens: interior areas keep the true owner fill, just
+   dimmed, so the contact line (full strength) reads at a glance without
+   losing "who owns the interior" entirely. */
+.world-map-territory[data-frontier="dim"] .world-map-area {
+  opacity: 0.4;
+}
+
+/* :region lens: a decorative bonus readout per region centroid —
+   aria-hidden, since `region_bonuses/1`'s panel and the sr-only board table
+   already carry the same numbers accessibly. */
+.world-map-region-label {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--color-text-muted);
+  paint-order: stroke;
+  stroke: var(--color-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* :frontier lens: the delta against the strongest adjacent
+   opposing stack, printed next to the count — secondary to it, so it takes
+   the muted text token rather than the count's own white-on-black outline. */
+.world-map-delta {
+  fill: var(--color-text-muted);
+  font-weight: 600;
 }
 
 /* Elements map: a per-element texture over the owner fill (patterns in
@@ -367,6 +423,135 @@
   user-select: none;
 }
 
+/* Pending-orders overlay — one arrow per owned area with a queued
+   transfer/attack, label-anchor to label-anchor. Attack borrows the same danger
+   hue and marching-dashes keyframe as `.world-map-highlight--target` so "this is a
+   hostile move" reads consistently everywhere the board uses it; transfer gets the
+   primary hue instead since it's a friendly reassignment, not a threat. */
+.world-map-order {
+  cursor: pointer;
+  outline: none;
+}
+
+.world-map-order:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Invisible fat stroke riding under the thin visible one so the arrow has a
+   pointer/touch hit target wider than its 2px visible line. */
+.world-map-order-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+}
+
+.world-map-order-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 5 3;
+  animation: world-map-march 1.2s linear infinite;
+  pointer-events: none;
+}
+
+.world-map-order-line--attack {
+  stroke: var(--color-danger);
+}
+
+.world-map-order-line--transfer {
+  stroke: var(--color-primary);
+}
+
+.gc-order-arrowhead--attack {
+  fill: var(--color-danger);
+}
+
+.gc-order-arrowhead--transfer {
+  fill: var(--color-primary);
+}
+
+.world-map-order-amount {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--white);
+  stroke: var(--black);
+  stroke-width: 2.5px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The last-turn replay layer. Arrows are visible by default (opacity
+   1) so a no-JS render, or a JS one that never adds `.world-map-replay--js`
+   (prefers-reduced-motion), shows the whole turn at once — the "reduced motion:
+   no animation, render everything statically" fallback the issue calls for.
+   Only once the `.TurnReplay` hook opts into animating does `--js` gate
+   unrevealed steps down to invisible until the hook reveals them stepwise. */
+.world-map-replay {
+  pointer-events: none;
+}
+
+.world-map-replay-arrow {
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 1;
+  transition: opacity 0.25s ease;
+}
+
+.world-map-replay--js .world-map-replay-arrow:not(.is-revealed) {
+  opacity: 0;
+}
+
+.world-map-replay-arrow--attack {
+  stroke: var(--color-danger);
+  marker-end: url(#gc-replay-arrowhead-attack);
+}
+
+.world-map-replay-arrow--transfer {
+  stroke: var(--color-primary);
+  marker-end: url(#gc-replay-arrowhead-transfer);
+}
+
+.world-map-replay-arrowhead--attack {
+  fill: var(--color-danger);
+}
+
+.world-map-replay-arrowhead--transfer {
+  fill: var(--color-primary);
+}
+
+/* A captured area's brief halo pulse — invisible until the hook lands on that
+   step and adds `.is-active`; removing then re-adding the class (with a forced
+   reflow, see the `.TurnReplay` hook's `render()`) lets it replay identically
+   every time that step is revisited. Animates under normal motion, holds as a
+   static ring under `prefers-reduced-motion` (below) — reduced motion opts out
+   of the animation, not the signal itself. */
+.world-map-replay-pulse {
+  opacity: 0;
+}
+
+.world-map-replay-pulse.is-active {
+  animation: world-map-replay-pulse 700ms ease-out;
+}
+
+@keyframes world-map-replay-pulse {
+  0% {
+    opacity: 1;
+    stroke-width: 5;
+  }
+  100% {
+    opacity: 0;
+    stroke-width: 14;
+  }
+}
+
+/* The accessible "Turn N results" list next to the board — highlights whichever
+   step the replay (or reduced-motion-safe manual stepping) is currently on. */
+#turn-results-list [data-step].is-current {
+  font-weight: 700;
+}
+
 /* Player-list legend dot, same tokens as the territory fills. */
 .world-map-swatch {
   display: inline-block;
@@ -385,5 +570,20 @@
 
   .world-map-highlight--target {
     animation: none;
+  }
+
+  .world-map-order-line {
+    animation: none;
+  }
+
+  .world-map-replay-arrow {
+    transition: none;
+  }
+
+  /* The animating keyframe is what "reduced motion" opts out of, not the signal
+     itself — landing on a capture step still shows a static ring. */
+  .world-map-replay-pulse.is-active {
+    animation: none;
+    opacity: 1;
   }
 }

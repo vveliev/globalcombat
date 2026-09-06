@@ -125,6 +125,7 @@ defmodule GlobalCombat.Games.Supervisor do
       rehydrate_from: game.serialized,
       turn_length_minutes: game.turn_length,
       last_turn_time: game.last_turn_time,
+      last_turn_events: game.last_turn_events,
       callers: [self() | Process.get(:"$callers", [])]
     ]
 
