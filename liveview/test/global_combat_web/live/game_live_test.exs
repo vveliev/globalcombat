@@ -365,9 +365,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
     # LiveView tags a function component's root element with `phx-r=""` (visible
     # throughout this render, e.g. the outer `<div phx-r="" id="game-board" ...>`)
-    # ahead of its own attributes — `board_table/1`'s `<table>` is one such root,
-    # so the attribute order isn't `<table class="sr-only">` verbatim.
-    assert html =~ ~r/<table[^>]*class="sr-only"[^>]*>/
+    # ahead of its own attributes — `board_table/1`'s wrapping `<div>` is one such
+    # root, so the attribute order isn't `<div class="sr-only overflow-hidden">`
+    # verbatim.
+    #
+    # `sr-only` lives on the wrapping div, not the `<table>` itself — see
+    # `board_table/1`'s comment for why, and the real-browser
+    # verification that backs it.
+    assert html =~ ~r/<div[^>]*class="sr-only overflow-hidden"[^>]*>\s*<table>/
     assert html =~ ~r/<th scope="row">#{owned_by_alice.name}<\/th>\s*<td>Alice<\/td>/
 
     [first_neighbor | _] = owned_by_alice.adjacent
@@ -1001,6 +1006,62 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert wait_for(alice_view, "Game Over") =~ "Game Over"
       assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+    end
+  end
+
+  describe "last-turn replay layer" do
+    # Area 1 (Alaska) -> 3 (Alberta) is Alice's own owned-adjacent pair (transfer
+    # mode, see the click-to-order describe block above) — deterministic (no
+    # combat RNG), unlike an attack, so the resulting event and its army-count
+    # math are exact.
+    test "a resolved transfer plays back as an arrow, a results line, and replay controls",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+      # Every area starts with 5 armies (`Server.new_engine/1`) and a transfer always
+      # leaves at least 1 behind (`Engine.set_transfer/3`), so 4 is the most this
+      # transfer can move — matching the order panel's own prefill for this exact
+      # selection.
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      render_submit(alice_view, "submit_order", %{"amount" => "4"})
+
+      render_click(alice_view, "done")
+      render_click(bob_view, "done")
+
+      html = wait_for(alice_view, "Turn 2")
+
+      assert html =~ "Alaska sent 4 armies to Alberta."
+      assert has_element?(alice_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
+      assert has_element?(alice_view, ~s(line.world-map-replay-arrow--transfer[data-step="0"]))
+      assert has_element?(alice_view, "button", "Turn 2 results ▶")
+
+      # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name at
+      # compile time, same as `.FocusManager` (see the focus-management test above) —
+      # asserting the literal dot-name here would never match the real output.
+      assert html =~
+               ~r/id="turn-replay-controls"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.TurnReplay"/
+
+      # This game isn't fogged (`is_fogged: false` default) — Bob's own results
+      # list, independently rendered from his own `PlayerView`, carries the same
+      # line rather than being empty or diverging.
+      assert wait_for(bob_view, "Alaska sent 4 armies to Alberta.") =~
+               "Alaska sent 4 armies to Alberta."
+    end
+
+    test "a turn with no orders queued shows neither replay controls nor a results list",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "done")
+      render_click(bob_view, "done")
+
+      wait_for(alice_view, "Turn 2")
+
+      refute has_element?(alice_view, "#turn-results-list")
+      refute has_element?(alice_view, "button", "Turn 2 results ▶")
     end
   end
 end
