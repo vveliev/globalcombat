@@ -27,4 +27,37 @@ defmodule GlobalCombatWeb.Components.SiteChromeTest do
     assert html =~ ~r/<summary[^>]*class="[^"]*\[&::-webkit-details-marker\]:hidden[^"]*"/
     refute html =~ ~r/<details[^>]*\sopen/
   end
+
+  describe "active sidebar link" do
+    # `aria-current="page"` is rendered server-side from the request path (via
+    # `GlobalCombatWeb.Plugs.CurrentPath` on controller pages) so it survives a
+    # LiveView patch and needs no client script.
+    test "the link matching the request path carries aria-current=page, others don't", %{
+      conn: conn
+    } do
+      html = conn |> get(~p"/") |> html_response(200)
+      doc = LazyHTML.from_document(html)
+
+      assert doc |> LazyHTML.query(~s(nav a[href="/"][aria-current="page"])) |> Enum.any?()
+      refute doc |> LazyHTML.query(~s(nav a[href="/Game-Manual"][aria-current])) |> Enum.any?()
+
+      html = conn |> get(~p"/Game-Manual") |> html_response(200)
+      doc = LazyHTML.from_document(html)
+
+      assert doc
+             |> LazyHTML.query(~s(nav a[href="/Game-Manual"][aria-current="page"]))
+             |> Enum.any?()
+
+      refute doc |> LazyHTML.query(~s(nav a[href="/"][aria-current])) |> Enum.any?()
+    end
+  end
+
+  test "the topbar exposes the theme toggle", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+    doc = LazyHTML.from_document(html)
+
+    for theme <- ~w(system light dark) do
+      assert doc |> LazyHTML.query(~s(button[data-phx-theme="#{theme}"])) |> Enum.any?()
+    end
+  end
 end
