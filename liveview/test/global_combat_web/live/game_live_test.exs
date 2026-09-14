@@ -596,6 +596,117 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  describe "order panel amount controls" do
+    # Same deal as the click-to-order block above: Alice owns area 1 (5 armies,
+    # 25 unassigned), area 3 is hers and adjacent, area 2 is Bob's and adjacent.
+
+    test "the amount field asks phones for the numeric keypad", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+
+      assert has_element?(
+               alice_view,
+               ~s(#order-amount[inputmode="numeric"][pattern="[0-9]*"][autocomplete="off"][enterkeyhint="done"])
+             )
+
+      assert has_element?(
+               alice_view,
+               ~s(#order-stepper button[phx-click="step_amount"][phx-value-delta="-1"])
+             )
+
+      assert has_element?(
+               alice_view,
+               ~s(#order-stepper button[phx-click="step_amount"][phx-value-delta="1"])
+             )
+
+      assert has_element?(alice_view, ~s(#order-stepper button[phx-click="max_amount"]), "Max")
+    end
+
+    test "step_amount moves the draft by the delta and never below zero, without touching the game",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, before} = Games.player_view(game_id, alice.id)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      assert has_element?(alice_view, ~s(#order-amount[value="25"]))
+
+      render_click(alice_view, "step_amount", %{"delta" => "1"})
+      assert has_element?(alice_view, ~s(#order-amount[value="26"]))
+
+      render_click(alice_view, "step_amount", %{"delta" => "-30"})
+      assert has_element?(alice_view, ~s(#order-amount[value="0"]))
+
+      render_click(alice_view, "step_amount", %{"delta" => "-1"})
+      assert has_element?(alice_view, ~s(#order-amount[value="0"]))
+
+      # The panel stays open and the engine saw nothing: no pool spent, no army moved.
+      assert has_element?(alice_view, "#order-panel", "Assign new armies or select a target area")
+      assert Games.player_view(game_id, alice.id) == {:playing, before}
+    end
+
+    test "step_amount starts from a typed amount, not the prefill", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      alice_view |> form("#order-form", %{"amount" => "7"}) |> render_change()
+      render_click(alice_view, "step_amount", %{"delta" => "1"})
+
+      assert has_element?(alice_view, ~s(#order-amount[value="8"]))
+    end
+
+    test "max_amount fills the unassigned pool in assign mode and the source's armies otherwise, without touching the game",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, before} = Games.player_view(game_id, alice.id)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "step_amount", %{"delta" => "-20"})
+      render_click(alice_view, "max_amount", %{})
+      assert has_element?(alice_view, ~s(#order-amount[value="25"]))
+
+      # Transfer: the prefill is armies - 1, Max is the whole stack.
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
+      render_click(alice_view, "max_amount", %{})
+      assert has_element?(alice_view, ~s(#order-amount[value="5"]))
+
+      render_click(alice_view, "cancel_order", %{})
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      render_click(alice_view, "max_amount", %{})
+      assert has_element?(alice_view, "#order-panel", "Attack")
+      assert has_element?(alice_view, ~s(#order-amount[value="5"]))
+
+      assert Games.player_view(game_id, alice.id) == {:playing, before}
+    end
+  end
+
+  test "the map lens control sits in the status strip, not the board", %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, ~s(section[aria-label="Game status"] #lens-form))
+    refute has_element?(alice_view, "#game-board > main #lens-form")
+
+    render_change(alice_view, "set_lens", %{"lens" => "region"})
+
+    assert has_element?(
+             alice_view,
+             ~s(section[aria-label="Game status"] #lens-form input[value="region"][checked])
+           )
+  end
+
   describe "pending-orders overlay" do
     test "a queued attack draws a labelled, clickable, keyboard-reachable arrow", %{
       conn: conn1

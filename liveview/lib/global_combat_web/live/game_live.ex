@@ -337,6 +337,31 @@ defmodule GlobalCombatWeb.GameLive do
 
   def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
 
+  # The amount field, stepper and Max only ever rewrite the draft `order_amount`;
+  # nothing reaches the game server until `submit_order`, which validates as before.
+  # `change_amount` keeps the draft in step with what was typed, so a step or Max
+  # after typing starts from the typed number rather than the prefill.
+  def handle_event("change_amount", %{"amount" => amount_str}, socket),
+    do: {:noreply, assign(socket, :order_amount, amount_str)}
+
+  def handle_event("step_amount", %{"delta" => delta_str}, socket) do
+    case Integer.parse(to_string(delta_str)) do
+      {delta, ""} ->
+        amount = max(parse_amount(socket.assigns.order_amount), 0) + delta
+        {:noreply, assign(socket, :order_amount, to_string(max(amount, 0)))}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("max_amount", _params, socket) do
+    case max_order_amount(socket.assigns) do
+      nil -> {:noreply, socket}
+      amount -> {:noreply, assign(socket, :order_amount, to_string(max(amount, 0)))}
+    end
+  end
+
   # The map lens is a per-viewer display preference, not game state —
   # it lives only in this socket's assigns, same as :selected_area/:target_area,
   # never touching `PlayerView`.
@@ -394,6 +419,22 @@ defmodule GlobalCombatWeb.GameLive do
       Games.attack(socket.assigns.game_id, account.id, source, target, amount)
     end
   end
+
+  # Assign mode tops out at the viewer's unassigned pool; transfer and attack at
+  # the source's whole stack (the engine clamps to armies - 1 when it resolves).
+  defp max_order_amount(%{status: :playing, selected_area: selected} = assigns)
+       when not is_nil(selected) do
+    view = assigns.view
+
+    case {find_area(view, selected), assigns.target_area, my_player(view)} do
+      {nil, _target, _me} -> nil
+      {_source, nil, nil} -> nil
+      {_source, nil, me} -> me.unassigned_armies
+      {source, _target, _me} -> source.armies
+    end
+  end
+
+  defp max_order_amount(_assigns), do: nil
 
   defp find_area(view, number), do: Enum.find(view.areas, &(&1.number == number))
 
@@ -480,6 +521,13 @@ defmodule GlobalCombatWeb.GameLive do
       >
         <:status>
           <span id="game-status">{status_line(assigns)}</span>
+          <form :if={@status == :playing} id="lens-form" phx-change="set_lens">
+            <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
+              <:option value="owner">Owner</:option>
+              <:option value="region">Region control</:option>
+              <:option value="frontier">Frontier</:option>
+            </SegmentedControl.segmented_control>
+          </form>
         </:status>
 
         <:board>
@@ -798,13 +846,6 @@ defmodule GlobalCombatWeb.GameLive do
     />
     <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
       <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] xl:flex-1">
-        <form id="lens-form" phx-change="set_lens">
-          <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
-            <:option value="owner">Owner</:option>
-            <:option value="region">Region control</:option>
-            <:option value="frontier">Frontier</:option>
-          </SegmentedControl.segmented_control>
-        </form>
         <figure class="m-0 w-full">
           <WorldMap.world_map
             map_name={@view.map_name}
@@ -996,7 +1037,12 @@ defmodule GlobalCombatWeb.GameLive do
     ~H"""
     <Card.card id="order-panel" class="min-w-[16rem]">
       <:header>{order_panel_title(@mode, @target)}</:header>
-      <form id="order-form" phx-submit="submit_order" class="flex flex-col gap-[var(--space-3)]">
+      <form
+        id="order-form"
+        phx-change="change_amount"
+        phx-submit="submit_order"
+        class="flex flex-col gap-[var(--space-3)]"
+      >
         <Input.input
           id="order-amount"
           name="amount"
@@ -1004,7 +1050,34 @@ defmodule GlobalCombatWeb.GameLive do
           min="0"
           label="Armies"
           value={@order_amount}
+          inputmode="numeric"
+          pattern="[0-9]*"
+          autocomplete="off"
+          enterkeyhint="done"
         />
+        <div id="order-stepper" class="flex flex-wrap gap-[var(--space-2)]">
+          <Button.button
+            type="button"
+            intent="neutral"
+            phx-click="step_amount"
+            phx-value-delta="-1"
+            aria-label="One army fewer"
+          >
+            −
+          </Button.button>
+          <Button.button
+            type="button"
+            intent="neutral"
+            phx-click="step_amount"
+            phx-value-delta="1"
+            aria-label="One army more"
+          >
+            +
+          </Button.button>
+          <Button.button type="button" intent="neutral" phx-click="max_amount">
+            Max
+          </Button.button>
+        </div>
         <div class="flex flex-wrap gap-[var(--space-2)]">
           <Button.button type="submit" intent="primary">
             {order_submit_label(@mode)}
