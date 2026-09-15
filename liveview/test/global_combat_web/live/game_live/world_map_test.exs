@@ -6,6 +6,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
 
   alias GlobalCombatWeb.GameLive.WorldMap
 
+  # The colocated-hook rewrite (`Phoenix.LiveView.ColocatedHook`) only fires
+  # for a static `phx-hook="..."` string; it qualifies the leading-dot name
+  # with the defining module. Any test asserting the rendered `phx-hook`
+  # value should compare against this, not the raw ".TerritoryKeyboard".
+  @territory_keyboard_hook "#{inspect(WorldMap)}.TerritoryKeyboard"
+
   # Australia on the :original map (region 6, bonus 2): a small, real region
   # (areas 39-42) rather than a synthetic one, so this exercises the actual
   # `MapInfo.areas/1` region grouping alongside the fill logic.
@@ -49,6 +55,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
     # unresponsive `role="button"`. This covers `interactive={false}` actually
     # dropping the interactive attributes; `GameLiveTest` covers the
     # end-to-end "clicking one after Game Over is a no-op" behaviour.
+    #
+    # `phx-hook` itself must stay static (`.TerritoryKeyboard` unconditionally)
+    # so `Phoenix.LiveView.ColocatedHook`'s compile-time rewrite can rename it
+    # to the manifest key — that rewrite only fires for a literal string
+    # attribute, so `phx-hook={@interactive && ".TerritoryKeyboard"}` would
+    # ship the raw ".TerritoryKeyboard" to the browser and never match the
+    # manifest (LiveView logs "unknown hook found for '.TerritoryKeyboard'"
+    # and the keyboard hook never mounts). Interactivity is gated instead via
+    # `data-interactive`, read by the hook itself on every keydown.
 
     test "interactive (default) territories are focusable role=button click/keyboard targets" do
       assigns = %{areas: [board_area(1)], players: players()}
@@ -63,10 +78,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       assert territory |> LazyHTML.filter(~s([role="button"])) |> Enum.any?()
       assert territory |> LazyHTML.filter(~s([tabindex="0"])) |> Enum.any?()
       assert territory |> LazyHTML.filter(~s([phx-click="select_area"])) |> Enum.any?()
+      assert territory |> LazyHTML.filter(~s([data-interactive])) |> Enum.any?()
       assert territory |> LazyHTML.filter(".world-map-territory--interactive") |> Enum.any?()
+      assert LazyHTML.attribute(territory, "phx-hook") == [@territory_keyboard_hook]
     end
 
-    test "interactive={false} territories have no role, tabindex, click or keyboard hook" do
+    test "interactive={false} territories keep a static (unrewritable) phx-hook but no data-interactive" do
       assigns = %{areas: [board_area(1)], players: players()}
 
       html =
@@ -79,8 +96,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       assert territory |> LazyHTML.filter("[role]") |> Enum.empty?()
       assert territory |> LazyHTML.filter("[tabindex]") |> Enum.empty?()
       assert territory |> LazyHTML.filter("[phx-click]") |> Enum.empty?()
-      assert territory |> LazyHTML.filter("[phx-hook]") |> Enum.empty?()
+      assert territory |> LazyHTML.filter("[data-interactive]") |> Enum.empty?()
       assert territory |> LazyHTML.filter(".world-map-territory--interactive") |> Enum.empty?()
+
+      # `phx-hook` stays present and static even when non-interactive — the
+      # ColocatedHook rewrite must see the same literal string every render,
+      # never a conditional expression, or it silently stops rewriting.
+      assert LazyHTML.attribute(territory, "phx-hook") == [@territory_keyboard_hook]
     end
   end
 
@@ -111,12 +133,18 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       assert arrow |> LazyHTML.filter(~s([role="button"])) |> Enum.any?()
       assert arrow |> LazyHTML.filter(~s([tabindex="0"])) |> Enum.any?()
       assert arrow |> LazyHTML.filter(~s([phx-click="select_order"])) |> Enum.any?()
-      assert arrow |> LazyHTML.filter(~s([phx-hook=".TerritoryKeyboard"])) |> Enum.any?()
+      assert arrow |> LazyHTML.filter(~s([data-interactive])) |> Enum.any?()
       assert arrow |> LazyHTML.filter(~s([data-select-event="select_order"])) |> Enum.any?()
       assert arrow |> LazyHTML.filter(".world-map-order--interactive") |> Enum.any?()
+
+      # Regression: `phx-hook` must be the fully-qualified manifest key, not
+      # the raw ".TerritoryKeyboard" — a dynamic `phx-hook={@interactive && ...}`
+      # skips the ColocatedHook rewrite and ships a name that matches nothing
+      # in the manifest, so the hook silently never mounts.
+      assert LazyHTML.attribute(arrow, "phx-hook") == [@territory_keyboard_hook]
     end
 
-    test "interactive={false} order arrows have no role, tabindex, click or keyboard hook" do
+    test "interactive={false} order arrows have no role, tabindex, click, or select-event, but keep the static hook" do
       assigns = %{areas: attacking_areas(), players: players()}
 
       html =
@@ -129,9 +157,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       assert arrow |> LazyHTML.filter("[role]") |> Enum.empty?()
       assert arrow |> LazyHTML.filter("[tabindex]") |> Enum.empty?()
       assert arrow |> LazyHTML.filter("[phx-click]") |> Enum.empty?()
-      assert arrow |> LazyHTML.filter("[phx-hook]") |> Enum.empty?()
+      assert arrow |> LazyHTML.filter("[data-interactive]") |> Enum.empty?()
       assert arrow |> LazyHTML.filter("[data-select-event]") |> Enum.empty?()
       assert arrow |> LazyHTML.filter(".world-map-order--interactive") |> Enum.empty?()
+
+      # `phx-hook` stays static (and thus still rewritten) even when
+      # non-interactive — only `data-interactive` gates the hook's behavior.
+      assert LazyHTML.attribute(arrow, "phx-hook") == [@territory_keyboard_hook]
 
       # Non-interactive doesn't mean invisible — the arrow itself, its label,
       # and the amount it carries must still render.

@@ -318,9 +318,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         // scrolls). `data-select-event` lets an order arrow reuse this hook
         // while pushing `select_order` instead of a territory's `select_area`
         // (defaulting to `select_area` so territories need no extra attribute).
+        // `phx-hook` must stay a static string so LiveView's colocated-hook
+        // rewrite can match it to the manifest — `@interactive` instead gates
+        // `data-interactive`, checked on every keydown so a live toggle of
+        // interactivity (no remount) still takes effect.
         export default {
           mounted() {
             this.el.addEventListener("keydown", (e) => {
+              if (this.el.dataset.interactive === undefined) return
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()
                 this.pushEvent(this.el.dataset.selectEvent || "select_area", {area: this.el.dataset.area})
@@ -769,7 +774,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-fog={!@area.visible}
       data-frontier={@fill.dim && "dim"}
       data-element={@element}
-      phx-hook={@interactive && ".TerritoryKeyboard"}
+      data-interactive={@interactive}
+      phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_area"}
       phx-value-area={@interactive && @area.number}
     >
@@ -1029,7 +1035,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       aria-label={@label}
       data-area={@area.number}
       data-select-event={@interactive && "select_order"}
-      phx-hook={@interactive && ".TerritoryKeyboard"}
+      data-interactive={@interactive}
+      phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_order"}
       phx-value-area={@interactive && @area.number}
     >
