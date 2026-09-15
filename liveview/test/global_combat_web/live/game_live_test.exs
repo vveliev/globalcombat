@@ -282,6 +282,33 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert has_element?(alice_view, "input#chat-message[placeholder='Send a message']")
   end
 
+  test "the region-bonuses/order-panel column only sits beside the map once there's room for both outer rails too",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    # Splitting this row at Tailwind's bare `xl:` (1280px) measured clean at
+    # a naive glance, but this board always renders inside *two* nested
+    # rails — `SiteChrome`'s `AdminLayout` sidebar (`--size-sidebar`) and
+    # `GameLayout`'s players rail (`--size-rail`) — that both eat into the
+    # same viewport before the board area starts. A real-browser check
+    # (getComputedStyle/offsetWidth at 1280x900, and a binary search up to
+    # ~1470px) showed the row's minimum content width — the map's own
+    # `lg:`-and-up floor (`.world-map { min-width: 40rem }`, app.css) plus
+    # this column's fixed `--size-rail-lg` plus their gap — didn't actually
+    # fit until the viewport passed ~1470px, so the column painted over the
+    # players rail across that whole band. `2xl:` (1536px) is the next
+    # breakpoint up with margin to spare; asserting it here (rather than
+    # `xl:`) is what would have caught the regression.
+    assert html =~ "flex flex-col gap-[var(--space-4)] 2xl:flex-row 2xl:items-start"
+    assert html =~ "flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] 2xl:flex-1"
+
+    assert html =~
+             "flex flex-wrap items-start gap-[var(--space-4)] 2xl:w-[var(--size-rail-lg)] 2xl:shrink-0 2xl:flex-col"
+  end
+
   test "an empty chat log shows a muted empty state instead of nothing",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
