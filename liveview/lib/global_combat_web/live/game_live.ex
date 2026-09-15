@@ -686,9 +686,25 @@ defmodule GlobalCombatWeb.GameLive do
       {@ended_pill.label}
     </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
-    <Button.button type="button" intent="neutral" data-map-fit aria-label="Reset map zoom">
+    <Button.button
+      type="button"
+      intent="neutral"
+      id="map-fit"
+      phx-hook=".MapFit"
+      aria-label="Reset map zoom"
+    >
       Fit
     </Button.button>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".MapFit">
+      // The .MapViewport hook (world_map.ex) lives on a different element,
+      // so rather than it reaching out with a document-level click listener,
+      // this button announces itself over a window event.
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => window.dispatchEvent(new CustomEvent("gc:map-fit")))
+        }
+      }
+    </script>
     <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
     <span :if={@view.ended} id="game-over-announce" class="sr-only">
       {@headline}<span :if={@outcome}>{" " <> @outcome}</span>

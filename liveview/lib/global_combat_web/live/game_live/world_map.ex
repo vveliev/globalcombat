@@ -344,6 +344,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         const DRAG_PX = 8
         const VISIBLE_MARGIN = 0.2
         const ANIMATE_MS = 200
+        const MOBILE_QUERY = "(min-width: 64rem)"
 
         export default {
           mounted() {
@@ -365,7 +366,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.onClick = this.onClick.bind(this)
             this.onWheel = this.onWheel.bind(this)
             this.onKeyDown = this.onKeyDown.bind(this)
-            this.onFitClick = this.onFitClick.bind(this)
+            this.onFitEvent = this.onFitEvent.bind(this)
             this.onResize = this.onResize.bind(this)
 
             this.el.addEventListener("pointerdown", this.onPointerDown)
@@ -376,7 +377,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.el.addEventListener("dblclick", (e) => e.preventDefault())
             this.el.addEventListener("wheel", this.onWheel, { passive: false })
             this.el.addEventListener("keydown", this.onKeyDown)
-            document.addEventListener("click", this.onFitClick)
+            window.addEventListener("gc:map-fit", this.onFitEvent)
             window.addEventListener("resize", this.onResize)
             window.addEventListener("orientationchange", this.onResize)
 
@@ -389,7 +390,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           },
 
           destroyed() {
-            document.removeEventListener("click", this.onFitClick)
+            window.removeEventListener("gc:map-fit", this.onFitEvent)
             window.removeEventListener("resize", this.onResize)
             window.removeEventListener("orientationchange", this.onResize)
             if (this.raf) cancelAnimationFrame(this.raf)
@@ -515,6 +516,22 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.save(target)
           },
 
+          // Shared by every discrete (non-gesture-driven) zoom: wheel, the
+          // +/- keys, and double tap. `animate: true` eases toward the target
+          // (skipped under reduced motion by `animateTo` itself); wheel stays
+          // un-eased since its own repeated small deltas are already smooth.
+          zoomTo(newW, vbPoint, clientX, clientY, { animate = false } = {}) {
+            const target = this.computeZoom(newW, vbPoint, clientX, clientY)
+            if (animate) {
+              this.animateTo(target)
+            } else {
+              this.current = target
+              this.applyViewBox()
+            }
+            this.save(target)
+            return target
+          },
+
           // --- pointer gestures: one finger pans, two pinch-zoom -----------
 
           onPointerDown(e) {
@@ -633,9 +650,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               return
             }
             const vb = this.clientToViewBox(clientX, clientY)
-            const target = this.computeZoom(this.base.w / DOUBLE_TAP_ZOOM, vb, clientX, clientY)
-            this.animateTo(target)
-            this.save(target)
+            this.zoomTo(this.base.w / DOUBLE_TAP_ZOOM, vb, clientX, clientY, { animate: true })
           },
 
           // --- wheel, keyboard, fit button, resize --------------------------
@@ -645,9 +660,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             e.preventDefault()
             const factor = Math.exp(e.deltaY * 0.01)
             const vb = this.clientToViewBox(e.clientX, e.clientY)
-            this.current = this.computeZoom(this.current.w * factor, vb, e.clientX, e.clientY)
-            this.applyViewBox()
-            this.save()
+            this.zoomTo(this.current.w * factor, vb, e.clientX, e.clientY)
           },
 
           onKeyDown(e) {
@@ -658,21 +671,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
             switch (e.key) {
               case "+":
-              case "=": {
+              case "=":
                 e.preventDefault()
-                const target = this.computeZoom(this.current.w / 1.2, this.clientToViewBox(cx, cy), cx, cy)
-                this.animateTo(target)
-                this.save(target)
+                this.zoomTo(this.current.w / 1.2, this.clientToViewBox(cx, cy), cx, cy, { animate: true })
                 return
-              }
               case "-":
-              case "_": {
+              case "_":
                 e.preventDefault()
-                const target = this.computeZoom(this.current.w * 1.2, this.clientToViewBox(cx, cy), cx, cy)
-                this.animateTo(target)
-                this.save(target)
+                this.zoomTo(this.current.w * 1.2, this.clientToViewBox(cx, cy), cx, cy, { animate: true })
                 return
-              }
               case "ArrowUp":
                 e.preventDefault()
                 this.current = this.clamped({ ...this.current, y: this.current.y - panStep })
@@ -697,13 +704,20 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.save()
           },
 
-          onFitClick(e) {
-            if (!e.target.closest("[data-map-fit]")) return
+          // The Fit button lives in the status strip, outside this wrapper —
+          // its own `.MapFit` hook dispatches this window event rather than
+          // us reaching for it with a document-level click listener.
+          onFitEvent() {
             this.resetToFit()
           },
 
+          // Below `lg` the stage is meant to always start fitted, so a resize
+          // (device rotation, address-bar show/hide) refits. Above `lg` the
+          // board isn't full-height/gesture-first, so a resize (e.g. a
+          // devtools panel toggling) must leave a deliberate zoom alone —
+          // wheel zoom keeps working regardless of breakpoint.
           onResize() {
-            this.resetToFit()
+            if (!window.matchMedia(MOBILE_QUERY).matches) this.resetToFit()
           }
         }
       </script>
