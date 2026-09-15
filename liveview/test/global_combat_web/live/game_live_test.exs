@@ -523,6 +523,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, row, "+#{bonus}")
     end
 
+    # Both the legend and the accessible list run highest bonus first.
+    names_by_bonus =
+      GlobalCombat.Engine.MapInfo.regions(:original)
+      |> Enum.sort_by(&elem(&1, 3), :desc)
+      |> Enum.map(&elem(&1, 1))
+
+    list_names =
+      alice_view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#region-bonuses li span:first-child")
+      |> Enum.map(&LazyHTML.text/1)
+
+    assert list_names == names_by_bonus
+
     # The accessible list no longer takes a slot in the side column: it sits
     # under the map, visible below md: and screen-reader only from md: up.
     assert has_element?(alice_view, "figure > #region-bonuses.md\\:sr-only")

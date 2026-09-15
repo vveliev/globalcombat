@@ -1044,10 +1044,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   def legend(map_name) do
     {x, y, scale} = Map.fetch!(@legend_placement, map_name)
 
+    # Highest bonus first; `sort_by` is stable, so ties keep region order.
     rows =
       for {number, name, _num_areas, bonus} <- MapInfo.regions(map_name) do
         %{number: number, name: name, bonus: bonus}
       end
+      |> Enum.sort_by(& &1.bonus, :desc)
 
     %{x: x, y: y, scale: scale, width: @legend_width, height: @legend_height, rows: rows}
   end

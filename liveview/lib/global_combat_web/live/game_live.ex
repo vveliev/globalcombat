@@ -1331,7 +1331,9 @@ defmodule GlobalCombatWeb.GameLive do
   attr :map_name, :atom, required: true
 
   defp region_bonuses(assigns) do
-    assigns = assign(assigns, :regions, MapInfo.regions(assigns.map_name))
+    # Same highest-bonus-first order as the map's legend.
+    regions = assigns.map_name |> MapInfo.regions() |> Enum.sort_by(&elem(&1, 3), :desc)
+    assigns = assign(assigns, :regions, regions)
 
     ~H"""
     <section

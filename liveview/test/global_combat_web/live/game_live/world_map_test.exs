@@ -226,6 +226,18 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
           assert LazyHTML.text(row) =~ "+#{bonus}"
         end
 
+        # Highest bonus first, ties in region order.
+        expected_order =
+          map_name
+          |> GlobalCombat.Engine.MapInfo.regions()
+          |> Enum.sort_by(&elem(&1, 3), :desc)
+          |> Enum.map(&to_string(elem(&1, 0)))
+
+        assert legend
+               |> LazyHTML.query(".world-map-legend-row")
+               |> LazyHTML.attribute("data-region") ==
+                 expected_order
+
         [vx, vy, vw, vh] =
           map_name |> WorldMap.view_box() |> String.split() |> Enum.map(&String.to_integer/1)
 
