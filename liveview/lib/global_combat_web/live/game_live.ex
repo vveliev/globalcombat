@@ -844,8 +844,21 @@ defmodule GlobalCombatWeb.GameLive do
       headline={@headline}
       outcome={@outcome}
     />
-    <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
-      <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] xl:flex-1">
+    <%!-- The row split needs room for the map's own `lg:`-and-up floor
+    (`.world-map`'s `min-width: 40rem`, app.css) plus this column's fixed
+    `--size-rail-lg` plus their gap — 916px of content width that Tailwind's
+    bare `xl:` (1280px) doesn't actually guarantee here, because this board
+    always renders inside *two* nested rails (`SiteChrome`'s `AdminLayout`
+    sidebar, `--size-sidebar`, and `GameLayout`'s players rail, `--size-rail`)
+    that eat into the same viewport before the board area starts. Measured
+    in a real browser: the board's available width only clears 916px again
+    once the viewport reaches ~1470px, so splitting at `xl:` left a ~1280-1470px
+    band where this column doesn't fit beside the map and instead paints over
+    the players rail. `2xl:` (1536px) is the next breakpoint up with margin
+    to spare; below it the column stacks under the map instead (same as any
+    narrower width already does). --%>
+    <div class="flex flex-col gap-[var(--space-4)] 2xl:flex-row 2xl:items-start">
+      <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] 2xl:flex-1">
         <figure class="m-0 w-full">
           <WorldMap.world_map
             map_name={@view.map_name}
@@ -867,7 +880,7 @@ defmodule GlobalCombatWeb.GameLive do
           </figcaption>
         </figure>
       </div>
-      <div class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-[var(--size-rail-lg)] xl:shrink-0 xl:flex-col">
+      <div class="flex flex-wrap items-start gap-[var(--space-4)] 2xl:w-[var(--size-rail-lg)] 2xl:shrink-0 2xl:flex-col">
         <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
         <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
         <.order_panel
