@@ -245,17 +245,24 @@
 .world-map-owner[data-owner="7"] { --map-owner-fill: var(--map-owner-7); }
 .world-map-owner[data-owner="8"] { --map-owner-fill: var(--map-owner-8); }
 
-/* The board scales with its column but never below 40rem: army counts are
-   SVG user units and shrink with it, and 40rem keeps them at ~80% of their
-   full size on the narrowest layout; the GameLayout board slot scrolls. */
+/* The board scales with its column. From lg up it never drops below 40rem
+   (army counts are SVG user units and shrink with it; the GameLayout board
+   slot scrolls). Below lg it fills its column so a phone sees the whole map,
+   and the counts grow instead — see the `width < 64rem` block after
+   `.world-map-order-amount`. */
 .world-map {
   --map-ink: var(--color-text);
-  min-width: 40rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   overflow: hidden;
   background: var(--map-sea);
   box-shadow: var(--shadow-md);
+}
+
+@media (min-width: 64rem) {
+  .world-map {
+    min-width: 40rem;
+  }
 }
 
 .world-map svg {
@@ -486,6 +493,16 @@
   stroke-width: 2.5px;
   pointer-events: none;
   user-select: none;
+}
+
+/* Below lg the board shrinks to its column instead of scrolling, so the SVG
+   draws at well under half scale on a phone; larger counts keep them legible
+   there (0 0 800 480 original, 456-unit-wide elements). */
+@media (width < 64rem) {
+  .world-map-count,
+  .world-map-order-amount {
+    font-size: 1.6em;
+  }
 }
 
 /* The last-turn replay layer. Arrows are visible by default (opacity
