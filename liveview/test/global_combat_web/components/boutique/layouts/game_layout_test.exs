@@ -46,14 +46,26 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       </GameLayout.game_layout>
       """)
 
-    assert [_one] = Regex.scan(~r/Players content/, html)
-    assert html =~ ~r/<dialog[^>]*id="game-drawer"[^>]*>.*Players content.*<\/dialog>/s
-    assert html =~ ~r/<dialog[^>]*aria-label="Players and chat"/
+    document = LazyHTML.from_fragment(html)
+    drawer = LazyHTML.query(document, "dialog#game-drawer")
+
+    assert Enum.count(drawer) == 1
+    assert LazyHTML.attribute(drawer, "aria-label") == ["Players and chat"]
+    assert LazyHTML.text(drawer) =~ "Players content"
+    # "Players content" renders exactly once across the whole tree — a
+    # hidden duplicate (one copy per breakpoint) would break the DOM ids
+    # chat and roster carry, so this can't just check it's inside the dialog.
+    assert LazyHTML.text(document) |> String.split("Players content") |> length() == 2
+
     # Colocated hook names starting with "." expand to the fully-qualified
     # module name at compile time, so this asserts the hook is wired at all
     # rather than pinning the exact expanded string.
-    assert html =~ ~r/<dialog[^>]*phx-hook="[^"]*Drawer"/
-    assert html =~ ~s(<button type="button" data-drawer-close)
+    assert [hook] = LazyHTML.attribute(drawer, "phx-hook")
+    assert hook =~ ~r/Drawer$/
+
+    close = LazyHTML.query(document, "dialog#game-drawer button[data-drawer-close]")
+    assert Enum.count(close) == 1
+    assert LazyHTML.attribute(close, "type") == ["button"]
   end
 
   test "omitting the :players slot renders no drawer at all" do

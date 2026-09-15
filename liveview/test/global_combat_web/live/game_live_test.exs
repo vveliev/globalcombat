@@ -1304,11 +1304,18 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#game-drawer a[href="/"]), "Home")
       assert has_element?(alice_view, ~s(#game-drawer a[href="/Game-Manual"]), "Game Manual")
 
-      # Quit moved out of the board's turn controls and into the drawer — it
-      # must not be duplicated in both places.
-      refute has_element?(alice_view, "#turn-controls button", "Quit")
+      # Desktop keeps the Quit button it always had in #turn-controls (moving
+      # it out would change the lg: rail, and "desktop is unchanged" rules
+      # that out) — the drawer's copy is lg:hidden, additive for mobile only.
+      assert has_element?(alice_view, "#turn-controls button", "Quit")
       assert has_element?(alice_view, "#turn-controls button", "End Turn")
       assert has_element?(alice_view, "#turn-controls button", "Force Turn")
+
+      # The drawer's own Quit is additive for the mobile sheet, not a second
+      # always-visible copy — lg: and up it stays hidden so the rail shows
+      # exactly what #turn-controls' desktop-only Quit already covers.
+      assert render(alice_view) =~
+               ~r/<button[^>]*class="[^"]*\blg:hidden\b[^"]*"[^>]*>\s*Quit\s*</
     end
 
     test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
