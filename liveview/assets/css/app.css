@@ -257,6 +257,18 @@
   overflow: hidden;
   background: var(--map-sea);
   box-shadow: var(--shadow-md);
+  /* `.MapViewport` owns pointer gestures on this wrapper (pan/pinch/double-tap) —
+     without these the browser's own touch scroll/zoom and text-selection would
+     fight the hook for the same pointer events. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  outline: none;
+}
+
+.world-map:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 @media (min-width: 64rem) {
