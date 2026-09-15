@@ -586,7 +586,54 @@
   flex: none;
 }
 
+/* The players drawer (GameLayout's :players slot, docs/mobile-battle-mode.md
+   §4.5): a native <dialog> that is today's static side rail at lg: and up,
+   and a slide-in sheet from the right below it. The base rules below reset
+   the UA <dialog> chrome (margin/border/background/max-*) that would
+   otherwise fight the Tailwind utility classes already on the element. */
+.game-drawer {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  max-width: none;
+  max-height: none;
+}
+
+.game-drawer::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+@media (width < 64rem) {
+  .game-drawer {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(22rem, 92vw);
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+  }
+
+  .game-drawer[open] {
+    transform: translateX(0);
+  }
+}
+
+/* Above lg: the .Drawer hook calls dialog.show() to mark it formally open,
+   but display is forced here regardless of the `open` attribute so the rail
+   renders identically to today's <aside> even before the hook mounts. */
+@media (width >= 64rem) {
+  .game-drawer {
+    display: block;
+    position: static;
+    width: var(--size-rail);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .game-drawer {
+    transition: none;
+  }
+
   .world-map-area {
     transition: none;
   }
