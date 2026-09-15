@@ -505,18 +505,30 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp maybe_assign_outcome(assigns), do: assigns
 
+  # Stage mode (GameLayout's `stage` attr) and SiteChrome's matching `immersive`
+  # only apply while a turn is actually in progress — the lobby and the
+  # finished-game screen read better stacked (GameLayout's existing
+  # `players_first` flip already covers the latter), and neither is short-lived
+  # enough to be worth swallowing the whole viewport for
+  # (`docs/mobile-battle-mode.md` §3, "Scope of stage mode").
+  defp stage?(%{status: :playing, view: %{ended: false}}), do: true
+  defp stage?(_assigns), do: false
+
   defp render_game(assigns) do
     assigns = maybe_assign_outcome(assigns)
+    assigns = assign(assigns, :stage, stage?(assigns))
 
     ~H"""
     <.site_chrome
       current_account={@current_account}
       current_path={assigns[:current_path]}
       page_title={"Game #{@game_id}"}
+      immersive={@stage}
     >
       <GameLayout.game_layout
         id="game-board"
         players_first={@status == :playing && @view.ended}
+        stage={@stage}
         phx-hook=".FocusManager"
       >
         <:status>
@@ -557,7 +569,14 @@ defmodule GlobalCombatWeb.GameLive do
         </:status>
 
         <:board>
-          <div id="game-board-surface" phx-hook=".StageViewport">
+          <%!-- h-full: stage mode's <main> (GameLayout) is the definite-height grid
+          row the board's own figure/`.world-map`/<svg> height chain needs
+          (board/1's moduledoc) — without it here, this wrapper's own
+          auto-by-default height would break that chain one level up. Outside
+          stage mode <main> has no definite height either, so this resolves to
+          plain `auto` there (CSS percentage-height-of-indefinite-ancestor
+          rule) — a no-op. --%>
+          <div id="game-board-surface" phx-hook=".StageViewport" class="h-full">
             <Layouts.flash_group flash={@flash} />
             <%= case @status do %>
               <% :lobby -> %>
@@ -568,6 +587,10 @@ defmodule GlobalCombatWeb.GameLive do
           </div>
         </:board>
 
+        <:dock :if={@stage}>
+          {dock(assigns)}
+        </:dock>
+
         <:players>
           <.player_list
             players={@view.players}
@@ -576,25 +599,29 @@ defmodule GlobalCombatWeb.GameLive do
             ended={@status == :playing and @view.ended}
             map_name={Map.get(@view, :map_name)}
           />
+          <%= if @status == :playing do %>
+            {players_extras(assigns)}
+          <% end %>
           <.chat
             messages={Map.get(@view, :messages, [])}
             chat_form={@chat_form}
             logged_in={!!@current_account}
           />
-          <%!-- lg: and up this drawer is the permanent static rail (GameLayout's
-          moduledoc) — a Quit button here would put it on the desktop screen for
-          the first time, which "desktop is unchanged" (mobile-battle-mode.md
-          WP4's done-when) rules out. #turn-controls below keeps the one Quit
-          button desktop has always had; lg:hidden gives the mobile drawer the
-          one Task 5 asked for, without duplicating it above lg. --%>
+          <%!-- Unconditional, not lg:hidden: :players renders once, inside the one
+          <dialog> GameLayout shows as the mobile drawer and the lg: rail alike
+          (GameLayout's moduledoc), so a single Quit button here is already
+          exactly one on both — stage mode's :dock (above) already emptied
+          #turn-controls of everything but End Turn/Force Turn, so there's no
+          second desktop Quit left to collide with. --%>
           <Button.button
             :if={
               @status == :playing && @view.viewer_number && !@view.ended &&
                 !my_player(@view).eliminated
             }
+            id="quit-button"
             intent="danger"
             phx-click="quit"
-            class="mt-[var(--space-4)] lg:hidden"
+            class="mt-[var(--space-4)]"
           >
             Quit
           </Button.button>
@@ -972,10 +999,16 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   # Every map is a responsive SVG (`WorldMap`) — the legacy per-owner GIF
-  # sprites `Index.cshtml` composited at fixed pixel offsets are gone.
+  # sprites `Index.cshtml` composited at fixed pixel offsets are gone. The
+  # order panel, turn controls, region bonuses, your orders, turn results and
+  # Quit used to sit in a rail column beside the map here; stage mode
+  # (`docs/mobile-battle-mode.md` §4.3) moved them into `:dock`/`:players` in
+  # `render_game/1` instead, so this is just the map and its accessible table
+  # now — `@stage` (true exactly when this isn't the ended state) gives the
+  # figure a definite height to fill so the map can fill the stage's board
+  # area instead of sizing to its own aspect ratio (`.world-map` in `app.css`
+  # completes the height chain down to the `<svg>` below `lg:`).
   defp board(assigns) do
-    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
-
     ~H"""
     <.game_over
       :if={@view.ended}
@@ -984,65 +1017,80 @@ defmodule GlobalCombatWeb.GameLive do
       headline={@headline}
       outcome={@outcome}
     />
-    <%!-- The row split needs room for the map's own `lg:`-and-up floor
-    (`.world-map`'s `min-width: 40rem`, app.css) plus this column's fixed
-    `--size-rail-lg` plus their gap — 916px of content width that Tailwind's
-    bare `xl:` (1280px) doesn't actually guarantee here, because this board
-    always renders inside *two* nested rails (`SiteChrome`'s `AdminLayout`
-    sidebar, `--size-sidebar`, and `GameLayout`'s players rail, `--size-rail`)
-    that eat into the same viewport before the board area starts. Measured
-    in a real browser: the board's available width only clears 916px again
-    once the viewport reaches ~1470px, so splitting at `xl:` left a ~1280-1470px
-    band where this column doesn't fit beside the map and instead paints over
-    the players rail. `2xl:` (1536px) is the next breakpoint up with margin
-    to spare; below it the column stacks under the map instead (same as any
-    narrower width already does). --%>
-    <div class="flex flex-col gap-[var(--space-4)] 2xl:flex-row 2xl:items-start">
-      <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] 2xl:flex-1">
-        <figure class="m-0 w-full">
-          <WorldMap.world_map
-            map_name={@view.map_name}
-            areas={@view.areas}
-            players={@view.players}
-            selected_area={@selected_area}
-            target_area={@target_area}
-            lens={@lens}
-            viewer_number={@view.viewer_number}
-            interactive={!@view.ended}
-            replay_steps={@replay_steps}
-            game_id={@game_id}
-          />
-          <figcaption
-            :if={@view.ended && @winner}
-            id="game-over-caption"
-            class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
-          >
-            {winner_caption(@winner, length(@view.areas))}
-          </figcaption>
-        </figure>
-      </div>
-      <div class="flex flex-wrap items-start gap-[var(--space-4)] 2xl:w-[var(--size-rail-lg)] 2xl:shrink-0 2xl:flex-col">
-        <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
-        <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
-        <.order_panel
-          :if={@selected_area && !@view.ended}
-          view={@view}
-          selected_area={@selected_area}
-          target_area={@target_area}
-          order_amount={@order_amount}
-        />
-        <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
-      </div>
-    </div>
+    <figure class={["m-0 w-full", @stage && "h-full"]}>
+      <WorldMap.world_map
+        map_name={@view.map_name}
+        areas={@view.areas}
+        players={@view.players}
+        selected_area={@selected_area}
+        target_area={@target_area}
+        lens={@lens}
+        viewer_number={@view.viewer_number}
+        interactive={!@view.ended}
+        replay_steps={@replay_steps}
+        game_id={@game_id}
+      />
+      <figcaption
+        :if={@view.ended && @winner}
+        id="game-over-caption"
+        class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
+      >
+        {winner_caption(@winner, length(@view.areas))}
+      </figcaption>
+    </figure>
     <.board_table areas={@view.areas} players={@view.players} />
-    <div :if={@view.viewer_number && !@view.ended} id="turn-controls" class="mt-[var(--space-4)]">
-      <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
+    """
+  end
+
+  # The dock's idle row (End Turn/Waiting/Force Turn) when nothing is
+  # selected, or the order panel once a territory is — never both, so a
+  # player never has to scroll the sheet to find the button they want
+  # (`docs/mobile-battle-mode.md` §4.3, "Dock contents by state"). Only
+  # rendered at all while `@stage` is true (`render_game/1`'s `:dock` slot),
+  # which already implies `@view.ended == false` — but not that there's a
+  # seated player: a spectator's `viewer_number` is `nil`, so `my_player/1`
+  # returns `nil` and a turn-controls row built around `my_player(@view).done`
+  # must stay gated on `@view.viewer_number`, same as the original
+  # (pre-stage) turn-controls div was.
+  defp dock(assigns) do
+    ~H"""
+    <.order_panel
+      :if={@selected_area}
+      view={@view}
+      selected_area={@selected_area}
+      target_area={@target_area}
+      order_amount={@order_amount}
+    />
+    <div
+      :if={!@selected_area && @view.viewer_number}
+      id="turn-controls"
+      class="flex flex-col gap-[var(--space-2)] sm:flex-row"
+    >
+      <Button.button :if={!my_player(@view).done} class="w-full sm:w-auto" phx-click="done">
+        End Turn
+      </Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
-      <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
-      <Button.button :if={!my_player(@view).eliminated} intent="neutral" phx-click="quit">
-        Quit
+      <Button.button
+        intent="neutral"
+        class="w-full sm:w-auto"
+        phx-click="force_turn"
+      >
+        Force Turn
       </Button.button>
     </div>
+    """
+  end
+
+  # Region bonuses, your queued orders and the last turn's results, in the
+  # `:players` rail between the roster and chat (`docs/mobile-battle-mode.md`
+  # §4.3) — only ever called while `@status == :playing` (`render_game/1`).
+  defp players_extras(assigns) do
+    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
+
+    ~H"""
+    <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
+    <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
+    <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
     """
   end
 

@@ -285,33 +285,6 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert has_element?(alice_view, "input#chat-message[placeholder='Send a message']")
   end
 
-  test "the region-bonuses/order-panel column only sits beside the map once there's room for both outer rails too",
-       %{conn: conn1} do
-    conn2 = Phoenix.ConnTest.build_conn()
-    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
-
-    html = render(alice_view)
-
-    # Splitting this row at Tailwind's bare `xl:` (1280px) measured clean at
-    # a naive glance, but this board always renders inside *two* nested
-    # rails — `SiteChrome`'s `AdminLayout` sidebar (`--size-sidebar`) and
-    # `GameLayout`'s players rail (`--size-rail`) — that both eat into the
-    # same viewport before the board area starts. A real-browser check
-    # (getComputedStyle/offsetWidth at 1280x900, and a binary search up to
-    # ~1470px) showed the row's minimum content width — the map's own
-    # `lg:`-and-up floor (`.world-map { min-width: 40rem }`, app.css) plus
-    # this column's fixed `--size-rail-lg` plus their gap — didn't actually
-    # fit until the viewport passed ~1470px, so the column painted over the
-    # players rail across that whole band. `2xl:` (1536px) is the next
-    # breakpoint up with margin to spare; asserting it here (rather than
-    # `xl:`) is what would have caught the regression.
-    assert html =~ "flex flex-col gap-[var(--space-4)] 2xl:flex-row 2xl:items-start"
-    assert html =~ "flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] 2xl:flex-1"
-
-    assert html =~
-             "flex flex-wrap items-start gap-[var(--space-4)] 2xl:w-[var(--size-rail-lg)] 2xl:shrink-0 2xl:flex-col"
-  end
-
   test "an empty chat log shows a muted empty state instead of nothing",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
@@ -753,6 +726,87 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#order-amount[value="5"]))
 
       assert Games.player_view(game_id, alice.id) == {:playing, before}
+    end
+  end
+
+  describe "stage mode dock (mobile battle mode WP3)" do
+    test "with nothing selected, the dock holds End Turn and Force Turn and no order panel",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(
+               alice_view,
+               ~s([aria-label="Actions"] #turn-controls button),
+               "End Turn"
+             )
+
+      assert has_element?(
+               alice_view,
+               ~s([aria-label="Actions"] #turn-controls button),
+               "Force Turn"
+             )
+
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #order-panel))
+    end
+
+    test "selecting a territory shows the order panel in the dock and hides the idle turn-controls row",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+
+      assert has_element?(alice_view, ~s([aria-label="Actions"] #order-panel))
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #turn-controls))
+
+      render_click(alice_view, "cancel_order", %{})
+
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #order-panel))
+      assert has_element?(alice_view, ~s([aria-label="Actions"] #turn-controls))
+    end
+
+    test "the shell is in stage mode while a turn is live: the board's <main> carries data-stage",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, "main[data-stage]")
+    end
+
+    test "Quit lives in the players rail, not the dock", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #quit-button))
+    end
+
+    test "a spectator viewing a live game does not crash the dock (no seated player, nothing selected)",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+
+      refute has_element?(spectator, "#turn-controls")
+      refute has_element?(spectator, ~s([aria-label="Actions"] button), "End Turn")
+    end
+
+    test "an ended game does not use stage: no dock, no data-stage shell, and Quit is gone",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, bob: bob, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      refute has_element?(alice_view, ~s([aria-label="Actions"]))
+      refute has_element?(alice_view, "main[data-stage]")
+      refute has_element?(alice_view, "#quit-button")
     end
   end
 
@@ -1304,18 +1358,16 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#game-drawer a[href="/"]), "Home")
       assert has_element?(alice_view, ~s(#game-drawer a[href="/Game-Manual"]), "Game Manual")
 
-      # Desktop keeps the Quit button it always had in #turn-controls (moving
-      # it out would change the lg: rail, and "desktop is unchanged" rules
-      # that out) — the drawer's copy is lg:hidden, additive for mobile only.
-      assert has_element?(alice_view, "#turn-controls button", "Quit")
+      # The drawer renders once (GameLayout's moduledoc) and is the mobile
+      # sheet *and* the lg: rail alike, so its one Quit button is already
+      # exactly one on both breakpoints — stage mode's :dock emptied
+      # #turn-controls down to End Turn/Force Turn only, so there's no
+      # separate desktop Quit left for the drawer's copy to duplicate.
+      refute has_element?(alice_view, "#turn-controls button", "Quit")
       assert has_element?(alice_view, "#turn-controls button", "End Turn")
       assert has_element?(alice_view, "#turn-controls button", "Force Turn")
 
-      # The drawer's own Quit is additive for the mobile sheet, not a second
-      # always-visible copy — lg: and up it stays hidden so the rail shows
-      # exactly what #turn-controls' desktop-only Quit already covers.
-      assert render(alice_view) =~
-               ~r/<button[^>]*class="[^"]*\blg:hidden\b[^"]*"[^>]*>\s*Quit\s*</
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
     end
 
     test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
