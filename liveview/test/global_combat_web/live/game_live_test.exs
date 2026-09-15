@@ -387,6 +387,40 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ ~r/aria-label="Game status"[^>]*tabindex="-1"[^>]*data-focus-landmark/
   end
 
+  test "the status strip carries a hidden-by-default full screen toggle targeting #game-board (mobile-battle-mode.md WP5)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    # Starts hidden — the `.Fullscreen` hook only unhides it once it has
+    # checked `document.fullscreenEnabled` client-side (iPhone Safari has no
+    # such API, so it must never flash visible there). ExUnit's LiveViewTest
+    # has no real DOM/JS, so this only asserts the static contract the hook
+    # depends on, not the toggle behavior itself.
+    assert has_element?(
+             alice_view,
+             ~s(section[aria-label="Game status"] button#fullscreen-toggle.hidden[aria-pressed="false"])
+           )
+
+    # ColocatedHook rewrites ".Fullscreen" to the fully-qualified manifest key
+    # at compile time (see the FocusManager test above for why the literal
+    # ".Fullscreen" name would never match rendered output).
+    assert render(alice_view) =~
+             ~r/id="fullscreen-toggle"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.Fullscreen"/
+  end
+
+  test "the board surface carries the keyboard-inset hook (mobile-battle-mode.md WP5)", %{
+    conn: conn1
+  } do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    assert html =~
+             ~r/id="game-board-surface"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.StageViewport"/
+  end
+
   test "the board has a visually-hidden table equivalent listing territory, owner, armies, and adjacency (WCAG 1.3.1, GIF-81)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
