@@ -185,11 +185,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "#order-form")
 
       # Territories stop being an interactive control at all, not just an
-      # unresponsive one — no role/tabindex/click/keyboard hook survives.
+      # unresponsive one — no role/tabindex/click survives, and the keyboard
+      # hook's own `data-interactive` gate is gone too (the hook's phx-hook
+      # attribute itself stays static/present — see world_map_test.exs — so
+      # it can be rewritten by `Phoenix.LiveView.ColocatedHook` at compile time).
       refute has_element?(alice_view, ~s(g#territory-1[role]))
       refute has_element?(alice_view, ~s(g#territory-1[tabindex]))
       refute has_element?(alice_view, ~s(g#territory-1[phx-click]))
-      refute has_element?(alice_view, ~s(g#territory-1[phx-hook]))
+      refute has_element?(alice_view, ~s(g#territory-1[data-interactive]))
     end
   end
 
@@ -735,10 +738,13 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # the same .TerritoryKeyboard hook a territory uses — its Enter/Space handler
       # pushes whatever event `data-select-event` names, "select_order" here (the
       # `select_order` describe block below exercises that event directly since
-      # ExUnit has no way to fire a real DOM keydown).
+      # ExUnit has no way to fire a real DOM keydown). The hook's `phx-hook` value
+      # must be the manifest-qualified name (not the raw ".TerritoryKeyboard") —
+      # otherwise `Phoenix.LiveView.ColocatedHook`'s compile-time rewrite never
+      # fired and the hook wouldn't mount in a real browser at all.
       assert has_element?(
                alice_view,
-               ~s(g.world-map-order[role="button"][tabindex="0"][phx-hook=".TerritoryKeyboard"][data-select-event="select_order"])
+               ~s(g.world-map-order[role="button"][tabindex="0"][phx-hook="GlobalCombatWeb.GameLive.WorldMap.TerritoryKeyboard"][data-select-event="select_order"])
              )
     end
 
