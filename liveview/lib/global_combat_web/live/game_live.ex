@@ -528,30 +528,44 @@ defmodule GlobalCombatWeb.GameLive do
               <:option value="frontier">Frontier</:option>
             </SegmentedControl.segmented_control>
           </form>
-          <button
-            type="button"
-            id="drawer-open"
-            aria-controls="game-drawer"
-            aria-expanded="false"
-            class="relative ml-auto rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
-          >
-            Players
-            <span
-              data-unread-dot
-              aria-hidden="true"
-              class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-red-600"
-            />
-          </button>
+          <div class="ml-auto flex items-center gap-[var(--space-2)]">
+            <button
+              type="button"
+              id="drawer-open"
+              aria-controls="game-drawer"
+              aria-expanded="false"
+              class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+            >
+              Players
+              <span
+                data-unread-dot
+                aria-hidden="true"
+                class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-red-600"
+              />
+            </button>
+            <button
+              id="fullscreen-toggle"
+              type="button"
+              phx-hook=".Fullscreen"
+              aria-pressed="false"
+              aria-label="Full screen"
+              class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            >
+              <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
+            </button>
+          </div>
         </:status>
 
         <:board>
-          <Layouts.flash_group flash={@flash} />
-          <%= case @status do %>
-            <% :lobby -> %>
-              {lobby(assigns)}
-            <% :playing -> %>
-              {board(assigns)}
-          <% end %>
+          <div id="game-board-surface" phx-hook=".StageViewport">
+            <Layouts.flash_group flash={@flash} />
+            <%= case @status do %>
+              <% :lobby -> %>
+                {lobby(assigns)}
+              <% :playing -> %>
+                {board(assigns)}
+            <% end %>
+          </div>
         </:board>
 
         <:players>
@@ -601,6 +615,79 @@ defmodule GlobalCombatWeb.GameLive do
             if (lost && !document.body.contains(lost)) {
               this.el.querySelector("[data-focus-landmark]")?.focus()
             }
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".Fullscreen">
+        // iOS Safari has no Fullscreen API for arbitrary elements
+        // (`document.fullscreenEnabled` is false there) — the button stays
+        // hidden rather than shown-and-broken; those players get the
+        // browser-chrome-free experience through the PWA install instead
+        // (manifest.webmanifest, root layout metas).
+        export default {
+          mounted() {
+            if (!document.fullscreenEnabled) return
+            this.el.classList.remove("hidden")
+            this.el.classList.add("inline-flex")
+            this.onClick = () => this.toggle()
+            this.onFullscreenChange = () => this.syncPressed()
+            this.el.addEventListener("click", this.onClick)
+            document.addEventListener("fullscreenchange", this.onFullscreenChange)
+          },
+          toggle() {
+            if (document.fullscreenElement) {
+              document.exitFullscreen()
+            } else {
+              document.getElementById("game-board")?.requestFullscreen({ navigationUI: "hide" })
+            }
+          },
+          syncPressed() {
+            const pressed = !!document.fullscreenElement
+            this.el.setAttribute("aria-pressed", pressed ? "true" : "false")
+            this.el.querySelector(".fullscreen-toggle-icon")?.classList.toggle(
+              "hero-arrows-pointing-in",
+              pressed
+            )
+            this.el.querySelector(".fullscreen-toggle-icon")?.classList.toggle(
+              "hero-arrows-pointing-out",
+              !pressed
+            )
+          },
+          destroyed() {
+            this.el.removeEventListener("click", this.onClick)
+            document.removeEventListener("fullscreenchange", this.onFullscreenChange)
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".StageViewport">
+        // Software keyboards shrink the visual viewport without shrinking the
+        // layout viewport, so a focused input's containing block doesn't
+        // shrink with it and whatever sits below it (the amount stepper's
+        // Assign/Attack button) can end up under the keyboard. Pinning this
+        // wrapper's height to `visualViewport.height` while it holds focus
+        // keeps that content in view. Below `lg` only — same breakpoint the
+        // rest of mobile battle mode collapses at (`--size-collapse`).
+        export default {
+          mounted() {
+            this.mq = window.matchMedia("(min-width: 64rem)")
+            this.onViewportResize = () => this.syncHeight()
+            this.onFocusOut = () => this.clearHeight()
+            this.onBreakpointChange = () => this.clearHeight()
+            window.visualViewport?.addEventListener("resize", this.onViewportResize)
+            this.el.addEventListener("focusout", this.onFocusOut)
+            this.mq.addEventListener("change", this.onBreakpointChange)
+          },
+          syncHeight() {
+            if (this.mq.matches || !window.visualViewport) return
+            this.el.style.height = `${window.visualViewport.height}px`
+          },
+          clearHeight() {
+            this.el.style.height = ""
+          },
+          destroyed() {
+            window.visualViewport?.removeEventListener("resize", this.onViewportResize)
+            this.el.removeEventListener("focusout", this.onFocusOut)
+            this.mq.removeEventListener("change", this.onBreakpointChange)
           }
         }
       </script>
