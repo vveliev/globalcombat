@@ -686,6 +686,9 @@ defmodule GlobalCombatWeb.GameLive do
       {@ended_pill.label}
     </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
+    <Button.button type="button" intent="neutral" data-map-fit aria-label="Reset map zoom">
+      Fit
+    </Button.button>
     <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
     <span :if={@view.ended} id="game-over-announce" class="sr-only">
       {@headline}<span :if={@outcome}>{" " <> @outcome}</span>
@@ -816,6 +819,7 @@ defmodule GlobalCombatWeb.GameLive do
             viewer_number={@view.viewer_number}
             interactive={!@view.ended}
             replay_steps={@replay_steps}
+            game_id={@game_id}
           />
           <figcaption
             :if={@view.ended && @winner}

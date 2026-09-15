@@ -35,6 +35,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
     html |> LazyHTML.from_fragment() |> LazyHTML.query_by_id("territory-1")
   end
 
+  defp wrapper(html) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query_by_id("world-map")
+  end
+
   defp order_arrow(html) do
     html |> LazyHTML.from_fragment() |> LazyHTML.query_by_id("order-1")
   end
@@ -132,6 +136,40 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       # Non-interactive doesn't mean invisible — the arrow itself, its label,
       # and the amount it carries must still render.
       assert arrow |> LazyHTML.filter(~s([aria-label])) |> Enum.any?()
+    end
+  end
+
+  describe ".MapViewport wrapper attrs" do
+    test "the .world-map wrapper carries the viewport hook, view box and keyboard tabindex" do
+      assigns = %{areas: [board_area(1)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      wrap = wrapper(html)
+
+      # A static `phx-hook="..."` literal on a colocated hook gets expanded at
+      # compile time to the fully-qualified hook name (module + name), unlike
+      # `.TerritoryKeyboard` above which is threaded through an `{...}` expression
+      # and so keeps its short form — hence the suffix match here.
+      assert wrap |> LazyHTML.filter(~s([phx-hook$=".MapViewport"])) |> Enum.any?()
+      assert wrap |> LazyHTML.filter(~s([data-view-box="0 0 800 480"])) |> Enum.any?()
+      assert wrap |> LazyHTML.filter(~s([tabindex="0"])) |> Enum.any?()
+    end
+
+    test "carries the game id for the hook's sessionStorage key when given one" do
+      assigns = %{areas: [board_area(1)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} game_id="abc123" />
+        """)
+
+      wrap = wrapper(html)
+
+      assert wrap |> LazyHTML.filter(~s([data-game-id="abc123"])) |> Enum.any?()
     end
   end
 

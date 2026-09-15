@@ -153,6 +153,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: [],
     doc: "`GameLive.Replay.steps/4` output for `PlayerView.last_turn_events`"
 
+  attr :game_id, :any,
+    default: nil,
+    doc: "used only as the `.MapViewport` hook's sessionStorage key; nil disables persistence"
+
   def world_map(assigns) do
     lens = effective_lens(assigns.lens, assigns.viewer_number)
 
@@ -171,7 +175,16 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       |> assign(:replay_captures, Enum.filter(assigns.replay_steps, & &1.captured))
 
     ~H"""
-    <div class="world-map" data-map={@map_name}>
+    <div
+      id="world-map"
+      class="world-map"
+      data-map={@map_name}
+      data-view-box={@view_box}
+      data-game-id={@game_id}
+      data-zoomed="false"
+      tabindex="0"
+      phx-hook=".MapViewport"
+    >
       <svg
         viewBox={@view_box}
         role="group"
@@ -313,6 +326,384 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
                 this.pushEvent(this.el.dataset.selectEvent || "select_area", {area: this.el.dataset.area})
               }
             })
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MapViewport">
+        // Pan/pinch/double-tap zoom for the map, without touching territory
+        // selection: a tap only ever gets cancelled when the pointer actually
+        // moved (drag) or when it completes a double-tap (zoom, not select).
+        // LiveView owns the SVG's viewBox attribute and resets it to the
+        // server-rendered value on every patch, so `updated()` re-applies
+        // whatever pan/zoom this hook is holding — same pattern as
+        // `.TurnReplay` re-applying its step count after a patch.
+        const MAX_SCALE = 6
+        const DOUBLE_TAP_ZOOM = 2.5
+        const DOUBLE_TAP_MS = 300
+        const DOUBLE_TAP_PX = 24
+        const DRAG_PX = 8
+        const VISIBLE_MARGIN = 0.2
+        const ANIMATE_MS = 200
+
+        export default {
+          mounted() {
+            this.svg = this.el.querySelector("svg")
+            this.base = this.parseViewBox(this.el.dataset.viewBox)
+            this.current = this.restore() || { ...this.base }
+            this.pointers = new Map()
+            this.moved = false
+            this.gestureStart = null
+            this.lastSingle = null
+            this.pinch = null
+            this.lastTap = null
+            this.raf = null
+            this.reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+            this.onPointerDown = this.onPointerDown.bind(this)
+            this.onPointerMove = this.onPointerMove.bind(this)
+            this.onPointerUp = this.onPointerUp.bind(this)
+            this.onClick = this.onClick.bind(this)
+            this.onWheel = this.onWheel.bind(this)
+            this.onKeyDown = this.onKeyDown.bind(this)
+            this.onFitClick = this.onFitClick.bind(this)
+            this.onResize = this.onResize.bind(this)
+
+            this.el.addEventListener("pointerdown", this.onPointerDown)
+            this.el.addEventListener("pointermove", this.onPointerMove)
+            this.el.addEventListener("pointerup", this.onPointerUp)
+            this.el.addEventListener("pointercancel", this.onPointerUp)
+            this.el.addEventListener("click", this.onClick, true)
+            this.el.addEventListener("dblclick", (e) => e.preventDefault())
+            this.el.addEventListener("wheel", this.onWheel, { passive: false })
+            this.el.addEventListener("keydown", this.onKeyDown)
+            document.addEventListener("click", this.onFitClick)
+            window.addEventListener("resize", this.onResize)
+            window.addEventListener("orientationchange", this.onResize)
+
+            this.applyViewBox()
+          },
+
+          updated() {
+            this.svg = this.el.querySelector("svg")
+            this.applyViewBox()
+          },
+
+          destroyed() {
+            document.removeEventListener("click", this.onFitClick)
+            window.removeEventListener("resize", this.onResize)
+            window.removeEventListener("orientationchange", this.onResize)
+            if (this.raf) cancelAnimationFrame(this.raf)
+          },
+
+          // --- viewBox state -----------------------------------------------
+
+          parseViewBox(str) {
+            const [x, y, w, h] = str.split(" ").map(Number)
+            return { x, y, w, h }
+          },
+
+          storageKey() {
+            const gameId = this.el.dataset.gameId
+            return gameId ? `gc:viewport:${gameId}` : null
+          },
+
+          restore() {
+            const key = this.storageKey()
+            if (!key) return null
+            try {
+              const parsed = JSON.parse(sessionStorage.getItem(key))
+              if (!parsed || typeof parsed.x !== "number" || typeof parsed.w !== "number") {
+                return null
+              }
+              return parsed
+            } catch {
+              return null
+            }
+          },
+
+          save(state = this.current) {
+            const key = this.storageKey()
+            if (!key) return
+            try {
+              sessionStorage.setItem(key, JSON.stringify(state))
+            } catch {
+              // Private browsing / quota — the viewport just won't survive a reload.
+            }
+          },
+
+          applyViewBox() {
+            if (!this.svg) return
+            const { x, y, w, h } = this.current
+            this.svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`)
+            this.el.dataset.zoomed = this.current.w < this.base.w - 0.01 ? "true" : "false"
+          },
+
+          clamped(next) {
+            const b = this.base
+            const minX = b.x - (1 - VISIBLE_MARGIN) * next.w
+            const maxX = b.x + b.w - VISIBLE_MARGIN * next.w
+            const minY = b.y - (1 - VISIBLE_MARGIN) * next.h
+            const maxY = b.y + b.h - VISIBLE_MARGIN * next.h
+
+            return {
+              ...next,
+              x: Math.min(Math.max(next.x, minX), maxX),
+              y: Math.min(Math.max(next.y, minY), maxY)
+            }
+          },
+
+          clientToViewBox(clientX, clientY) {
+            const rect = this.svg.getBoundingClientRect()
+            const upp = this.current.w / rect.width
+            return {
+              x: this.current.x + (clientX - rect.left) * upp,
+              y: this.current.y + (clientY - rect.top) * upp
+            }
+          },
+
+          // Zoom so `vbPoint` (a viewBox-space point) lands back under the
+          // client point (clientX, clientY) — the same anchoring math serves
+          // pinch (vbPoint from the old midpoint, anchored to the new one),
+          // wheel/dblclick/keyboard zoom (anchored to the same point it zoomed
+          // from), and double tap.
+          computeZoom(newW, vbPoint, clientX, clientY) {
+            const rect = this.svg.getBoundingClientRect()
+            const minW = this.base.w / MAX_SCALE
+            const clampedW = Math.min(Math.max(newW, minW), this.base.w)
+            const newH = clampedW * (this.base.h / this.base.w)
+            const upp = clampedW / rect.width
+
+            return this.clamped({
+              w: clampedW,
+              h: newH,
+              x: vbPoint.x - (clientX - rect.left) * upp,
+              y: vbPoint.y - (clientY - rect.top) * upp
+            })
+          },
+
+          animateTo(target) {
+            if (this.raf) cancelAnimationFrame(this.raf)
+
+            if (this.reduceMotion) {
+              this.current = target
+              this.applyViewBox()
+              return
+            }
+
+            const start = { ...this.current }
+            const startTime = performance.now()
+
+            const step = (now) => {
+              const t = Math.min(1, (now - startTime) / ANIMATE_MS)
+              const eased = 1 - Math.pow(1 - t, 3)
+              this.current = {
+                x: start.x + (target.x - start.x) * eased,
+                y: start.y + (target.y - start.y) * eased,
+                w: start.w + (target.w - start.w) * eased,
+                h: start.h + (target.h - start.h) * eased
+              }
+              this.applyViewBox()
+              if (t < 1) this.raf = requestAnimationFrame(step)
+            }
+
+            this.raf = requestAnimationFrame(step)
+          },
+
+          resetToFit() {
+            const target = { ...this.base }
+            this.animateTo(target)
+            this.save(target)
+          },
+
+          // --- pointer gestures: one finger pans, two pinch-zoom -----------
+
+          onPointerDown(e) {
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+            // Capture is a nice-to-have (keeps a fast finger receiving moves after
+            // it strays outside the wrapper) — a second/third pointer's capture can
+            // fail (InvalidPointerId) in edge cases, and losing that pointer from
+            // `this.pointers` entirely would silently break the pinch gesture.
+            try {
+              this.el.setPointerCapture?.(e.pointerId)
+            } catch {
+              // Ignored — the pointer stays tracked, just uncaptured.
+            }
+
+            if (this.pointers.size === 1) {
+              this.gestureStart = { x: e.clientX, y: e.clientY }
+              this.moved = false
+              this.lastSingle = { x: e.clientX, y: e.clientY }
+              this.pinch = null
+            } else if (this.pointers.size === 2) {
+              this.lastSingle = null
+              this.pinch = this.pinchState()
+            }
+          },
+
+          onPointerMove(e) {
+            if (!this.pointers.has(e.pointerId)) return
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+            if (this.gestureStart) {
+              const dx = e.clientX - this.gestureStart.x
+              const dy = e.clientY - this.gestureStart.y
+              if (Math.hypot(dx, dy) > DRAG_PX) this.moved = true
+            }
+
+            if (this.pointers.size === 1 && this.lastSingle) {
+              const dx = e.clientX - this.lastSingle.x
+              const dy = e.clientY - this.lastSingle.y
+              this.lastSingle = { x: e.clientX, y: e.clientY }
+              const rect = this.svg.getBoundingClientRect()
+              const upp = this.current.w / rect.width
+              this.current = this.clamped({
+                ...this.current,
+                x: this.current.x - dx * upp,
+                y: this.current.y - dy * upp
+              })
+              this.applyViewBox()
+            } else if (this.pointers.size === 2 && this.pinch) {
+              this.moved = true
+              const next = this.pinchState()
+              const vbPoint = this.clientToViewBox(this.pinch.mid.x, this.pinch.mid.y)
+              const scaleFactor = this.pinch.dist / Math.max(next.dist, 1)
+              this.current = this.computeZoom(
+                this.current.w * scaleFactor,
+                vbPoint,
+                next.mid.x,
+                next.mid.y
+              )
+              this.applyViewBox()
+              this.pinch = next
+            }
+          },
+
+          onPointerUp(e) {
+            this.pointers.delete(e.pointerId)
+
+            if (this.pointers.size === 1) {
+              const [remaining] = this.pointers.values()
+              this.lastSingle = { ...remaining }
+              this.pinch = null
+            } else if (this.pointers.size === 0) {
+              this.pinch = null
+              this.lastSingle = null
+              this.gestureStart = null
+              this.save()
+            }
+          },
+
+          pinchState() {
+            const [p1, p2] = [...this.pointers.values()]
+            return {
+              dist: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+              mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+            }
+          },
+
+          // --- taps: territory click vs. double-tap zoom --------------------
+
+          onClick(e) {
+            if (this.moved) {
+              e.stopPropagation()
+              e.preventDefault()
+              return
+            }
+
+            const now = Date.now()
+            const isDoubleTap =
+              this.lastTap &&
+              now - this.lastTap.time < DOUBLE_TAP_MS &&
+              Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < DOUBLE_TAP_PX
+
+            if (isDoubleTap) {
+              e.stopPropagation()
+              e.preventDefault()
+              this.lastTap = null
+              this.doubleTapZoom(e.clientX, e.clientY)
+              return
+            }
+
+            this.lastTap = { time: now, x: e.clientX, y: e.clientY }
+          },
+
+          doubleTapZoom(clientX, clientY) {
+            if (this.current.w < this.base.w - 0.01) {
+              this.resetToFit()
+              return
+            }
+            const vb = this.clientToViewBox(clientX, clientY)
+            const target = this.computeZoom(this.base.w / DOUBLE_TAP_ZOOM, vb, clientX, clientY)
+            this.animateTo(target)
+            this.save(target)
+          },
+
+          // --- wheel, keyboard, fit button, resize --------------------------
+
+          onWheel(e) {
+            if (!e.ctrlKey) return
+            e.preventDefault()
+            const factor = Math.exp(e.deltaY * 0.01)
+            const vb = this.clientToViewBox(e.clientX, e.clientY)
+            this.current = this.computeZoom(this.current.w * factor, vb, e.clientX, e.clientY)
+            this.applyViewBox()
+            this.save()
+          },
+
+          onKeyDown(e) {
+            const rect = this.svg.getBoundingClientRect()
+            const cx = rect.left + rect.width / 2
+            const cy = rect.top + rect.height / 2
+            const panStep = this.current.w * 0.1
+
+            switch (e.key) {
+              case "+":
+              case "=": {
+                e.preventDefault()
+                const target = this.computeZoom(this.current.w / 1.2, this.clientToViewBox(cx, cy), cx, cy)
+                this.animateTo(target)
+                this.save(target)
+                return
+              }
+              case "-":
+              case "_": {
+                e.preventDefault()
+                const target = this.computeZoom(this.current.w * 1.2, this.clientToViewBox(cx, cy), cx, cy)
+                this.animateTo(target)
+                this.save(target)
+                return
+              }
+              case "ArrowUp":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, y: this.current.y - panStep })
+                break
+              case "ArrowDown":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, y: this.current.y + panStep })
+                break
+              case "ArrowLeft":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, x: this.current.x - panStep })
+                break
+              case "ArrowRight":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, x: this.current.x + panStep })
+                break
+              default:
+                return
+            }
+
+            this.applyViewBox()
+            this.save()
+          },
+
+          onFitClick(e) {
+            if (!e.target.closest("[data-map-fit]")) return
+            this.resetToFit()
+          },
+
+          onResize() {
+            this.resetToFit()
           }
         }
       </script>
