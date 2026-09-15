@@ -8,11 +8,23 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout do
   Collapses to a stacked topbar/sidebar/content column at `lg:` (Tailwind's
   64rem breakpoint matches `--size-collapse`, tokens/scales.json) — a CSS
   media query stands in for the React version's `useCollapsed()` hook.
+
+  `immersive` (boolean attr, default `false`) drops the topbar and sidebar
+  below `lg:` — and the content slot's own padding with them — for a
+  consumer that wants to be a full-height stage there (`SiteChrome`'s own
+  `immersive` attr, for `GameLive`'s stage mode,
+  `docs/mobile-battle-mode.md` §4.2). `lg:` and up is unaffected either way:
+  the sidebar/topbar stay exactly as they render today.
   """
   use Phoenix.Component
 
   attr :id, :any, default: nil
   attr :class, :any, default: nil
+
+  attr :immersive, :boolean,
+    default: false,
+    doc: "below lg: hides the topbar and sidebar and drops the content slot's padding"
+
   attr :rest, :global
 
   slot :sidebar
@@ -25,8 +37,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout do
       id={@id}
       class={[
         "grid min-h-screen bg-background text-text body-text",
-        "grid-cols-1 grid-rows-[var(--size-topbar)_auto_minmax(0,1fr)]",
-        "[grid-template-areas:'topbar'_'sidebar'_'content']",
+        "grid-cols-1",
+        if(@immersive,
+          do: "grid-rows-[minmax(0,1fr)] [grid-template-areas:'content']",
+          else: [
+            "grid-rows-[var(--size-topbar)_auto_minmax(0,1fr)]",
+            "[grid-template-areas:'topbar'_'sidebar'_'content']"
+          ]
+        ),
         "lg:grid-cols-[var(--size-sidebar)_minmax(0,1fr)] lg:grid-rows-[var(--size-topbar)_minmax(0,1fr)]",
         "lg:[grid-template-areas:'sidebar_topbar'_'sidebar_content']",
         @class
@@ -48,21 +66,28 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout do
         aria-label="Sidebar"
         class={[
           "[grid-area:sidebar] bg-surface p-[var(--space-4)] overflow-y-auto",
-          "border-b border-border lg:border-b-0 lg:border-r"
+          "border-b border-border lg:border-b-0 lg:border-r",
+          @immersive && "hidden lg:block"
         ]}
       >
         {render_slot(@sidebar)}
       </nav>
       <header
         :if={@topbar != []}
-        class="[grid-area:topbar] flex items-center gap-[var(--space-4)] px-[var(--space-6)] bg-surface border-b border-border"
+        class={[
+          "[grid-area:topbar] flex items-center gap-[var(--space-4)] px-[var(--space-6)] bg-surface border-b border-border",
+          @immersive && "hidden lg:flex"
+        ]}
       >
         {render_slot(@topbar)}
       </header>
       <main
         id="main-content"
         tabindex="-1"
-        class="[grid-area:content] min-w-0 p-[var(--space-6)] overflow-y-auto focus:outline-none"
+        class={[
+          "[grid-area:content] min-w-0 overflow-y-auto focus:outline-none",
+          if(@immersive, do: "p-0 lg:p-[var(--space-6)]", else: "p-[var(--space-6)]")
+        ]}
       >
         {render_slot(@content)}
       </main>

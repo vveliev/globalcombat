@@ -561,6 +561,30 @@
   }
 }
 
+/* Stage mode (`GameLayout`'s `stage` attr, `main[data-stage]`) below lg:
+   the board's `<main>` is a definite-height grid row (`h-[100dvh]` on the
+   shell), so the figure/`.world-map`/`<svg>` chain each need an explicit
+   100% to inherit it and fill the space between the status strip and the
+   dock, instead of sizing to their own aspect ratio. `preserveAspectRatio`
+   (the SVG's default `xMidYMid meet`) still letterboxes the map rather than
+   stretching or cropping it — see the `viewBox` on `WorldMap.world_map/1`.
+   Above lg: nothing here applies; the board keeps scrolling its column. */
+@media (width < 64rem) {
+  main[data-stage] .world-map,
+  main[data-stage] .world-map svg {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* Stage mode's dock (`GameLayout`'s `:dock` slot, `aria-label="Actions"`) is
+   a bottom sheet on a touch device — every button inside gets the WCAG
+   2.5.8 minimum target size regardless of the design system's default
+   padding-driven button height. */
+[aria-label="Actions"] button {
+  min-height: 2.75rem;
+}
+
 /* The last-turn replay layer. Arrows are visible by default (opacity
    1) so a no-JS render, or a JS one that never adds `.world-map-replay--js`
    (prefers-reduced-motion), shows the whole turn at once — the "reduced motion:

@@ -70,6 +70,46 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
         </ul>
       </:players>
     </GameLayout.game_layout>
+
+    <h2 class="p-[var(--space-4)] text-sm font-semibold uppercase tracking-wide text-text-muted">
+      Stage mode — below lg: full-height map stage with a bottom-sheet dock
+      (mobile battle mode, WP3)
+    </h2>
+
+    <GameLayout.game_layout class="min-h-screen" stage>
+      <:status>
+        <span class="heading-3 tabular-nums">
+          Turn {@turn}
+        </span>
+        <StatusPill.status_pill tone="active">Resolving</StatusPill.status_pill>
+      </:status>
+
+      <:board>
+        <div class="flex h-full w-full items-center justify-center rounded-[var(--radius-md)] border border-dashed border-border text-text-muted">
+          Map stage — fills the space between the status strip and the dock
+        </div>
+      </:board>
+
+      <:dock>
+        <Button.button intent="primary" class="w-full sm:w-auto">End turn</Button.button>
+        <Button.button intent="neutral" class="w-full sm:w-auto">Force turn</Button.button>
+      </:dock>
+
+      <:players>
+        <h2 class="mb-[var(--space-3)] text-sm font-semibold uppercase tracking-wide text-text-muted">
+          Players
+        </h2>
+        <ul class="flex flex-col gap-[var(--space-3)]">
+          <li :for={player <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
+            <span>{player.name}</span>
+            <span class="flex items-center gap-[var(--space-2)]">
+              <span class="text-text-muted">{player.armies}</span>
+              <StatusPill.status_pill tone={player.tone}>{player.state}</StatusPill.status_pill>
+            </span>
+          </li>
+        </ul>
+      </:players>
+    </GameLayout.game_layout>
     """
   end
 end
