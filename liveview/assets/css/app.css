@@ -283,9 +283,10 @@
 }
 
 /* The elements board is nearly square; at the world map's full width it would
-   run taller than most viewports. */
+   run taller than most viewports. 53rem keeps its art at the old 44rem size
+   now that its view box carries the legend strip on the left. */
 .world-map[data-map="elements"] {
-  max-width: 44rem;
+  max-width: 53rem;
 }
 
 .world-map-sea {
@@ -366,6 +367,49 @@
   stroke-width: 3px;
   stroke-linejoin: round;
   pointer-events: none;
+}
+
+/* Region bonus legend: a printed-board style box drawn into the sea in the
+   board's bottom-left corner. Sizes are SVG user units, so it pans and zooms
+   with the board like the rest of the art. */
+.world-map-legend {
+  pointer-events: none;
+  user-select: none;
+}
+
+.world-map-legend-plate {
+  fill: var(--color-surface);
+  fill-opacity: 0.9;
+  stroke: var(--map-ink);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+}
+
+.world-map-legend-rule {
+  stroke: var(--map-ink);
+  stroke-opacity: 0.25;
+  stroke-width: 1;
+}
+
+.world-map-legend-title {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  fill: var(--color-text-muted);
+}
+
+.world-map-legend-name {
+  font-family: inherit;
+  font-size: 13px;
+  fill: var(--color-text);
+}
+
+.world-map-legend-bonus {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  fill: var(--color-primary);
 }
 
 /* :frontier lens: the delta against the strongest adjacent

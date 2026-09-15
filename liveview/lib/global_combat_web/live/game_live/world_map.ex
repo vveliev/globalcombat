@@ -162,7 +162,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
     assigns =
       assigns
-      |> assign(:view_box, Geometry.view_box(assigns.map_name))
+      |> assign(:view_box, view_box(assigns.map_name))
       |> assign(:owner_names, owner_names(assigns.players))
       |> assign(:area_names, area_names(assigns.areas))
       |> assign(:lens, lens)
@@ -171,6 +171,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         :region_labels,
         if(lens == :region, do: region_labels(assigns.map_name), else: [])
       )
+      |> assign(:legend, legend(assigns.map_name))
       |> assign(:replay_arrows, Enum.filter(assigns.replay_steps, &(&1.from && &1.to)))
       |> assign(:replay_captures, Enum.filter(assigns.replay_steps, & &1.captured))
 
@@ -255,6 +256,35 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           />
         </g>
         <use href="#gc-region-outlines" class="world-map-outlines" />
+        <g
+          class="world-map-legend"
+          aria-hidden="true"
+          transform={"translate(#{@legend.x} #{@legend.y}) scale(#{@legend.scale})"}
+        >
+          <rect
+            class="world-map-legend-plate"
+            width={@legend.width}
+            height={@legend.height}
+            rx="8"
+          />
+          <text class="world-map-legend-title" x="10" y="19">REGION BONUSES</text>
+          <line class="world-map-legend-rule" x1="10" y1="27" x2={@legend.width - 10} y2="27" />
+          <g
+            :for={{row, i} <- Enum.with_index(@legend.rows)}
+            class="world-map-legend-row"
+            data-region={row.number}
+          >
+            <text class="world-map-legend-name" x="10" y={45 + i * 19}>{row.name}</text>
+            <text
+              class="world-map-legend-bonus"
+              x={@legend.width - 10}
+              y={45 + i * 19}
+              text-anchor="end"
+            >
+              +{row.bonus}
+            </text>
+          </g>
+        </g>
         <g class="world-map-highlights" aria-hidden="true">
           <use :if={@selected_area} href={"#gc-area-#{@selected_area}"} class="world-map-halo" />
           <use
@@ -988,6 +1018,40 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       {x, y} = region_centroid(map_name, Map.fetch!(areas_by_region, region_number))
       %{number: region_number, bonus: bonus, x: x, y: y}
     end
+  end
+
+  # The elements art fills its generated, cropped view box edge to edge, so
+  # the region bonus legend gets a 100-unit strip of sea added on the left.
+  # Everything that reads the view box (the SVG, `.MapViewport`'s base box,
+  # `board_ground/1`) takes it from this one assign, so they stay in step.
+  @elements_view_box "136 54 556 421"
+
+  @doc "The board's SVG `viewBox`: `MapGeometry`'s, plus the legend strip on elements."
+  def view_box(:elements), do: @elements_view_box
+  def view_box(map_name), do: Geometry.view_box(map_name)
+
+  # A printed-board style legend of every region's control bonus, drawn into
+  # the sea in the board's bottom-left corner so it pans and zooms with the
+  # art. `{x, y}` is the box's top-left, checked clear of every territory and
+  # sea lane on the world map; elements draws it smaller because that board
+  # renders ~1.5x larger per SVG unit. Decorative and aria-hidden —
+  # `GameLive`'s `region_bonuses/1` carries the same numbers accessibly.
+  @legend_width 150
+  @legend_height 152
+  @legend_placement %{original: {8, 320, 1}, elements: {142, 375, 0.62}}
+
+  @doc false
+  def legend(map_name) do
+    {x, y, scale} = Map.fetch!(@legend_placement, map_name)
+
+    # Highest bonus first; `sort_by` is stable, so ties keep region order.
+    rows =
+      for {number, name, _num_areas, bonus} <- MapInfo.regions(map_name) do
+        %{number: number, name: name, bonus: bonus}
+      end
+      |> Enum.sort_by(& &1.bonus, :desc)
+
+    %{x: x, y: y, scale: scale, width: @legend_width, height: @legend_height, rows: rows}
   end
 
   defp region_centroid(map_name, area_numbers) do

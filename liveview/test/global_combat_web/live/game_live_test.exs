@@ -483,6 +483,40 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  test "region bonuses are drawn into the map as a legend, with the list only visible on phones",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, "#world-map svg g.world-map-legend[aria-hidden='true']")
+
+    for {number, name, _num_areas, bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
+      row = "#world-map .world-map-legend-row[data-region='#{number}']"
+      assert has_element?(alice_view, row, name)
+      assert has_element?(alice_view, row, "+#{bonus}")
+    end
+
+    # Both the legend and the accessible list run highest bonus first.
+    names_by_bonus =
+      GlobalCombat.Engine.MapInfo.regions(:original)
+      |> Enum.sort_by(&elem(&1, 3), :desc)
+      |> Enum.map(&elem(&1, 1))
+
+    list_names =
+      alice_view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#region-bonuses li span:first-child")
+      |> Enum.map(&LazyHTML.text/1)
+
+    assert list_names == names_by_bonus
+
+    # The accessible list stays in the players rail/drawer, visible below md:
+    # and screen-reader only from md: up, where the map's legend is readable.
+    assert has_element?(alice_view, "#region-bonuses.md\\:sr-only")
+    refute has_element?(alice_view, "figure #region-bonuses")
+  end
+
   describe "territory click-to-order composition (GIF-111)" do
     # `start_two_player_game/2` deals :original's 42 areas round-robin over 2 players
     # (`Games.Server.deal_areas/2`): Alice (player 1) gets every odd area, Bob (player

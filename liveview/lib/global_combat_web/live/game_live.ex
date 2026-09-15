@@ -1370,24 +1370,41 @@ defmodule GlobalCombatWeb.GameLive do
   # from the same `MapInfo.regions/1` the board's areas/adjacency already
   # come from rather than hardcoded per-map text, so a future map addition
   # doesn't need a matching edit here.
+  #
+  # The map itself draws these bonuses as a legend in its bottom-left sea
+  # (`WorldMap.legend/1`), like a printed board. That legend is SVG art that
+  # shrinks with the board, too small to read below `md:`, so there this
+  # list stays visible in the players drawer (`players_extras/1`); from `md:`
+  # up it is screen-reader only, since the legend is aria-hidden.
   attr :map_name, :atom, required: true
 
   defp region_bonuses(assigns) do
-    assigns = assign(assigns, :regions, MapInfo.regions(assigns.map_name))
+    # Same highest-bonus-first order as the map's legend.
+    regions = assigns.map_name |> MapInfo.regions() |> Enum.sort_by(&elem(&1, 3), :desc)
+    assigns = assign(assigns, :regions, regions)
 
     ~H"""
-    <Card.card class="min-w-[16rem]">
-      <:header>Region Bonuses</:header>
-      <ul class="flex flex-col gap-[var(--space-1)] text-sm">
+    <section
+      id="region-bonuses"
+      aria-labelledby="region-bonuses-heading"
+      class="mt-[var(--space-2)] flex flex-wrap items-baseline gap-x-[var(--space-3)] text-xs leading-tight text-text md:sr-only"
+    >
+      <h2
+        id="region-bonuses-heading"
+        class="m-0 font-semibold uppercase tracking-wide text-text-muted"
+      >
+        Region Bonuses
+      </h2>
+      <ul class="m-0 flex list-none flex-wrap gap-x-[var(--space-3)] p-0">
         <li
           :for={{_number, name, _num_areas, army_bonus} <- @regions}
-          class="flex items-center justify-between gap-[var(--space-3)]"
+          class="flex items-center gap-[var(--space-1)]"
         >
           <span>{name}</span>
-          <span class="font-semibold">{army_bonus}</span>
+          <span class="font-semibold tabular-nums">{army_bonus}</span>
         </li>
       </ul>
-    </Card.card>
+    </section>
     """
   end
 
