@@ -1223,6 +1223,54 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  describe "players drawer (mobile battle mode WP4)" do
+    test "the drawer carries the roster, chat form, Quit and the site nav links", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(dialog#game-drawer[aria-label="Players and chat"]))
+      assert has_element?(alice_view, "#game-drawer", "Alice")
+      assert has_element?(alice_view, "#game-drawer", "Bob")
+      assert has_element?(alice_view, "#game-drawer #chat-form")
+      assert has_element?(alice_view, "#game-drawer ul#chat-messages")
+      assert has_element?(alice_view, "#game-drawer button", "Quit")
+      assert has_element?(alice_view, ~s(#game-drawer a[href="/"]), "Home")
+      assert has_element?(alice_view, ~s(#game-drawer a[href="/Game-Manual"]), "Game Manual")
+
+      # Quit moved out of the board's turn controls and into the drawer — it
+      # must not be duplicated in both places.
+      refute has_element?(alice_view, "#turn-controls button", "Quit")
+      assert has_element?(alice_view, "#turn-controls button", "End Turn")
+      assert has_element?(alice_view, "#turn-controls button", "Force Turn")
+    end
+
+    test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view, bob_view: bob_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      refute has_element?(alice_view, "#game-drawer button", "Quit")
+    end
+
+    test "the drawer opener has aria-controls/aria-expanded and an initially-hidden unread dot",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(
+               alice_view,
+               ~s(button#drawer-open[aria-controls="game-drawer"][aria-expanded="false"])
+             )
+
+      assert has_element?(alice_view, "#drawer-open [data-unread-dot].hidden")
+    end
+  end
+
   describe "last-turn replay layer" do
     # Area 1 (Alaska) -> 3 (Alberta) is Alice's own owned-adjacent pair (transfer
     # mode, see the click-to-order describe block above) — deterministic (no

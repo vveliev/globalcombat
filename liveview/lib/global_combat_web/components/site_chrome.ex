@@ -89,10 +89,16 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
     """
   end
 
+  @doc """
+  The site nav links, shared with `GameLive`'s players drawer below `lg:` —
+  the game screen's own top strip has no room for the "Menu" disclosure this
+  chrome renders below `lg:`, so the drawer carries its own copy of the same
+  links rather than leaving them reachable only by closing the drawer first.
+  """
   attr :current_account, :any, required: true
   attr :current_path, :string, required: true
 
-  defp sidebar_links(assigns) do
+  def sidebar_links(assigns) do
     ~H"""
     <.nav_link href="/" current_path={@current_path}>Home</.nav_link>
     <.nav_link href={~p"/Game-Manual"} current_path={@current_path}>Game Manual</.nav_link>

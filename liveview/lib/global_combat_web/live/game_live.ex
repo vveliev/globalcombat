@@ -21,7 +21,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   use GlobalCombatWeb, :live_view
 
-  import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1]
+  import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1, sidebar_links: 1]
 
   alias GlobalCombat.Engine.MapInfo
   alias GlobalCombat.Games.Live, as: Games
@@ -528,6 +528,20 @@ defmodule GlobalCombatWeb.GameLive do
               <:option value="frontier">Frontier</:option>
             </SegmentedControl.segmented_control>
           </form>
+          <button
+            type="button"
+            id="drawer-open"
+            aria-controls="game-drawer"
+            aria-expanded="false"
+            class="relative ml-auto rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+          >
+            Players
+            <span
+              data-unread-dot
+              aria-hidden="true"
+              class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-red-600"
+            />
+          </button>
         </:status>
 
         <:board>
@@ -553,6 +567,20 @@ defmodule GlobalCombatWeb.GameLive do
             chat_form={@chat_form}
             logged_in={!!@current_account}
           />
+          <Button.button
+            :if={
+              @status == :playing && @view.viewer_number && !@view.ended &&
+                !my_player(@view).eliminated
+            }
+            intent="danger"
+            phx-click="quit"
+            class="mt-[var(--space-4)]"
+          >
+            Quit
+          </Button.button>
+          <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
+            <.sidebar_links current_account={@current_account} current_path={assigns[:current_path]} />
+          </div>
         </:players>
       </GameLayout.game_layout>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
@@ -905,9 +933,6 @@ defmodule GlobalCombatWeb.GameLive do
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
-      <Button.button :if={!my_player(@view).eliminated} intent="neutral" phx-click="quit">
-        Quit
-      </Button.button>
     </div>
     """
   end
@@ -1351,6 +1376,7 @@ defmodule GlobalCombatWeb.GameLive do
       >
         <Input.input
           id="chat-message"
+          name="text"
           field={@chat_form[:text]}
           label="Message"
           placeholder="Send a message"
@@ -1358,9 +1384,13 @@ defmodule GlobalCombatWeb.GameLive do
         />
         <Button.button type="submit" intent="neutral" class="self-end">Send</Button.button>
       </.form>
-      <ul aria-live="polite" class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
+      <ul
+        aria-live="polite"
+        id="chat-messages"
+        class="flex flex-col-reverse gap-[var(--space-1)] text-sm"
+      >
         <li :if={@messages == []} class="text-text-muted">No messages yet.</li>
-        <li :for={m <- @messages}>
+        <li :for={m <- @messages} data-message>
           <span class="font-semibold">{m.source_name}:</span> {m.text}
         </li>
       </ul>
