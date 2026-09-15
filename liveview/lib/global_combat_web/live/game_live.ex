@@ -517,6 +517,7 @@ defmodule GlobalCombatWeb.GameLive do
       <GameLayout.game_layout
         id="game-board"
         players_first={@status == :playing && @view.ended}
+        data-stage={@status == :playing && !@view.ended}
         phx-hook=".FocusManager"
       >
         <:status>
@@ -528,6 +529,14 @@ defmodule GlobalCombatWeb.GameLive do
               <:option value="frontier">Frontier</:option>
             </SegmentedControl.segmented_control>
           </form>
+          <button
+            :if={@status == :playing}
+            type="button"
+            class="game-stage-only game-hud-chip"
+            phx-click={JS.toggle_class("is-drawer-open", to: "#game-board")}
+          >
+            Players
+          </button>
         </:status>
 
         <:board>
@@ -867,7 +876,10 @@ defmodule GlobalCombatWeb.GameLive do
           </figcaption>
         </figure>
       </div>
-      <div class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-[var(--size-rail-lg)] xl:shrink-0 xl:flex-col">
+      <div
+        id="board-rail"
+        class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-[var(--size-rail-lg)] xl:shrink-0 xl:flex-col"
+      >
         <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
         <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
         <.order_panel
@@ -1152,7 +1164,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp turn_results(assigns) do
     ~H"""
-    <Card.card class="min-w-[16rem]">
+    <Card.card id="turn-results" class="min-w-[16rem]">
       <:header>Turn {@turn} results</:header>
       <ol
         id="turn-results-list"
@@ -1174,18 +1186,17 @@ defmodule GlobalCombatWeb.GameLive do
     assigns = assign(assigns, :regions, MapInfo.regions(assigns.map_name))
 
     ~H"""
-    <Card.card class="min-w-[16rem]">
-      <:header>Region Bonuses</:header>
-      <ul class="flex flex-col gap-[var(--space-1)] text-sm">
-        <li
-          :for={{_number, name, _num_areas, army_bonus} <- @regions}
-          class="flex items-center justify-between gap-[var(--space-3)]"
-        >
+    <details id="region-bonuses" class="min-w-[16rem] rounded-[var(--radius-panel)] border border-border bg-surface p-[var(--space-3)]" open>
+      <summary class="cursor-pointer font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring">
+        Region Bonuses
+      </summary>
+      <ul class="mt-[var(--space-2)] flex flex-col gap-[var(--space-1)] text-sm">
+        <li :for={{_number, name, _num_areas, army_bonus} <- @regions} class="flex items-center justify-between gap-[var(--space-3)]">
           <span>{name}</span>
-          <span class="font-semibold">{army_bonus}</span>
+          <span class="font-semibold tabular-nums">+{army_bonus}</span>
         </li>
       </ul>
-    </Card.card>
+    </details>
     """
   end
 
