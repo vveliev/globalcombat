@@ -42,17 +42,52 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   content slot, so a second forced viewport-height here would inflate the page
   to roughly double the visible content. A standalone consumer (`DesignSmokeLive`)
   passes `class="min-h-screen"` explicitly to get the old full-viewport look back.
+  `stage` mode (below) is the one exception: it pins the whole shell to
+  `100dvh` on purpose, matching `SiteChrome`'s `immersive` attr stripping the
+  chrome around it down to nothing at the same breakpoint.
+
+  `stage` (boolean attr, default `false`) turns the shell into a full-height
+  map stage with a bottom-sheet `:dock` below `lg:` — the mobile battle mode
+  spec (`docs/mobile-battle-mode.md` §4.1). Below `lg:` the grid becomes
+  `status/board/dock` (`h-[100dvh]`, `overflow-hidden`, a safe-area top inset
+  on `:status`), `:board` drops its padding and its own scroll (the board
+  itself owns panning), and `:dock` is a `max-h-[45dvh]` internal-scroll sheet
+  with a safe-area bottom inset, `aria-label="Actions"`. `:players` needs no
+  special handling from `stage` at all here — the `<dialog>` drawer above is
+  already closed by default below `lg:` (native `dialog:not([open])`
+  behavior; the `.Drawer` hook only opens it on a genuine user action), so it
+  simply stays out of the way. At `lg:` and up, `stage` gives the rail
+  column a second row so `:dock` sits at its top, above the drawer — both
+  `[grid-area]` siblings of `:board`, not nested inside the drawer, so
+  `:dock` renders exactly once and is simply repositioned by `grid-area` per
+  breakpoint (`:board` spans both rail rows to back-fill whatever space
+  `:dock`'s own row leaves). Rendering `:dock` twice — once for the sheet,
+  once inside the rail — was the first cut of this, dropped once it was
+  clear every id inside it (`order-panel`, `order-form`, `turn-controls`, …)
+  would then exist twice in one document. `stage` is silently a no-op unless
+  `:dock` has content — with an empty `:dock` slot the shell falls back to
+  today's stacked/side-by-side shape.
   """
   use Phoenix.Component
 
   attr :id, :any, default: nil
   attr :class, :any, default: nil
   attr :players_first, :boolean, default: false
+
+  attr :stage, :boolean,
+    default: false,
+    doc:
+      "below lg: status becomes a fixed/translucent top strip, board fills the viewport with no scroll, and :dock becomes a bottom sheet (the :players drawer stays closed by default there on its own). Above lg: unchanged, :dock renders at the top of the players rail."
+
   attr :rest, :global
 
   slot :status
   slot :board, required: true
   slot :players
+
+  slot :dock,
+    doc:
+      "contextual actions; rendered inline at the top of the players rail above lg, as the bottom sheet below lg when stage is set. Ignored entirely when stage is false."
 
   def game_layout(assigns) do
     ~H"""
@@ -60,13 +95,24 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       id={@id}
       class={[
         "grid bg-background text-text body-text",
-        "grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto]",
-        if(@players_first,
-          do: "[grid-template-areas:'status'_'players'_'board']",
-          else: "[grid-template-areas:'status'_'board'_'players']"
+        "grid-cols-1",
+        if(@stage,
+          do:
+            "h-[100dvh] grid-rows-[auto_minmax(0,1fr)_auto] [grid-template-areas:'status'_'board'_'dock'] overflow-hidden pt-[env(safe-area-inset-top)]",
+          else: [
+            "grid-rows-[auto_minmax(0,1fr)_auto]",
+            if(@players_first,
+              do: "[grid-template-areas:'status'_'players'_'board']",
+              else: "[grid-template-areas:'status'_'board'_'players']"
+            )
+          ]
         ),
-        "lg:grid-cols-[minmax(0,1fr)_var(--size-rail)] lg:grid-rows-[auto_minmax(0,1fr)]",
-        "lg:[grid-template-areas:'status_status'_'board_players']",
+        if(@stage,
+          do:
+            "lg:h-auto lg:overflow-visible lg:pt-0 lg:grid-cols-[minmax(0,1fr)_var(--size-rail)] lg:grid-rows-[auto_auto_minmax(0,1fr)] lg:[grid-template-areas:'status_status'_'board_dock'_'board_players']",
+          else:
+            "lg:grid-cols-[minmax(0,1fr)_var(--size-rail)] lg:grid-rows-[auto_minmax(0,1fr)] lg:[grid-template-areas:'status_status'_'board_players']"
+        ),
         @class
       ]}
       {@rest}
@@ -77,13 +123,32 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         aria-live="polite"
         tabindex="-1"
         data-focus-landmark
-        class="[grid-area:status] flex flex-wrap items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] bg-surface border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring"
+        class={[
+          "[grid-area:status] flex flex-wrap items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring",
+          if(@stage, do: "bg-surface/90 backdrop-blur-[6px]", else: "bg-surface")
+        ]}
       >
         {render_slot(@status)}
       </section>
-      <main class="[grid-area:board] min-w-0 min-h-0 p-[var(--space-4)] overflow-auto">
+      <main
+        data-stage={@stage}
+        class={[
+          "[grid-area:board] min-w-0 min-h-0",
+          if(@stage,
+            do: "p-0 overflow-hidden lg:p-[var(--space-4)] lg:overflow-auto",
+            else: "p-[var(--space-4)] overflow-auto"
+          )
+        ]}
+      >
         {render_slot(@board)}
       </main>
+      <section
+        :if={@stage and @dock != []}
+        aria-label="Actions"
+        class="[grid-area:dock] max-h-[45dvh] overflow-y-auto bg-surface border-t border-border p-[var(--space-3)] pb-[max(var(--space-3),env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:border-t-0 lg:border-l lg:p-[var(--space-4)] lg:pb-0"
+      >
+        {render_slot(@dock)}
+      </section>
       <dialog
         :if={@players != []}
         id="game-drawer"

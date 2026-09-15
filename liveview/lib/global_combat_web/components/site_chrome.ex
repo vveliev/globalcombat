@@ -38,11 +38,17 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   attr :current_account, :any, default: nil
   attr :page_title, :string, default: nil
   attr :current_path, :string, default: nil, doc: "request path, for the active sidebar link"
+
+  attr :immersive, :boolean,
+    default: false,
+    doc:
+      "below lg: hides the topbar and sidebar and drops content padding, for a consumer that wants to be its own full-height stage there (GameLive's stage mode, docs/mobile-battle-mode.md §4.2)"
+
   slot :inner_block, required: true
 
   def site_chrome(assigns) do
     ~H"""
-    <GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout.admin_layout>
+    <GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout.admin_layout immersive={@immersive}>
       <:topbar>
         <a href="/" class="flex items-center gap-[var(--space-2)] font-semibold text-text">
           GLOBAL COMBAT
@@ -91,9 +97,11 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
 
   @doc """
   The site nav links, shared with `GameLive`'s players drawer below `lg:` —
-  the game screen's own top strip has no room for the "Menu" disclosure this
-  chrome renders below `lg:`, so the drawer carries its own copy of the same
-  links rather than leaving them reachable only by closing the drawer first.
+  once `immersive` (and stage mode) hides this module's own topbar/sidebar
+  copy there, the game screen's top strip has no room for the "Menu"
+  disclosure this chrome renders below `lg:`, so the drawer carries its own
+  copy of the same links rather than leaving them reachable only by closing
+  the drawer first.
   """
   attr :current_account, :any, required: true
   attr :current_path, :string, required: true
