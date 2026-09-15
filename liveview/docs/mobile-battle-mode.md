@@ -108,7 +108,8 @@ New attr `immersive :boolean, default: false`. When true, the topbar and sidebar
 | `order_panel/1` | rail column beside the map | `:dock` |
 | Turn controls (End Turn, Waiting, Force Turn) | below the board table | `:dock`, rendered only when no area is selected |
 | Quit button | turn controls | `:players` (drawer), bottom, `intent="danger"` |
-| `region_bonuses/1`, `your_orders_card/1`, `turn_results/1` | rail column beside the map | `:players`, after the roster and before chat |
+| `region_bonuses/1` | rail column beside the map | overlay in the map figure's bottom-left corner from `md` up; a wrapping strip under the map below `md` |
+| `your_orders_card/1`, `turn_results/1` | rail column beside the map | `:players`, after the roster and before chat |
 | `board_table/1` (sr-only) | board | board (unchanged) |
 | Replay controls | status strip | status strip (unchanged; compact button labels below `lg`) |
 

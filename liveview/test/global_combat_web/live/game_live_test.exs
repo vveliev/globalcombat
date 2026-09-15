@@ -285,7 +285,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert has_element?(alice_view, "input#chat-message[placeholder='Send a message']")
   end
 
-  test "the region-bonuses/order-panel column only sits beside the map once there's room for both outer rails too",
+  test "the order-panel column only sits beside the map once there's room for both outer rails too",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -508,6 +508,24 @@ defmodule GlobalCombatWeb.GameLiveTest do
     for {_number, name, _num_areas, army_bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
       assert html =~ ~r/#{Regex.escape(name)}[\s\S]*?#{army_bonus}/
     end
+  end
+
+  test "the Region Bonuses legend overlays the map's bottom-left corner instead of taking a column slot",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, "figure.relative > #region-bonuses")
+
+    # Overlay from md: up; below that the corner is too small, so it flows
+    # under the map instead of covering territories.
+    assert render(alice_view) =~
+             ~r/id="region-bonuses"[^>]*class="[^"]*md:absolute md:bottom-\[var\(--space-2\)\] md:left-\[var\(--space-2\)\]/
+
+    # Taps and pinches under the legend must still reach the map.
+    assert has_element?(alice_view, "#region-bonuses.pointer-events-none")
+    # Outside the zoomable viewport, so panning never drags it off-screen.
+    refute has_element?(alice_view, "#world-map #region-bonuses")
   end
 
   describe "territory click-to-order composition (GIF-111)" do
