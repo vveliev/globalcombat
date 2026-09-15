@@ -581,6 +581,12 @@ defmodule GlobalCombatWeb.GameLive do
             chat_form={@chat_form}
             logged_in={!!@current_account}
           />
+          <%!-- lg: and up this drawer is the permanent static rail (GameLayout's
+          moduledoc) — a Quit button here would put it on the desktop screen for
+          the first time, which "desktop is unchanged" (mobile-battle-mode.md
+          WP4's done-when) rules out. #turn-controls below keeps the one Quit
+          button desktop has always had; lg:hidden gives the mobile drawer the
+          one Task 5 asked for, without duplicating it above lg. --%>
           <Button.button
             :if={
               @status == :playing && @view.viewer_number && !@view.ended &&
@@ -588,7 +594,7 @@ defmodule GlobalCombatWeb.GameLive do
             }
             intent="danger"
             phx-click="quit"
-            class="mt-[var(--space-4)]"
+            class="mt-[var(--space-4)] lg:hidden"
           >
             Quit
           </Button.button>
@@ -1020,6 +1026,9 @@ defmodule GlobalCombatWeb.GameLive do
       <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
+      <Button.button :if={!my_player(@view).eliminated} intent="neutral" phx-click="quit">
+        Quit
+      </Button.button>
     </div>
     """
   end

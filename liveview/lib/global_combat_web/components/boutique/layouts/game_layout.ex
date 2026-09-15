@@ -149,7 +149,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
             // sibling <li> with no data-message, and would otherwise mask the
             // very first real message ever arriving (1 placeholder -> 1
             // message is not an increase).
-            return document.querySelectorAll("#chat-messages li[data-message]").length
+            return this.el.querySelectorAll("#chat-messages li[data-message]").length
           },
 
           // Real open/close calls: only for a genuine user action or an actual
