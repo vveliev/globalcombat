@@ -999,7 +999,7 @@ defmodule GlobalCombatWeb.GameLive do
     narrower width already does). --%>
     <div class="flex flex-col gap-[var(--space-4)] 2xl:flex-row 2xl:items-start">
       <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] 2xl:flex-1">
-        <figure class="relative m-0 w-full">
+        <figure class="m-0 w-full">
           <WorldMap.world_map
             map_name={@view.map_name}
             areas={@view.areas}
@@ -1323,13 +1323,11 @@ defmodule GlobalCombatWeb.GameLive do
   # come from rather than hardcoded per-map text, so a future map addition
   # doesn't need a matching edit here.
   #
-  # From `md:` up, a compact legend over the map's bottom-left corner (open
-  # sea on both boards) rather than a full card in the side column. Below
-  # `md:` that corner is too small to hold it without covering territories,
-  # so it flows under the map as a two-line wrapping strip instead — still far
-  # shorter than the old card. `pointer-events-none` so taps, pans and pinches
-  # under the overlay still reach the map; it sits in the `<figure>`, outside
-  # `#world-map`, so zooming the map never moves or clips it.
+  # The map itself draws these bonuses as a legend in its bottom-left sea
+  # (`WorldMap.legend/1`), like a printed board. That legend is SVG art that
+  # shrinks with the board, too small to read below `md:`, so there
+  # this list shows as a two-line strip under the map; from `md:` up it is
+  # screen-reader only, since the legend is aria-hidden.
   attr :map_name, :atom, required: true
 
   defp region_bonuses(assigns) do
@@ -1339,18 +1337,18 @@ defmodule GlobalCombatWeb.GameLive do
     <section
       id="region-bonuses"
       aria-labelledby="region-bonuses-heading"
-      class="pointer-events-none mt-[var(--space-2)] flex flex-wrap items-baseline gap-x-[var(--space-3)] text-xs leading-tight text-text md:absolute md:bottom-[var(--space-2)] md:left-[var(--space-2)] md:mt-0 md:block md:rounded-[var(--radius-md)] md:border md:border-border md:bg-surface/90 md:px-[var(--space-2)] md:py-[var(--space-1)] md:text-[0.625rem] md:shadow-sm lg:text-xs"
+      class="mt-[var(--space-2)] flex flex-wrap items-baseline gap-x-[var(--space-3)] text-xs leading-tight text-text md:sr-only"
     >
       <h2
         id="region-bonuses-heading"
-        class="m-0 font-semibold uppercase tracking-wide text-text-muted md:mb-[var(--space-1)]"
+        class="m-0 font-semibold uppercase tracking-wide text-text-muted"
       >
         Region Bonuses
       </h2>
-      <ul class="m-0 flex list-none flex-wrap gap-x-[var(--space-3)] p-0 md:flex-col">
+      <ul class="m-0 flex list-none flex-wrap gap-x-[var(--space-3)] p-0">
         <li
           :for={{_number, name, _num_areas, army_bonus} <- @regions}
-          class="flex items-center justify-between gap-[var(--space-1)] md:gap-[var(--space-3)]"
+          class="flex items-center gap-[var(--space-1)]"
         >
           <span>{name}</span>
           <span class="font-semibold tabular-nums">{army_bonus}</span>

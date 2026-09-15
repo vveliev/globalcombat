@@ -205,6 +205,49 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
     end
   end
 
+  describe "region bonus legend" do
+    for map_name <- [:original, :elements] do
+      test "#{map_name}: lists every region's bonus in one aria-hidden legend inside the view box" do
+        map_name = unquote(map_name)
+        assigns = %{areas: [board_area(1)], players: players(), map_name: map_name}
+
+        html =
+          rendered_to_string(~H"""
+          <WorldMap.world_map map_name={@map_name} areas={@areas} players={@players} />
+          """)
+
+        doc = LazyHTML.from_fragment(html)
+        legend = LazyHTML.query(doc, "g.world-map-legend[aria-hidden='true']")
+        assert Enum.count(legend) == 1
+
+        for {number, name, _num_areas, bonus} <- GlobalCombat.Engine.MapInfo.regions(map_name) do
+          row = LazyHTML.query(legend, ".world-map-legend-row[data-region='#{number}']")
+          assert LazyHTML.text(row) =~ name
+          assert LazyHTML.text(row) =~ "+#{bonus}"
+        end
+
+        [vx, vy, vw, vh] =
+          map_name |> WorldMap.view_box() |> String.split() |> Enum.map(&String.to_integer/1)
+
+        %{x: x, y: y, scale: scale, width: w, height: h} = WorldMap.legend(map_name)
+
+        assert x >= vx and y >= vy
+        assert x + w * scale <= vx + vw
+        assert y + h * scale <= vy + vh
+      end
+    end
+
+    test "elements widens its view box with a sea strip on the left for the legend" do
+      [x, _y, w, _h] = String.split(WorldMap.view_box(:elements))
+      [gx, _gy, gw, _gh] = String.split(GlobalCombatWeb.GameLive.MapGeometry.view_box(:elements))
+
+      assert String.to_integer(x) < String.to_integer(gx)
+
+      assert String.to_integer(x) + String.to_integer(w) ==
+               String.to_integer(gx) + String.to_integer(gw)
+    end
+  end
+
   describe "region_owner/1" do
     test "returns the shared owner when every area in the region is visible and one-owned" do
       areas = Enum.map(@australia, &area(&1, 3))

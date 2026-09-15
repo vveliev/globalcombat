@@ -510,21 +510,22 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
-  test "the Region Bonuses legend overlays the map's bottom-left corner instead of taking a column slot",
+  test "region bonuses are drawn into the map as a legend, with the list under the map only on phones",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
 
-    assert has_element?(alice_view, "figure.relative > #region-bonuses")
+    assert has_element?(alice_view, "#world-map svg g.world-map-legend[aria-hidden='true']")
 
-    # Overlay from md: up; below that the corner is too small, so it flows
-    # under the map instead of covering territories.
-    assert render(alice_view) =~
-             ~r/id="region-bonuses"[^>]*class="[^"]*md:absolute md:bottom-\[var\(--space-2\)\] md:left-\[var\(--space-2\)\]/
+    for {number, name, _num_areas, bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
+      row = "#world-map .world-map-legend-row[data-region='#{number}']"
+      assert has_element?(alice_view, row, name)
+      assert has_element?(alice_view, row, "+#{bonus}")
+    end
 
-    # Taps and pinches under the legend must still reach the map.
-    assert has_element?(alice_view, "#region-bonuses.pointer-events-none")
-    # Outside the zoomable viewport, so panning never drags it off-screen.
+    # The accessible list no longer takes a slot in the side column: it sits
+    # under the map, visible below md: and screen-reader only from md: up.
+    assert has_element?(alice_view, "figure > #region-bonuses.md\\:sr-only")
     refute has_element?(alice_view, "#world-map #region-bonuses")
   end
 
