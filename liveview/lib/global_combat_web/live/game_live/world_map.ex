@@ -308,6 +308,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         export default {
           mounted() {
             this.el.addEventListener("keydown", (e) => {
+              if (this.el.getAttribute("role") !== "button") return
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()
                 this.pushEvent(this.el.dataset.selectEvent || "select_area", {area: this.el.dataset.area})
@@ -364,7 +365,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-fog={!@area.visible}
       data-frontier={@fill.dim && "dim"}
       data-element={@element}
-      phx-hook={@interactive && ".TerritoryKeyboard"}
+      phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_area"}
       phx-value-area={@interactive && @area.number}
     >
@@ -624,7 +625,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       aria-label={@label}
       data-area={@area.number}
       data-select-event={@interactive && "select_order"}
-      phx-hook={@interactive && ".TerritoryKeyboard"}
+      phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_order"}
       phx-value-area={@interactive && @area.number}
     >
