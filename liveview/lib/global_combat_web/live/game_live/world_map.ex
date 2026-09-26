@@ -153,12 +153,16 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: [],
     doc: "`GameLive.Replay.steps/4` output for `PlayerView.last_turn_events`"
 
+  attr :game_id, :any,
+    default: nil,
+    doc: "used only as the `.MapViewport` hook's sessionStorage key; nil disables persistence"
+
   def world_map(assigns) do
     lens = effective_lens(assigns.lens, assigns.viewer_number)
 
     assigns =
       assigns
-      |> assign(:view_box, Geometry.view_box(assigns.map_name))
+      |> assign(:view_box, view_box(assigns.map_name))
       |> assign(:owner_names, owner_names(assigns.players))
       |> assign(:area_names, area_names(assigns.areas))
       |> assign(:lens, lens)
@@ -167,11 +171,21 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         :region_labels,
         if(lens == :region, do: region_labels(assigns.map_name), else: [])
       )
+      |> assign(:legend, legend(assigns.map_name))
       |> assign(:replay_arrows, Enum.filter(assigns.replay_steps, &(&1.from && &1.to)))
       |> assign(:replay_captures, Enum.filter(assigns.replay_steps, & &1.captured))
 
     ~H"""
-    <div class="world-map" data-map={@map_name}>
+    <div
+      id="world-map"
+      class="world-map"
+      data-map={@map_name}
+      data-view-box={@view_box}
+      data-game-id={@game_id}
+      data-zoomed="false"
+      tabindex="0"
+      phx-hook=".MapViewport"
+    >
       <svg
         viewBox={@view_box}
         role="group"
@@ -242,6 +256,35 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           />
         </g>
         <use href="#gc-region-outlines" class="world-map-outlines" />
+        <g
+          class="world-map-legend"
+          aria-hidden="true"
+          transform={"translate(#{@legend.x} #{@legend.y}) scale(#{@legend.scale})"}
+        >
+          <rect
+            class="world-map-legend-plate"
+            width={@legend.width}
+            height={@legend.height}
+            rx="8"
+          />
+          <text class="world-map-legend-title" x="10" y="19">REGION BONUSES</text>
+          <line class="world-map-legend-rule" x1="10" y1="27" x2={@legend.width - 10} y2="27" />
+          <g
+            :for={{row, i} <- Enum.with_index(@legend.rows)}
+            class="world-map-legend-row"
+            data-region={row.number}
+          >
+            <text class="world-map-legend-name" x="10" y={45 + i * 19}>{row.name}</text>
+            <text
+              class="world-map-legend-bonus"
+              x={@legend.width - 10}
+              y={45 + i * 19}
+              text-anchor="end"
+            >
+              +{row.bonus}
+            </text>
+          </g>
+        </g>
         <g class="world-map-highlights" aria-hidden="true">
           <use :if={@selected_area} href={"#gc-area-#{@selected_area}"} class="world-map-halo" />
           <use
@@ -305,14 +348,411 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         // scrolls). `data-select-event` lets an order arrow reuse this hook
         // while pushing `select_order` instead of a territory's `select_area`
         // (defaulting to `select_area` so territories need no extra attribute).
+        // `phx-hook` must stay a static string so LiveView's colocated-hook
+        // rewrite can match it to the manifest — `@interactive` instead gates
+        // `data-interactive`, checked on every keydown so a live toggle of
+        // interactivity (no remount) still takes effect.
         export default {
           mounted() {
             this.el.addEventListener("keydown", (e) => {
+              if (this.el.dataset.interactive === undefined) return
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()
                 this.pushEvent(this.el.dataset.selectEvent || "select_area", {area: this.el.dataset.area})
               }
             })
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MapViewport">
+        // Pan/pinch/double-tap zoom for the map, without touching territory
+        // selection: a tap only ever gets cancelled when the pointer actually
+        // moved (drag) or when it completes a double-tap (zoom, not select).
+        // LiveView owns the SVG's viewBox attribute and resets it to the
+        // server-rendered value on every patch, so `updated()` re-applies
+        // whatever pan/zoom this hook is holding — same pattern as
+        // `.TurnReplay` re-applying its step count after a patch.
+        const MAX_SCALE = 6
+        const DOUBLE_TAP_ZOOM = 2.5
+        const DOUBLE_TAP_MS = 300
+        const DOUBLE_TAP_PX = 24
+        const DRAG_PX = 8
+        const VISIBLE_MARGIN = 0.2
+        const ANIMATE_MS = 200
+        const MOBILE_QUERY = "(min-width: 64rem)"
+
+        export default {
+          mounted() {
+            this.svg = this.el.querySelector("svg")
+            this.base = this.parseViewBox(this.el.dataset.viewBox)
+            this.current = this.restore() || { ...this.base }
+            this.pointers = new Map()
+            this.moved = false
+            this.gestureStart = null
+            this.lastSingle = null
+            this.pinch = null
+            this.lastTap = null
+            this.raf = null
+            this.reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+            this.onPointerDown = this.onPointerDown.bind(this)
+            this.onPointerMove = this.onPointerMove.bind(this)
+            this.onPointerUp = this.onPointerUp.bind(this)
+            this.onClick = this.onClick.bind(this)
+            this.onWheel = this.onWheel.bind(this)
+            this.onKeyDown = this.onKeyDown.bind(this)
+            this.onFitEvent = this.onFitEvent.bind(this)
+            this.onResize = this.onResize.bind(this)
+
+            this.el.addEventListener("pointerdown", this.onPointerDown)
+            this.el.addEventListener("pointermove", this.onPointerMove)
+            this.el.addEventListener("pointerup", this.onPointerUp)
+            this.el.addEventListener("pointercancel", this.onPointerUp)
+            this.el.addEventListener("click", this.onClick, true)
+            this.el.addEventListener("dblclick", (e) => e.preventDefault())
+            this.el.addEventListener("wheel", this.onWheel, { passive: false })
+            this.el.addEventListener("keydown", this.onKeyDown)
+            window.addEventListener("gc:map-fit", this.onFitEvent)
+            window.addEventListener("resize", this.onResize)
+            window.addEventListener("orientationchange", this.onResize)
+
+            this.applyViewBox()
+          },
+
+          updated() {
+            this.svg = this.el.querySelector("svg")
+            this.applyViewBox()
+          },
+
+          destroyed() {
+            window.removeEventListener("gc:map-fit", this.onFitEvent)
+            window.removeEventListener("resize", this.onResize)
+            window.removeEventListener("orientationchange", this.onResize)
+            if (this.raf) cancelAnimationFrame(this.raf)
+          },
+
+          // --- viewBox state -----------------------------------------------
+
+          parseViewBox(str) {
+            const [x, y, w, h] = str.split(" ").map(Number)
+            return { x, y, w, h }
+          },
+
+          storageKey() {
+            const gameId = this.el.dataset.gameId
+            return gameId ? `gc:viewport:${gameId}` : null
+          },
+
+          restore() {
+            const key = this.storageKey()
+            if (!key) return null
+            try {
+              const parsed = JSON.parse(sessionStorage.getItem(key))
+              if (!parsed || typeof parsed.x !== "number" || typeof parsed.w !== "number") {
+                return null
+              }
+              return parsed
+            } catch {
+              return null
+            }
+          },
+
+          save(state = this.current) {
+            const key = this.storageKey()
+            if (!key) return
+            try {
+              sessionStorage.setItem(key, JSON.stringify(state))
+            } catch {
+              // Private browsing / quota — the viewport just won't survive a reload.
+            }
+          },
+
+          applyViewBox() {
+            if (!this.svg) return
+            const { x, y, w, h } = this.current
+            this.svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`)
+            this.el.dataset.zoomed = this.current.w < this.base.w - 0.01 ? "true" : "false"
+          },
+
+          clamped(next) {
+            const b = this.base
+            const minX = b.x - (1 - VISIBLE_MARGIN) * next.w
+            const maxX = b.x + b.w - VISIBLE_MARGIN * next.w
+            const minY = b.y - (1 - VISIBLE_MARGIN) * next.h
+            const maxY = b.y + b.h - VISIBLE_MARGIN * next.h
+
+            return {
+              ...next,
+              x: Math.min(Math.max(next.x, minX), maxX),
+              y: Math.min(Math.max(next.y, minY), maxY)
+            }
+          },
+
+          clientToViewBox(clientX, clientY) {
+            const rect = this.svg.getBoundingClientRect()
+            const upp = this.current.w / rect.width
+            return {
+              x: this.current.x + (clientX - rect.left) * upp,
+              y: this.current.y + (clientY - rect.top) * upp
+            }
+          },
+
+          // Zoom so `vbPoint` (a viewBox-space point) lands back under the
+          // client point (clientX, clientY) — the same anchoring math serves
+          // pinch (vbPoint from the old midpoint, anchored to the new one),
+          // wheel/dblclick/keyboard zoom (anchored to the same point it zoomed
+          // from), and double tap.
+          computeZoom(newW, vbPoint, clientX, clientY) {
+            const rect = this.svg.getBoundingClientRect()
+            const minW = this.base.w / MAX_SCALE
+            const clampedW = Math.min(Math.max(newW, minW), this.base.w)
+            const newH = clampedW * (this.base.h / this.base.w)
+            const upp = clampedW / rect.width
+
+            return this.clamped({
+              w: clampedW,
+              h: newH,
+              x: vbPoint.x - (clientX - rect.left) * upp,
+              y: vbPoint.y - (clientY - rect.top) * upp
+            })
+          },
+
+          animateTo(target) {
+            if (this.raf) cancelAnimationFrame(this.raf)
+
+            if (this.reduceMotion) {
+              this.current = target
+              this.applyViewBox()
+              return
+            }
+
+            const start = { ...this.current }
+            const startTime = performance.now()
+
+            const step = (now) => {
+              const t = Math.min(1, (now - startTime) / ANIMATE_MS)
+              const eased = 1 - Math.pow(1 - t, 3)
+              this.current = {
+                x: start.x + (target.x - start.x) * eased,
+                y: start.y + (target.y - start.y) * eased,
+                w: start.w + (target.w - start.w) * eased,
+                h: start.h + (target.h - start.h) * eased
+              }
+              this.applyViewBox()
+              if (t < 1) this.raf = requestAnimationFrame(step)
+            }
+
+            this.raf = requestAnimationFrame(step)
+          },
+
+          resetToFit() {
+            const target = { ...this.base }
+            this.animateTo(target)
+            this.save(target)
+          },
+
+          // Shared by every discrete (non-gesture-driven) zoom: wheel, the
+          // +/- keys, and double tap. `animate: true` eases toward the target
+          // (skipped under reduced motion by `animateTo` itself); wheel stays
+          // un-eased since its own repeated small deltas are already smooth.
+          zoomTo(newW, vbPoint, clientX, clientY, { animate = false } = {}) {
+            const target = this.computeZoom(newW, vbPoint, clientX, clientY)
+            if (animate) {
+              this.animateTo(target)
+            } else {
+              this.current = target
+              this.applyViewBox()
+            }
+            this.save(target)
+            return target
+          },
+
+          // --- pointer gestures: one finger pans, two pinch-zoom -----------
+
+          onPointerDown(e) {
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+            // Capture is a nice-to-have (keeps a fast finger receiving moves after
+            // it strays outside the wrapper) — a second/third pointer's capture can
+            // fail (InvalidPointerId) in edge cases, and losing that pointer from
+            // `this.pointers` entirely would silently break the pinch gesture.
+            try {
+              this.el.setPointerCapture?.(e.pointerId)
+            } catch {
+              // Ignored — the pointer stays tracked, just uncaptured.
+            }
+
+            if (this.pointers.size === 1) {
+              this.gestureStart = { x: e.clientX, y: e.clientY }
+              this.moved = false
+              this.lastSingle = { x: e.clientX, y: e.clientY }
+              this.pinch = null
+            } else if (this.pointers.size === 2) {
+              this.lastSingle = null
+              this.pinch = this.pinchState()
+            }
+          },
+
+          onPointerMove(e) {
+            if (!this.pointers.has(e.pointerId)) return
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+            if (this.gestureStart) {
+              const dx = e.clientX - this.gestureStart.x
+              const dy = e.clientY - this.gestureStart.y
+              if (Math.hypot(dx, dy) > DRAG_PX) this.moved = true
+            }
+
+            if (this.pointers.size === 1 && this.lastSingle) {
+              const dx = e.clientX - this.lastSingle.x
+              const dy = e.clientY - this.lastSingle.y
+              this.lastSingle = { x: e.clientX, y: e.clientY }
+              const rect = this.svg.getBoundingClientRect()
+              const upp = this.current.w / rect.width
+              this.current = this.clamped({
+                ...this.current,
+                x: this.current.x - dx * upp,
+                y: this.current.y - dy * upp
+              })
+              this.applyViewBox()
+            } else if (this.pointers.size === 2 && this.pinch) {
+              this.moved = true
+              const next = this.pinchState()
+              const vbPoint = this.clientToViewBox(this.pinch.mid.x, this.pinch.mid.y)
+              const scaleFactor = this.pinch.dist / Math.max(next.dist, 1)
+              this.current = this.computeZoom(
+                this.current.w * scaleFactor,
+                vbPoint,
+                next.mid.x,
+                next.mid.y
+              )
+              this.applyViewBox()
+              this.pinch = next
+            }
+          },
+
+          onPointerUp(e) {
+            this.pointers.delete(e.pointerId)
+
+            if (this.pointers.size === 1) {
+              const [remaining] = this.pointers.values()
+              this.lastSingle = { ...remaining }
+              this.pinch = null
+            } else if (this.pointers.size === 0) {
+              this.pinch = null
+              this.lastSingle = null
+              this.gestureStart = null
+              this.save()
+            }
+          },
+
+          pinchState() {
+            const [p1, p2] = [...this.pointers.values()]
+            return {
+              dist: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+              mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+            }
+          },
+
+          // --- taps: territory click vs. double-tap zoom --------------------
+
+          onClick(e) {
+            if (this.moved) {
+              e.stopPropagation()
+              e.preventDefault()
+              return
+            }
+
+            const now = Date.now()
+            const isDoubleTap =
+              this.lastTap &&
+              now - this.lastTap.time < DOUBLE_TAP_MS &&
+              Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < DOUBLE_TAP_PX
+
+            if (isDoubleTap) {
+              e.stopPropagation()
+              e.preventDefault()
+              this.lastTap = null
+              this.doubleTapZoom(e.clientX, e.clientY)
+              return
+            }
+
+            this.lastTap = { time: now, x: e.clientX, y: e.clientY }
+          },
+
+          doubleTapZoom(clientX, clientY) {
+            if (this.current.w < this.base.w - 0.01) {
+              this.resetToFit()
+              return
+            }
+            const vb = this.clientToViewBox(clientX, clientY)
+            this.zoomTo(this.base.w / DOUBLE_TAP_ZOOM, vb, clientX, clientY, { animate: true })
+          },
+
+          // --- wheel, keyboard, fit button, resize --------------------------
+
+          onWheel(e) {
+            if (!e.ctrlKey) return
+            e.preventDefault()
+            const factor = Math.exp(e.deltaY * 0.01)
+            const vb = this.clientToViewBox(e.clientX, e.clientY)
+            this.zoomTo(this.current.w * factor, vb, e.clientX, e.clientY)
+          },
+
+          onKeyDown(e) {
+            const rect = this.svg.getBoundingClientRect()
+            const cx = rect.left + rect.width / 2
+            const cy = rect.top + rect.height / 2
+            const panStep = this.current.w * 0.1
+
+            switch (e.key) {
+              case "+":
+              case "=":
+                e.preventDefault()
+                this.zoomTo(this.current.w / 1.2, this.clientToViewBox(cx, cy), cx, cy, { animate: true })
+                return
+              case "-":
+              case "_":
+                e.preventDefault()
+                this.zoomTo(this.current.w * 1.2, this.clientToViewBox(cx, cy), cx, cy, { animate: true })
+                return
+              case "ArrowUp":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, y: this.current.y - panStep })
+                break
+              case "ArrowDown":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, y: this.current.y + panStep })
+                break
+              case "ArrowLeft":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, x: this.current.x - panStep })
+                break
+              case "ArrowRight":
+                e.preventDefault()
+                this.current = this.clamped({ ...this.current, x: this.current.x + panStep })
+                break
+              default:
+                return
+            }
+
+            this.applyViewBox()
+            this.save()
+          },
+
+          // The Fit button lives in the status strip, outside this wrapper —
+          // its own `.MapFit` hook dispatches this window event rather than
+          // us reaching for it with a document-level click listener.
+          onFitEvent() {
+            this.resetToFit()
+          },
+
+          // Below `lg` the stage is meant to always start fitted, so a resize
+          // (device rotation, address-bar show/hide) refits. Above `lg` the
+          // board isn't full-height/gesture-first, so a resize (e.g. a
+          // devtools panel toggling) must leave a deliberate zoom alone —
+          // wheel zoom keeps working regardless of breakpoint.
+          onResize() {
+            if (!window.matchMedia(MOBILE_QUERY).matches) this.resetToFit()
           }
         }
       </script>
@@ -364,7 +804,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-fog={!@area.visible}
       data-frontier={@fill.dim && "dim"}
       data-element={@element}
-      phx-hook={@interactive && ".TerritoryKeyboard"}
+      data-interactive={@interactive}
+      phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_area"}
       phx-value-area={@interactive && @area.number}
     >
@@ -579,6 +1020,40 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     end
   end
 
+  # The elements art fills its generated, cropped view box edge to edge, so
+  # the region bonus legend gets a 100-unit strip of sea added on the left.
+  # Everything that reads the view box (the SVG, `.MapViewport`'s base box,
+  # `board_ground/1`) takes it from this one assign, so they stay in step.
+  @elements_view_box "136 54 556 421"
+
+  @doc "The board's SVG `viewBox`: `MapGeometry`'s, plus the legend strip on elements."
+  def view_box(:elements), do: @elements_view_box
+  def view_box(map_name), do: Geometry.view_box(map_name)
+
+  # A printed-board style legend of every region's control bonus, drawn into
+  # the sea in the board's bottom-left corner so it pans and zooms with the
+  # art. `{x, y}` is the box's top-left, checked clear of every territory and
+  # sea lane on the world map; elements draws it smaller because that board
+  # renders ~1.5x larger per SVG unit. Decorative and aria-hidden —
+  # `GameLive`'s `region_bonuses/1` carries the same numbers accessibly.
+  @legend_width 150
+  @legend_height 152
+  @legend_placement %{original: {8, 320, 1}, elements: {142, 375, 0.62}}
+
+  @doc false
+  def legend(map_name) do
+    {x, y, scale} = Map.fetch!(@legend_placement, map_name)
+
+    # Highest bonus first; `sort_by` is stable, so ties keep region order.
+    rows =
+      for {number, name, _num_areas, bonus} <- MapInfo.regions(map_name) do
+        %{number: number, name: name, bonus: bonus}
+      end
+      |> Enum.sort_by(& &1.bonus, :desc)
+
+    %{x: x, y: y, scale: scale, width: @legend_width, height: @legend_height, rows: rows}
+  end
+
   defp region_centroid(map_name, area_numbers) do
     points = Enum.map(area_numbers, &Geometry.label(map_name, &1))
     {sum_x, sum_y} = Enum.reduce(points, {0, 0}, fn {x, y}, {sx, sy} -> {sx + x, sy + y} end)
@@ -624,7 +1099,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       aria-label={@label}
       data-area={@area.number}
       data-select-event={@interactive && "select_order"}
-      phx-hook={@interactive && ".TerritoryKeyboard"}
+      data-interactive={@interactive}
+      phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_order"}
       phx-value-area={@interactive && @area.number}
     >

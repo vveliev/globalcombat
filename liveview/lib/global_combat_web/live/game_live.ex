@@ -21,7 +21,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   use GlobalCombatWeb, :live_view
 
-  import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1]
+  import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1, sidebar_links: 1]
 
   alias GlobalCombat.Engine.MapInfo
   alias GlobalCombat.Games.Live, as: Games
@@ -505,19 +505,30 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp maybe_assign_outcome(assigns), do: assigns
 
+  # Stage mode (GameLayout's `stage` attr) and SiteChrome's matching `immersive`
+  # only apply while a turn is actually in progress — the lobby and the
+  # finished-game screen read better stacked (GameLayout's existing
+  # `players_first` flip already covers the latter), and neither is short-lived
+  # enough to be worth swallowing the whole viewport for
+  # (`docs/mobile-battle-mode.md` §3, "Scope of stage mode").
+  defp stage?(%{status: :playing, view: %{ended: false}}), do: true
+  defp stage?(_assigns), do: false
+
   defp render_game(assigns) do
     assigns = maybe_assign_outcome(assigns)
+    assigns = assign(assigns, :stage, stage?(assigns))
 
     ~H"""
     <.site_chrome
       current_account={@current_account}
       current_path={assigns[:current_path]}
       page_title={"Game #{@game_id}"}
+      immersive={@stage}
     >
       <GameLayout.game_layout
         id="game-board"
         players_first={@status == :playing && @view.ended}
-        data-stage={@status == :playing && !@view.ended}
+        stage={@stage}
         phx-hook=".FocusManager"
       >
         <:status>
@@ -529,25 +540,56 @@ defmodule GlobalCombatWeb.GameLive do
               <:option value="frontier">Frontier</:option>
             </SegmentedControl.segmented_control>
           </form>
-          <button
-            :if={@status == :playing}
-            type="button"
-            class="game-stage-only game-hud-chip"
-            phx-click={JS.toggle_class("is-drawer-open", to: "#game-board")}
-          >
-            Players
-          </button>
+          <div class="ml-auto flex items-center gap-[var(--space-2)]">
+            <button
+              type="button"
+              id="drawer-open"
+              aria-controls="game-drawer"
+              aria-expanded="false"
+              class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+            >
+              Players
+              <span
+                data-unread-dot
+                aria-hidden="true"
+                class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-red-600"
+              />
+            </button>
+            <button
+              id="fullscreen-toggle"
+              type="button"
+              phx-hook=".Fullscreen"
+              aria-pressed="false"
+              aria-label="Full screen"
+              class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            >
+              <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
+            </button>
+          </div>
         </:status>
 
         <:board>
-          <Layouts.flash_group flash={@flash} />
-          <%= case @status do %>
-            <% :lobby -> %>
-              {lobby(assigns)}
-            <% :playing -> %>
-              {board(assigns)}
-          <% end %>
+          <%!-- h-full: stage mode's <main> (GameLayout) is the definite-height grid
+          row the board's own figure/`.world-map`/<svg> height chain needs
+          (board/1's moduledoc) — without it here, this wrapper's own
+          auto-by-default height would break that chain one level up. Outside
+          stage mode <main> has no definite height either, so this resolves to
+          plain `auto` there (CSS percentage-height-of-indefinite-ancestor
+          rule) — a no-op. --%>
+          <div id="game-board-surface" phx-hook=".StageViewport" class="h-full">
+            <Layouts.flash_group flash={@flash} />
+            <%= case @status do %>
+              <% :lobby -> %>
+                {lobby(assigns)}
+              <% :playing -> %>
+                {board(assigns)}
+            <% end %>
+          </div>
         </:board>
+
+        <:dock :if={@stage}>
+          {dock(assigns)}
+        </:dock>
 
         <:players>
           <.player_list
@@ -557,11 +599,35 @@ defmodule GlobalCombatWeb.GameLive do
             ended={@status == :playing and @view.ended}
             map_name={Map.get(@view, :map_name)}
           />
+          <%= if @status == :playing do %>
+            {players_extras(assigns)}
+          <% end %>
           <.chat
             messages={Map.get(@view, :messages, [])}
             chat_form={@chat_form}
             logged_in={!!@current_account}
           />
+          <%!-- Unconditional, not lg:hidden: :players renders once, inside the one
+          <dialog> GameLayout shows as the mobile drawer and the lg: rail alike
+          (GameLayout's moduledoc), so a single Quit button here is already
+          exactly one on both — stage mode's :dock (above) already emptied
+          #turn-controls of everything but End Turn/Force Turn, so there's no
+          second desktop Quit left to collide with. --%>
+          <Button.button
+            :if={
+              @status == :playing && @view.viewer_number && !@view.ended &&
+                !my_player(@view).eliminated
+            }
+            id="quit-button"
+            intent="danger"
+            phx-click="quit"
+            class="mt-[var(--space-4)]"
+          >
+            Quit
+          </Button.button>
+          <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
+            <.sidebar_links current_account={@current_account} current_path={assigns[:current_path]} />
+          </div>
         </:players>
       </GameLayout.game_layout>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
@@ -582,6 +648,79 @@ defmodule GlobalCombatWeb.GameLive do
             if (lost && !document.body.contains(lost)) {
               this.el.querySelector("[data-focus-landmark]")?.focus()
             }
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".Fullscreen">
+        // iOS Safari has no Fullscreen API for arbitrary elements
+        // (`document.fullscreenEnabled` is false there) — the button stays
+        // hidden rather than shown-and-broken; those players get the
+        // browser-chrome-free experience through the PWA install instead
+        // (manifest.webmanifest, root layout metas).
+        export default {
+          mounted() {
+            if (!document.fullscreenEnabled) return
+            this.el.classList.remove("hidden")
+            this.el.classList.add("inline-flex")
+            this.onClick = () => this.toggle()
+            this.onFullscreenChange = () => this.syncPressed()
+            this.el.addEventListener("click", this.onClick)
+            document.addEventListener("fullscreenchange", this.onFullscreenChange)
+          },
+          toggle() {
+            if (document.fullscreenElement) {
+              document.exitFullscreen()
+            } else {
+              document.getElementById("game-board")?.requestFullscreen({ navigationUI: "hide" })
+            }
+          },
+          syncPressed() {
+            const pressed = !!document.fullscreenElement
+            this.el.setAttribute("aria-pressed", pressed ? "true" : "false")
+            this.el.querySelector(".fullscreen-toggle-icon")?.classList.toggle(
+              "hero-arrows-pointing-in",
+              pressed
+            )
+            this.el.querySelector(".fullscreen-toggle-icon")?.classList.toggle(
+              "hero-arrows-pointing-out",
+              !pressed
+            )
+          },
+          destroyed() {
+            this.el.removeEventListener("click", this.onClick)
+            document.removeEventListener("fullscreenchange", this.onFullscreenChange)
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".StageViewport">
+        // Software keyboards shrink the visual viewport without shrinking the
+        // layout viewport, so a focused input's containing block doesn't
+        // shrink with it and whatever sits below it (the amount stepper's
+        // Assign/Attack button) can end up under the keyboard. Pinning this
+        // wrapper's height to `visualViewport.height` while it holds focus
+        // keeps that content in view. Below `lg` only — same breakpoint the
+        // rest of mobile battle mode collapses at (`--size-collapse`).
+        export default {
+          mounted() {
+            this.mq = window.matchMedia("(min-width: 64rem)")
+            this.onViewportResize = () => this.syncHeight()
+            this.onFocusOut = () => this.clearHeight()
+            this.onBreakpointChange = () => this.clearHeight()
+            window.visualViewport?.addEventListener("resize", this.onViewportResize)
+            this.el.addEventListener("focusout", this.onFocusOut)
+            this.mq.addEventListener("change", this.onBreakpointChange)
+          },
+          syncHeight() {
+            if (this.mq.matches || !window.visualViewport) return
+            this.el.style.height = `${window.visualViewport.height}px`
+          },
+          clearHeight() {
+            this.el.style.height = ""
+          },
+          destroyed() {
+            window.visualViewport?.removeEventListener("resize", this.onViewportResize)
+            this.el.removeEventListener("focusout", this.onFocusOut)
+            this.mq.removeEventListener("change", this.onBreakpointChange)
           }
         }
       </script>
@@ -743,6 +882,25 @@ defmodule GlobalCombatWeb.GameLive do
       {@ended_pill.label}
     </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
+    <Button.button
+      type="button"
+      intent="neutral"
+      id="map-fit"
+      phx-hook=".MapFit"
+      aria-label="Reset map zoom"
+    >
+      Fit
+    </Button.button>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".MapFit">
+      // The .MapViewport hook (world_map.ex) lives on a different element,
+      // so rather than it reaching out with a document-level click listener,
+      // this button announces itself over a window event.
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => window.dispatchEvent(new CustomEvent("gc:map-fit")))
+        }
+      }
+    </script>
     <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
     <span :if={@view.ended} id="game-over-announce" class="sr-only">
       {@headline}<span :if={@outcome}>{" " <> @outcome}</span>
@@ -841,10 +999,16 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   # Every map is a responsive SVG (`WorldMap`) — the legacy per-owner GIF
-  # sprites `Index.cshtml` composited at fixed pixel offsets are gone.
+  # sprites `Index.cshtml` composited at fixed pixel offsets are gone. The
+  # order panel, turn controls, region bonuses, your orders, turn results and
+  # Quit used to sit in a rail column beside the map here; stage mode
+  # (`docs/mobile-battle-mode.md` §4.3) moved them into `:dock`/`:players` in
+  # `render_game/1` instead, so this is just the map and its accessible table
+  # now — `@stage` (true exactly when this isn't the ended state) gives the
+  # figure a definite height to fill so the map can fill the stage's board
+  # area instead of sizing to its own aspect ratio (`.world-map` in `app.css`
+  # completes the height chain down to the `<svg>` below `lg:`).
   defp board(assigns) do
-    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
-
     ~H"""
     <.game_over
       :if={@view.ended}
@@ -853,54 +1017,80 @@ defmodule GlobalCombatWeb.GameLive do
       headline={@headline}
       outcome={@outcome}
     />
-    <div class="flex flex-col gap-[var(--space-4)] xl:flex-row xl:items-start">
-      <div class="flex w-full max-w-[60rem] flex-col gap-[var(--space-4)] xl:flex-1">
-        <figure class="m-0 w-full">
-          <WorldMap.world_map
-            map_name={@view.map_name}
-            areas={@view.areas}
-            players={@view.players}
-            selected_area={@selected_area}
-            target_area={@target_area}
-            lens={@lens}
-            viewer_number={@view.viewer_number}
-            interactive={!@view.ended}
-            replay_steps={@replay_steps}
-          />
-          <figcaption
-            :if={@view.ended && @winner}
-            id="game-over-caption"
-            class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
-          >
-            {winner_caption(@winner, length(@view.areas))}
-          </figcaption>
-        </figure>
-      </div>
-      <div
-        id="board-rail"
-        class="flex flex-wrap items-start gap-[var(--space-4)] xl:w-[var(--size-rail-lg)] xl:shrink-0 xl:flex-col"
+    <figure class={["m-0 w-full", @stage && "h-full"]}>
+      <WorldMap.world_map
+        map_name={@view.map_name}
+        areas={@view.areas}
+        players={@view.players}
+        selected_area={@selected_area}
+        target_area={@target_area}
+        lens={@lens}
+        viewer_number={@view.viewer_number}
+        interactive={!@view.ended}
+        replay_steps={@replay_steps}
+        game_id={@game_id}
+      />
+      <figcaption
+        :if={@view.ended && @winner}
+        id="game-over-caption"
+        class="mt-[var(--space-2)] text-[length:var(--text-sm)] text-text-muted"
       >
-        <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
-        <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
-        <.order_panel
-          :if={@selected_area && !@view.ended}
-          view={@view}
-          selected_area={@selected_area}
-          target_area={@target_area}
-          order_amount={@order_amount}
-        />
-        <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
-      </div>
-    </div>
+        {winner_caption(@winner, length(@view.areas))}
+      </figcaption>
+    </figure>
     <.board_table areas={@view.areas} players={@view.players} />
-    <div :if={@view.viewer_number && !@view.ended} id="turn-controls" class="mt-[var(--space-4)]">
-      <Button.button :if={!my_player(@view).done} phx-click="done">End Turn</Button.button>
+    """
+  end
+
+  # The dock's idle row (End Turn/Waiting/Force Turn) when nothing is
+  # selected, or the order panel once a territory is — never both, so a
+  # player never has to scroll the sheet to find the button they want
+  # (`docs/mobile-battle-mode.md` §4.3, "Dock contents by state"). Only
+  # rendered at all while `@stage` is true (`render_game/1`'s `:dock` slot),
+  # which already implies `@view.ended == false` — but not that there's a
+  # seated player: a spectator's `viewer_number` is `nil`, so `my_player/1`
+  # returns `nil` and a turn-controls row built around `my_player(@view).done`
+  # must stay gated on `@view.viewer_number`, same as the original
+  # (pre-stage) turn-controls div was.
+  defp dock(assigns) do
+    ~H"""
+    <.order_panel
+      :if={@selected_area}
+      view={@view}
+      selected_area={@selected_area}
+      target_area={@target_area}
+      order_amount={@order_amount}
+    />
+    <div
+      :if={!@selected_area && @view.viewer_number}
+      id="turn-controls"
+      class="flex flex-col gap-[var(--space-2)] sm:flex-row"
+    >
+      <Button.button :if={!my_player(@view).done} class="w-full sm:w-auto" phx-click="done">
+        End Turn
+      </Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
-      <Button.button intent="neutral" phx-click="force_turn">Force Turn</Button.button>
-      <Button.button :if={!my_player(@view).eliminated} intent="neutral" phx-click="quit">
-        Quit
+      <Button.button
+        intent="neutral"
+        class="w-full sm:w-auto"
+        phx-click="force_turn"
+      >
+        Force Turn
       </Button.button>
     </div>
+    """
+  end
+
+  # Region bonuses, your queued orders and the last turn's results, in the
+  # `:players` rail between the roster and chat (`docs/mobile-battle-mode.md`
+  # §4.3) — only ever called while `@status == :playing` (`render_game/1`).
+  defp players_extras(assigns) do
+    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
+
+    ~H"""
+    <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
+    <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
+    <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
     """
   end
 
@@ -1180,23 +1370,41 @@ defmodule GlobalCombatWeb.GameLive do
   # from the same `MapInfo.regions/1` the board's areas/adjacency already
   # come from rather than hardcoded per-map text, so a future map addition
   # doesn't need a matching edit here.
+  #
+  # The map itself draws these bonuses as a legend in its bottom-left sea
+  # (`WorldMap.legend/1`), like a printed board. That legend is SVG art that
+  # shrinks with the board, too small to read below `md:`, so there this
+  # list stays visible in the players drawer (`players_extras/1`); from `md:`
+  # up it is screen-reader only, since the legend is aria-hidden.
   attr :map_name, :atom, required: true
 
   defp region_bonuses(assigns) do
-    assigns = assign(assigns, :regions, MapInfo.regions(assigns.map_name))
+    # Same highest-bonus-first order as the map's legend.
+    regions = assigns.map_name |> MapInfo.regions() |> Enum.sort_by(&elem(&1, 3), :desc)
+    assigns = assign(assigns, :regions, regions)
 
     ~H"""
-    <details id="region-bonuses" class="min-w-[16rem] rounded-[var(--radius-panel)] border border-border bg-surface p-[var(--space-3)]" open>
-      <summary class="cursor-pointer font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring">
+    <section
+      id="region-bonuses"
+      aria-labelledby="region-bonuses-heading"
+      class="mt-[var(--space-2)] flex flex-wrap items-baseline gap-x-[var(--space-3)] text-xs leading-tight text-text md:sr-only"
+    >
+      <h2
+        id="region-bonuses-heading"
+        class="m-0 font-semibold uppercase tracking-wide text-text-muted"
+      >
         Region Bonuses
-      </summary>
-      <ul class="mt-[var(--space-2)] flex flex-col gap-[var(--space-1)] text-sm">
-        <li :for={{_number, name, _num_areas, army_bonus} <- @regions} class="flex items-center justify-between gap-[var(--space-3)]">
+      </h2>
+      <ul class="m-0 flex list-none flex-wrap gap-x-[var(--space-3)] p-0">
+        <li
+          :for={{_number, name, _num_areas, army_bonus} <- @regions}
+          class="flex items-center gap-[var(--space-1)]"
+        >
           <span>{name}</span>
-          <span class="font-semibold tabular-nums">+{army_bonus}</span>
+          <span class="font-semibold tabular-nums">{army_bonus}</span>
         </li>
       </ul>
-    </details>
+    </section>
     """
   end
 
@@ -1342,6 +1550,7 @@ defmodule GlobalCombatWeb.GameLive do
       >
         <Input.input
           id="chat-message"
+          name="text"
           field={@chat_form[:text]}
           label="Message"
           placeholder="Send a message"
@@ -1349,9 +1558,13 @@ defmodule GlobalCombatWeb.GameLive do
         />
         <Button.button type="submit" intent="neutral" class="self-end">Send</Button.button>
       </.form>
-      <ul aria-live="polite" class="flex flex-col-reverse gap-[var(--space-1)] text-sm">
+      <ul
+        aria-live="polite"
+        id="chat-messages"
+        class="flex flex-col-reverse gap-[var(--space-1)] text-sm"
+      >
         <li :if={@messages == []} class="text-text-muted">No messages yet.</li>
-        <li :for={m <- @messages}>
+        <li :for={m <- @messages} data-message>
           <span class="font-semibold">{m.source_name}:</span> {m.text}
         </li>
       </ul>

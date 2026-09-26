@@ -43,4 +43,43 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayoutTest do
     assert html =~ "sr-only"
     assert html =~ "focus:not-sr-only"
   end
+
+  describe "immersive (SiteChrome's stage-mode passthrough, mobile battle mode WP3)" do
+    test "hides the topbar and sidebar below lg: and drops content padding, unchanged at lg:" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <AdminLayout.admin_layout immersive>
+          <:sidebar>Sidebar</:sidebar>
+          <:topbar>Topbar</:topbar>
+          <:content>Content</:content>
+        </AdminLayout.admin_layout>
+        """)
+
+      assert html =~ "[grid-template-areas:&#39;content&#39;]"
+      assert html =~ ~r/<nav[^>]*class="[^"]*\bhidden\b[^"]*\blg:block\b[^"]*"/
+      assert html =~ ~r/<header[^>]*class="[^"]*\bhidden\b[^"]*\blg:flex\b[^"]*"/
+      assert html =~ ~r/<main[^>]*class="[^"]*\bp-0\b[^"]*lg:p-\[var\(--space-6\)\][^"]*"/
+      # The lg: side-by-side order is untouched by immersive.
+      assert html =~ "lg:[grid-template-areas:&#39;sidebar_topbar&#39;_&#39;sidebar_content&#39;]"
+    end
+
+    test "without immersive, output matches today's shape" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <AdminLayout.admin_layout>
+          <:sidebar>Sidebar</:sidebar>
+          <:topbar>Topbar</:topbar>
+          <:content>Content</:content>
+        </AdminLayout.admin_layout>
+        """)
+
+      refute html =~ "hidden lg:block"
+      refute html =~ "hidden lg:flex"
+      assert html =~ "[grid-template-areas:&#39;topbar&#39;_&#39;sidebar&#39;_&#39;content&#39;]"
+    end
+  end
 end

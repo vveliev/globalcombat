@@ -185,11 +185,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "#order-form")
 
       # Territories stop being an interactive control at all, not just an
-      # unresponsive one — no role/tabindex/click/keyboard hook survives.
+      # unresponsive one — no role/tabindex/click survives, and the keyboard
+      # hook's own `data-interactive` gate is gone too (the hook's phx-hook
+      # attribute itself stays static/present — see world_map_test.exs — so
+      # it can be rewritten by `Phoenix.LiveView.ColocatedHook` at compile time).
       refute has_element?(alice_view, ~s(g#territory-1[role]))
       refute has_element?(alice_view, ~s(g#territory-1[tabindex]))
       refute has_element?(alice_view, ~s(g#territory-1[phx-click]))
-      refute has_element?(alice_view, ~s(g#territory-1[phx-hook]))
+      refute has_element?(alice_view, ~s(g#territory-1[data-interactive]))
     end
   end
 
@@ -387,6 +390,40 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ ~r/aria-label="Game status"[^>]*tabindex="-1"[^>]*data-focus-landmark/
   end
 
+  test "the status strip carries a hidden-by-default full screen toggle targeting #game-board (mobile-battle-mode.md WP5)",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    # Starts hidden — the `.Fullscreen` hook only unhides it once it has
+    # checked `document.fullscreenEnabled` client-side (iPhone Safari has no
+    # such API, so it must never flash visible there). ExUnit's LiveViewTest
+    # has no real DOM/JS, so this only asserts the static contract the hook
+    # depends on, not the toggle behavior itself.
+    assert has_element?(
+             alice_view,
+             ~s(section[aria-label="Game status"] button#fullscreen-toggle.hidden[aria-pressed="false"])
+           )
+
+    # ColocatedHook rewrites ".Fullscreen" to the fully-qualified manifest key
+    # at compile time (see the FocusManager test above for why the literal
+    # ".Fullscreen" name would never match rendered output).
+    assert render(alice_view) =~
+             ~r/id="fullscreen-toggle"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.Fullscreen"/
+  end
+
+  test "the board surface carries the keyboard-inset hook (mobile-battle-mode.md WP5)", %{
+    conn: conn1
+  } do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    html = render(alice_view)
+
+    assert html =~
+             ~r/id="game-board-surface"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.StageViewport"/
+  end
+
   test "the board has a visually-hidden table equivalent listing territory, owner, armies, and adjacency (WCAG 1.3.1, GIF-81)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
@@ -444,6 +481,40 @@ defmodule GlobalCombatWeb.GameLiveTest do
     for {_number, name, _num_areas, army_bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
       assert html =~ ~r/#{Regex.escape(name)}[\s\S]*?#{army_bonus}/
     end
+  end
+
+  test "region bonuses are drawn into the map as a legend, with the list only visible on phones",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, "#world-map svg g.world-map-legend[aria-hidden='true']")
+
+    for {number, name, _num_areas, bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
+      row = "#world-map .world-map-legend-row[data-region='#{number}']"
+      assert has_element?(alice_view, row, name)
+      assert has_element?(alice_view, row, "+#{bonus}")
+    end
+
+    # Both the legend and the accessible list run highest bonus first.
+    names_by_bonus =
+      GlobalCombat.Engine.MapInfo.regions(:original)
+      |> Enum.sort_by(&elem(&1, 3), :desc)
+      |> Enum.map(&elem(&1, 1))
+
+    list_names =
+      alice_view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#region-bonuses li span:first-child")
+      |> Enum.map(&LazyHTML.text/1)
+
+    assert list_names == names_by_bonus
+
+    # The accessible list stays in the players rail/drawer, visible below md:
+    # and screen-reader only from md: up, where the map's legend is readable.
+    assert has_element?(alice_view, "#region-bonuses.md\\:sr-only")
+    refute has_element?(alice_view, "figure #region-bonuses")
   end
 
   describe "territory click-to-order composition (GIF-111)" do
@@ -692,6 +763,87 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  describe "stage mode dock (mobile battle mode WP3)" do
+    test "with nothing selected, the dock holds End Turn and Force Turn and no order panel",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(
+               alice_view,
+               ~s([aria-label="Actions"] #turn-controls button),
+               "End Turn"
+             )
+
+      assert has_element?(
+               alice_view,
+               ~s([aria-label="Actions"] #turn-controls button),
+               "Force Turn"
+             )
+
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #order-panel))
+    end
+
+    test "selecting a territory shows the order panel in the dock and hides the idle turn-controls row",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+
+      assert has_element?(alice_view, ~s([aria-label="Actions"] #order-panel))
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #turn-controls))
+
+      render_click(alice_view, "cancel_order", %{})
+
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #order-panel))
+      assert has_element?(alice_view, ~s([aria-label="Actions"] #turn-controls))
+    end
+
+    test "the shell is in stage mode while a turn is live: the board's <main> carries data-stage",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, "main[data-stage]")
+    end
+
+    test "Quit lives in the players rail, not the dock", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+      refute has_element?(alice_view, ~s([aria-label="Actions"] #quit-button))
+    end
+
+    test "a spectator viewing a live game does not crash the dock (no seated player, nothing selected)",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+
+      refute has_element?(spectator, "#turn-controls")
+      refute has_element?(spectator, ~s([aria-label="Actions"] button), "End Turn")
+    end
+
+    test "an ended game does not use stage: no dock, no data-stage shell, and Quit is gone",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, bob_view: bob_view, bob: bob, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      refute has_element?(alice_view, ~s([aria-label="Actions"]))
+      refute has_element?(alice_view, "main[data-stage]")
+      refute has_element?(alice_view, "#quit-button")
+    end
+  end
+
   test "the map lens control sits in the status strip, not the board", %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -735,10 +887,13 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # the same .TerritoryKeyboard hook a territory uses — its Enter/Space handler
       # pushes whatever event `data-select-event` names, "select_order" here (the
       # `select_order` describe block below exercises that event directly since
-      # ExUnit has no way to fire a real DOM keydown).
+      # ExUnit has no way to fire a real DOM keydown). The hook's `phx-hook` value
+      # must be the manifest-qualified name (not the raw ".TerritoryKeyboard") —
+      # otherwise `Phoenix.LiveView.ColocatedHook`'s compile-time rewrite never
+      # fired and the hook wouldn't mount in a real browser at all.
       assert has_element?(
                alice_view,
-               ~s(g.world-map-order[role="button"][tabindex="0"][phx-hook=".TerritoryKeyboard"][data-select-event="select_order"])
+               ~s(g.world-map-order[role="button"][tabindex="0"][phx-hook="GlobalCombatWeb.GameLive.WorldMap.TerritoryKeyboard"][data-select-event="select_order"])
              )
     end
 
@@ -1220,6 +1375,59 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert wait_for(alice_view, "Game Over") =~ "Game Over"
       assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+    end
+  end
+
+  describe "players drawer (mobile battle mode WP4)" do
+    test "the drawer carries the roster, chat form, Quit and the site nav links", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(dialog#game-drawer[aria-label="Players and chat"]))
+      assert has_element?(alice_view, "#game-drawer", "Alice")
+      assert has_element?(alice_view, "#game-drawer", "Bob")
+      assert has_element?(alice_view, "#game-drawer #chat-form")
+      assert has_element?(alice_view, "#game-drawer ul#chat-messages")
+      assert has_element?(alice_view, "#game-drawer button", "Quit")
+      assert has_element?(alice_view, ~s(#game-drawer a[href="/"]), "Home")
+      assert has_element?(alice_view, ~s(#game-drawer a[href="/Game-Manual"]), "Game Manual")
+
+      # The drawer renders once (GameLayout's moduledoc) and is the mobile
+      # sheet *and* the lg: rail alike, so its one Quit button is already
+      # exactly one on both breakpoints — stage mode's :dock emptied
+      # #turn-controls down to End Turn/Force Turn only, so there's no
+      # separate desktop Quit left for the drawer's copy to duplicate.
+      refute has_element?(alice_view, "#turn-controls button", "Quit")
+      assert has_element?(alice_view, "#turn-controls button", "End Turn")
+      assert has_element?(alice_view, "#turn-controls button", "Force Turn")
+
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+    end
+
+    test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, bob: bob, alice_view: alice_view, bob_view: bob_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+
+      refute has_element?(alice_view, "#game-drawer button", "Quit")
+    end
+
+    test "the drawer opener has aria-controls/aria-expanded and an initially-hidden unread dot",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(
+               alice_view,
+               ~s(button#drawer-open[aria-controls="game-drawer"][aria-expanded="false"])
+             )
+
+      assert has_element?(alice_view, "#drawer-open [data-unread-dot].hidden")
     end
   end
 
