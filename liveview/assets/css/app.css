@@ -610,3 +610,193 @@
     opacity: 1;
   }
 }
+
+/* PROTOTYPE (not for merge): mobile overlay stage. Below lg, while a game is in
+   play, the board fills the screen and the status strip, order panel, turn
+   controls and players rail float over the map as HUD pieces. */
+.game-stage-only {
+  display: none;
+}
+
+@media (width < 64rem) {
+  body:has(#game-board[data-stage]) {
+    overflow: hidden;
+  }
+
+  #game-board[data-stage] {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: block;
+    background: var(--map-sea);
+  }
+
+  #game-board[data-stage] > main {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  #game-board[data-stage] .world-map {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* HUD: top chips */
+  #game-board[data-stage] > section[aria-label="Game status"] {
+    position: absolute;
+    z-index: 4;
+    inset: 0 0 auto 0;
+    padding: calc(env(safe-area-inset-top) + var(--space-3)) var(--space-3) 0;
+    background: transparent;
+    border: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    pointer-events: none;
+  }
+
+  #game-board[data-stage] > section[aria-label="Game status"] > * {
+    pointer-events: auto;
+  }
+
+  #game-board[data-stage] #game-status,
+  #game-board[data-stage] #lens-form,
+  #game-board[data-stage] .game-hud-chip,
+  #game-board[data-stage] #turn-controls > span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--color-surface) 82%, transparent);
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-md);
+  }
+
+  #game-board[data-stage] #game-status .heading-3 {
+    font-size: 1rem;
+  }
+
+  #game-board[data-stage] #lens-form {
+    padding: 2px;
+  }
+
+  #game-board[data-stage] .game-hud-chip {
+    margin-left: auto;
+    min-height: 2.5rem;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  /* HUD: bottom — order card replaces the turn controls while a territory is selected */
+  #game-board[data-stage] #board-rail {
+    position: absolute;
+    z-index: 2;
+    inset: auto 0 0 0;
+    display: block;
+    padding: 0 var(--space-3) calc(env(safe-area-inset-bottom) + var(--space-3));
+    pointer-events: none;
+  }
+
+  #game-board[data-stage] #board-rail > * {
+    display: none;
+  }
+
+  #game-board[data-stage] #board-rail > #order-panel {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    pointer-events: auto;
+    box-shadow: var(--shadow-md);
+    animation: game-sheet-up 180ms ease-out;
+  }
+
+  #game-board[data-stage] #board-rail > #turn-results {
+    display: block;
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 7.5rem);
+    left: var(--space-3);
+    right: var(--space-3);
+    max-height: 26dvh;
+    overflow-y: auto;
+    pointer-events: auto;
+    opacity: 0.95;
+  }
+
+  #game-board[data-stage] #turn-controls {
+    position: absolute;
+    z-index: 2;
+    right: var(--space-3);
+    bottom: calc(env(safe-area-inset-bottom) + var(--space-3));
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  #game-board[data-stage]:has(#order-panel) #turn-controls,
+  #game-board[data-stage] #turn-controls button[phx-click="quit"] {
+    display: none;
+  }
+
+  #game-board[data-stage] #turn-controls button[phx-click="done"] {
+    min-height: 3.25rem;
+    padding-inline: var(--space-6);
+    border-radius: 999px;
+    font-size: 1.05rem;
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Players drawer */
+  #game-board[data-stage] .game-stage-only {
+    display: inline-flex;
+  }
+
+  #game-board[data-stage] > aside {
+    position: absolute;
+    z-index: 3;
+    inset: 0 0 0 auto;
+    width: min(22rem, 88vw);
+    padding-top: calc(env(safe-area-inset-top) + 4.5rem);
+    border: 0;
+    box-shadow: var(--shadow-md);
+    transform: translateX(100%);
+    transition: transform 200ms ease;
+  }
+
+  #game-board[data-stage].is-drawer-open > aside {
+    transform: none;
+  }
+
+  /* While the drawer is open only the turn chip and the Players toggle stay on
+     top; the lens chip would otherwise sit over the roster's first row. */
+  #game-board[data-stage].is-drawer-open #lens-form {
+    visibility: hidden;
+  }
+
+  #game-board[data-stage] > aside {
+    padding-top: calc(env(safe-area-inset-top) + 4rem);
+    overflow-x: hidden;
+  }
+}
+
+@keyframes game-sheet-up {
+  from {
+    transform: translateY(1.5rem);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #game-board[data-stage] > aside,
+  #game-board[data-stage] #board-rail > #order-panel {
+    transition: none;
+    animation: none;
+  }
+}
