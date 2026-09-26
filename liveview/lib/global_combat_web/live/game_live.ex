@@ -1354,7 +1354,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp turn_results(assigns) do
     ~H"""
-    <Card.card class="min-w-[16rem]">
+    <Card.card id="turn-results" class="min-w-[16rem]">
       <:header>Turn {@turn} results</:header>
       <ol
         id="turn-results-list"
