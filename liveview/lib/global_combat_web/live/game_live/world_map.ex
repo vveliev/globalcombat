@@ -581,6 +581,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               this.lastSingle = null
               this.pinch = this.pinchState()
             }
+
+            // A finger added mid-drag never crosses the drag threshold itself, so
+            // capture it now rather than leaving it uncaptured for the rest of
+            // the gesture (a lost pointerup would leave the map stuck pinching).
+            if (this.moved) this.capturePointers()
           },
 
           onPointerMove(e) {
@@ -648,6 +653,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           // then stays tracked, just uncaptured.
           capturePointers() {
             for (const id of this.pointers.keys()) {
+              if (this.el.hasPointerCapture?.(id)) continue
               try {
                 this.el.setPointerCapture?.(id)
               } catch {
