@@ -571,15 +571,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
           onPointerDown(e) {
             this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-            // Capture is a nice-to-have (keeps a fast finger receiving moves after
-            // it strays outside the wrapper) — a second/third pointer's capture can
-            // fail (InvalidPointerId) in edge cases, and losing that pointer from
-            // `this.pointers` entirely would silently break the pinch gesture.
-            try {
-              this.el.setPointerCapture?.(e.pointerId)
-            } catch {
-              // Ignored — the pointer stays tracked, just uncaptured.
-            }
 
             if (this.pointers.size === 1) {
               this.gestureStart = { x: e.clientX, y: e.clientY }
@@ -590,6 +581,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               this.lastSingle = null
               this.pinch = this.pinchState()
             }
+
+            // A finger added mid-drag never crosses the drag threshold itself, so
+            // capture it now rather than leaving it uncaptured for the rest of
+            // the gesture (a lost pointerup would leave the map stuck pinching).
+            if (this.moved) this.capturePointers()
           },
 
           onPointerMove(e) {
@@ -599,7 +595,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             if (this.gestureStart) {
               const dx = e.clientX - this.gestureStart.x
               const dy = e.clientY - this.gestureStart.y
-              if (Math.hypot(dx, dy) > DRAG_PX) this.moved = true
+              if (!this.moved && Math.hypot(dx, dy) > DRAG_PX) {
+                this.moved = true
+                this.capturePointers()
+              }
             }
 
             if (this.pointers.size === 1 && this.lastSingle) {
@@ -615,6 +614,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               })
               this.applyViewBox()
             } else if (this.pointers.size === 2 && this.pinch) {
+              if (!this.moved) this.capturePointers()
               this.moved = true
               const next = this.pinchState()
               const vbPoint = this.clientToViewBox(this.pinch.mid.x, this.pinch.mid.y)
@@ -642,6 +642,23 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               this.lastSingle = null
               this.gestureStart = null
               this.save()
+            }
+          },
+
+          // Capture only once a gesture is really a drag: capturing on pointerdown
+          // retargets the tap's `click` to this wrapper, so a territory's
+          // phx-click="select_area" would never fire. Capture is a nice-to-have
+          // (keeps a fast finger receiving moves after it strays outside the
+          // wrapper) and can fail (InvalidPointerId) in edge cases — the pointer
+          // then stays tracked, just uncaptured.
+          capturePointers() {
+            for (const id of this.pointers.keys()) {
+              if (this.el.hasPointerCapture?.(id)) continue
+              try {
+                this.el.setPointerCapture?.(id)
+              } catch {
+                // Ignored — see above.
+              }
             }
           },
 
