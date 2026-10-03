@@ -68,7 +68,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       to the count. A spectator (`viewer_number: nil`) has no "own"
       territory to draw a frontier from, so this lens falls back to
       `:owner` for them, same as `PlayerView`'s fog treats a spectator as a
-      fogged non-owner.
+      fogged non-owner. A seated player with no frontier at all (eliminated,
+      or a winner holding the whole board) gets the same fallback rather
+      than a board of nothing but dimmed areas.
   """
   use Phoenix.Component
 
@@ -158,7 +160,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     doc: "used only as the `.MapViewport` hook's sessionStorage key; nil disables persistence"
 
   def world_map(assigns) do
-    lens = effective_lens(assigns.lens, assigns.viewer_number)
+    lens = effective_lens(assigns.lens, assigns.areas, assigns.viewer_number)
 
     assigns =
       assigns
@@ -897,9 +899,16 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # A spectator has no "own" territory for :frontier to draw a border from —
   # same treatment `PlayerView` gives a spectator elsewhere (it "sees exactly
   # what a fogged non-owner sees"), so this falls back to :owner rather than
-  # rendering every area dimmed.
-  defp effective_lens(:frontier, nil), do: :owner
-  defp effective_lens(lens, _viewer_number), do: lens
+  # rendering every area dimmed. So does a seated player whose frontier is
+  # empty: eliminated (owns nothing), or the winner owning the whole board.
+  @doc false
+  def effective_lens(:frontier, _areas, nil), do: :owner
+
+  def effective_lens(:frontier, areas, viewer_number) do
+    if Enum.empty?(frontier_info(areas, viewer_number)), do: :owner, else: :frontier
+  end
+
+  def effective_lens(lens, _areas, _viewer_number), do: lens
 
   @doc false
   def fills(:owner, areas, _map_name, _viewer_number) do
@@ -972,11 +981,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     end
   end
 
-  # Every area bordering one of the viewer's own areas is already visible
-  # regardless of fog (`PlayerView.owns_adjacent?/3`), so this needs no
-  # separate fog check: an owned area with a differently-owned neighbour is a
-  # border area, and every enemy area adjacent to one is, by that same rule,
-  # already revealed.
+  # An owned area with a differently-owned neighbour is a border area; an
+  # enemy area is on the frontier when one of its own links reaches a border
+  # area. Fog still has to be checked here: `PlayerView.owns_adjacent?/3`
+  # reveals the areas the viewer's *own* links reach, but some links are
+  # one-way (on the elements map 7->8, 9->23, 31->32, 33->15), so an enemy
+  # area can link into the viewer's border while staying fogged, with no
+  # owner or army count to draw a frontier delta from.
   defp frontier_info(areas, viewer_number) do
     areas_by_number = Map.new(areas, &{&1.number, &1})
 
@@ -995,7 +1006,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
     enemy_borders =
       areas
-      |> Enum.filter(&(&1.owner_number != viewer_number))
+      |> Enum.filter(&(&1.visible and &1.owner_number != viewer_number))
       |> Enum.filter(&Enum.any?(&1.adjacent, fn n -> MapSet.member?(my_borders, n) end))
       |> MapSet.new(& &1.number)
 
@@ -1005,7 +1016,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # The army delta shown next to a frontier tile's count: this area's armies
   # minus the strongest visible, differently-owned neighbour — from either
   # side of the line, a positive delta favours whoever holds the tile it's
-  # printed on.
+  # printed on. No count of its own (fogged), no delta.
+  defp frontier_delta(%{armies: armies}, _areas_by_number) when not is_integer(armies), do: nil
+
   defp frontier_delta(area, areas_by_number) do
     opposing =
       area.adjacent
