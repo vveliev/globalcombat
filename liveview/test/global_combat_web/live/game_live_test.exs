@@ -1472,6 +1472,30 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
     end
 
+    test "crafted turn/order events on an ended game are ignored", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, alice: alice, bob: bob, alice_view: alice_view, bob_view: bob_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+      {:playing, ended_view} = Games.player_view(game_id, alice.id)
+
+      render_click(alice_view, "change_amount", %{"amount" => "3"})
+      render_click(alice_view, "step_amount", %{"delta" => "1"})
+      render_click(alice_view, "max_amount", %{})
+      render_click(alice_view, "submit_order", %{"amount" => "3"})
+      render_click(alice_view, "unassign_order", %{})
+      render_click(alice_view, "done", %{})
+      render_click(alice_view, "force_turn", %{})
+      sync_game(game_id, alice_view)
+
+      assert Games.player_view(game_id, alice.id) == {:playing, ended_view}
+      assert has_element?(alice_view, "#game-over")
+    end
+
     test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
 

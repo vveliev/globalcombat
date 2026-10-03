@@ -117,7 +117,8 @@ defmodule GlobalCombat.Games.Server do
 
   @doc """
   Port of `GameController.Quit` + `Game.Unjoin` (lobby) / `Game.EliminatePlayer` (mid-play).
-  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_playing`, `:already_eliminated`.
+  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_playing`, `:already_eliminated`,
+  `:game_ended`.
   """
   def quit(game_id, account_id) do
     GenServer.call(via(game_id), {:quit, account_id})
@@ -207,6 +208,13 @@ defmodule GlobalCombat.Games.Server do
   end
 
   # --- server callbacks ---------------------------------------------------
+  #
+  # Once the engine reports `ended`, the game is read-only: every mutating clause below matches
+  # only `%{status: :playing, engine: %Engine{ended: false}}`, so done/force_turn/orders/quit and
+  # a stale scheduler claim on a finished game fall through to their no-op/error clause instead
+  # of reaching `run_turn`. `engine.ended` (persisted in the snapshot, so it survives
+  # rehydration) is the single source of truth; `status` stays `:playing`, which is what
+  # `player_view/2` reports for a game past its lobby, finished or not.
 
   @impl true
   def init(opts) do
@@ -411,7 +419,11 @@ defmodule GlobalCombat.Games.Server do
     end
   end
 
-  def handle_call({:quit, account_id}, _from, %{status: :playing} = state) do
+  def handle_call(
+        {:quit, account_id},
+        _from,
+        %{status: :playing, engine: %Engine{ended: false}} = state
+      ) do
     case find_player_number(state, account_id) do
       nil ->
         {:reply, {:error, :not_playing}, state}
@@ -424,6 +436,8 @@ defmodule GlobalCombat.Games.Server do
         end
     end
   end
+
+  def handle_call({:quit, _account_id}, _from, state), do: {:reply, {:error, :game_ended}, state}
 
   def handle_call({:kick, account_id, player_number}, _from, %{status: :lobby} = state) do
     cond do
@@ -476,7 +490,7 @@ defmodule GlobalCombat.Games.Server do
   def handle_call(
         {:run_scheduled_turn, claimed_last_turn_time},
         _from,
-        %{status: :playing} = state
+        %{status: :playing, engine: %Engine{ended: false}} = state
       ) do
     state = run_turn(%{state | db_last_turn_time: claimed_last_turn_time}, advance_clock: false)
     {:reply, :ok, state}
@@ -491,7 +505,7 @@ defmodule GlobalCombat.Games.Server do
     {:noreply, post_message(state, account_id, name, text)}
   end
 
-  def handle_cast({:done, account_id}, %{status: :playing} = state) do
+  def handle_cast({:done, account_id}, %{status: :playing, engine: %Engine{ended: false}} = state) do
     case find_player_number(state, account_id) do
       nil -> {:noreply, state}
       player_number -> {:noreply, mark_done(state, player_number)}
@@ -500,7 +514,10 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast({:done, _account_id}, state), do: {:noreply, state}
 
-  def handle_cast({:force_turn, account_id}, %{status: :playing} = state) do
+  def handle_cast(
+        {:force_turn, account_id},
+        %{status: :playing, engine: %Engine{ended: false}} = state
+      ) do
     player_number = find_player_number(state, account_id)
 
     if player_number && time_left(state) <= 0 do
@@ -522,7 +539,10 @@ defmodule GlobalCombat.Games.Server do
   # own `return 0` guards, not a crash — `Map.fetch!`-based `Engine.area!/2` would
   # take the whole game's GenServer down (every seated player, not just the sender)
   # on a bad area number, which a raw client param absolutely can be.
-  def handle_cast({:assign, account_id, area_number, amount}, %{status: :playing} = state) do
+  def handle_cast(
+        {:assign, account_id, area_number, amount},
+        %{status: :playing, engine: %Engine{ended: false}} = state
+      ) do
     with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
          true <- valid_amount?(amount),
          true <- owns_area?(state, player_number, area_number) do
@@ -535,7 +555,10 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast({:assign, _account_id, _area_number, _amount}, state), do: {:noreply, state}
 
-  def handle_cast({:unassign, account_id, area_number}, %{status: :playing} = state) do
+  def handle_cast(
+        {:unassign, account_id, area_number},
+        %{status: :playing, engine: %Engine{ended: false}} = state
+      ) do
     with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
          true <- owns_area?(state, player_number, area_number) do
       {_amount, engine} = Engine.clear_assigned(state.engine, area_number)
@@ -549,7 +572,7 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast(
         {:transfer, account_id, area_number, target_area_number, amount},
-        %{status: :playing} = state
+        %{status: :playing, engine: %Engine{ended: false}} = state
       ) do
     with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
          true <- valid_amount?(amount),
@@ -569,7 +592,7 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast(
         {:attack, account_id, area_number, target_area_number, amount},
-        %{status: :playing} = state
+        %{status: :playing, engine: %Engine{ended: false}} = state
       ) do
     with player_number when not is_nil(player_number) <- find_player_number(state, account_id),
          true <- valid_amount?(amount),
@@ -843,7 +866,14 @@ defmodule GlobalCombat.Games.Server do
   # caller already advanced those columns via an actual claim_turn/2 call before handing off —
   # see GlobalCombat.Games.advance_turn/4's moduledoc for why running it again here would be a
   # double-advance, not idempotent.
-  defp run_turn(state, opts \\ []) do
+  #
+  # A finished game never runs another turn (`Game.RunTurn`'s `if (Ended) return;`) — the
+  # callers are already gated on it, this is the last line of defence against re-running the
+  # end-of-game side effects (tourney advancement, notifications, an empty turn log).
+  defp run_turn(state, opts \\ [])
+  defp run_turn(%{engine: %Engine{ended: true}} = state, _opts), do: state
+
+  defp run_turn(state, opts) do
     advance_clock? = Keyword.get(opts, :advance_clock, true)
     old_engine = state.engine
 

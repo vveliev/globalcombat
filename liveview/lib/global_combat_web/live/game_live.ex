@@ -146,7 +146,15 @@ defmodule GlobalCombatWeb.GameLive do
 
   # --- user actions --------------------------------------------------------
 
+  # A finished game takes no more turns or orders. The game server already refuses them; this
+  # just keeps a crafted event (the controls are gone from the page) from reaching it at all.
+  @ended_game_events ~w(done force_turn submit_order unassign_order change_amount step_amount max_amount)
+
   @impl true
+  def handle_event(event, _params, %{assigns: %{status: :playing, view: %{ended: true}}} = socket)
+      when event in @ended_game_events,
+      do: {:noreply, socket}
+
   def handle_event("join", _params, socket) do
     case require_account(socket) do
       {:ok, account} ->
