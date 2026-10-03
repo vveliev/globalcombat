@@ -1583,7 +1583,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(alice_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
       assert has_element?(alice_view, ~s(line.world-map-replay-arrow--transfer[data-step="0"]))
-      assert has_element?(alice_view, "button", "Turn 2 results ▶")
+      # The turn that just resolved is turn 1 (the board now shows turn 2), as legacy labelled it.
+      assert has_element?(alice_view, "button", "Turn 1 results ▶")
+      assert has_element?(alice_view, "#turn-results", "Turn 1 results")
 
       # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name at
       # compile time, same as `.FocusManager` (see the focus-management test above) —

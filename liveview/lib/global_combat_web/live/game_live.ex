@@ -1029,7 +1029,7 @@ defmodule GlobalCombatWeb.GameLive do
   # simply had no visible events", including the very next turn that does.
   # Stepping/announcing here is otherwise plain client-side JS (no phx-click):
   # "the hook owns the timing", not the server.
-  attr :turn, :integer, required: true
+  attr :turn, :integer, required: true, doc: "the current turn, `@view.turn`"
   attr :steps, :list, required: true
 
   defp turn_replay_controls(assigns) do
@@ -1045,7 +1045,7 @@ defmodule GlobalCombatWeb.GameLive do
     >
       <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
         <Button.button id="turn-replay-play" type="button" data-replay-play>
-          Turn {@turn} results ▶
+          Turn {resolved_turn(@turn)} results ▶
         </Button.button>
         <Button.button id="turn-replay-back" type="button" intent="neutral" data-replay-back>
           ◀ Step
@@ -1490,7 +1490,7 @@ defmodule GlobalCombatWeb.GameLive do
   defp turn_results(assigns) do
     ~H"""
     <Card.card id="turn-results" class="min-w-[16rem]">
-      <:header>Turn {@turn} results</:header>
+      <:header>Turn {resolved_turn(@turn)} results</:header>
       <ol
         id="turn-results-list"
         phx-hook=".TurnResultsList"
@@ -1501,6 +1501,11 @@ defmodule GlobalCombatWeb.GameLive do
     </Card.card>
     """
   end
+
+  # The last turn's events are logged against the turn the engine already advanced to
+  # (`Engine.Game.resolve_turn/1`), so the turn they *resolved* is one before `@view.turn` —
+  # legacy's results post reads "Turn {Turn - 1} Results" for the same reason.
+  defp resolved_turn(turn), do: turn - 1
 
   # Player-facing rule info (GIF-103): every region's control bonus, sourced
   # from the same `MapInfo.regions/1` the board's areas/adjacency already
