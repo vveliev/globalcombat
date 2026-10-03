@@ -53,8 +53,11 @@ defmodule GlobalCombat.Games.PlayerView do
   just captured visibility into. Both instants have to be checked independently —
   `owns_adjacent?/3` depends on a *neighboring* area's owner, which can itself flip mid-turn, so
   "visible before" and "visible after" are genuinely different computations, not the same check
-  run twice. `{:eliminated, _}`/`{:ended, _}` touch no area and are never filtered, matching the
-  player-roll-up rule above (elimination/game-end is public information, not a board detail).
+  run twice. `{:eliminated, _}`/`{:ended, _}`/`{:bonus, _, _, _}` touch no area and are never
+  filtered, matching the player-roll-up rule above: elimination, game end and each player's
+  reinforcement count are public information, not board detail (legacy `RunTurn` posted the "Army
+  Bonuses" lines to the game's forum for every player, fogged game or not, and the bonus is
+  derivable from the public per-player area count plus region control anyway).
 
   The "before" ownership snapshot has no equivalent already sitting in `Engine.Game` — the engine
   is pure and only ever hands back the *resolved* state (see its moduledoc's "old state is
@@ -209,6 +212,7 @@ defmodule GlobalCombat.Games.PlayerView do
        ),
        do: [from, to]
 
+  defp event_area_numbers({:bonus, _player, _new_armies, _region_bonus}), do: []
   defp event_area_numbers({:eliminated, _player}), do: []
   defp event_area_numbers({:ended, _winner}), do: []
 

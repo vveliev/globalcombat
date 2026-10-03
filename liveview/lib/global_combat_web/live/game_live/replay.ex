@@ -52,6 +52,7 @@ defmodule GlobalCombatWeb.GameLive.Replay do
   defp kind({:assign, _, _}), do: :assign
   defp kind({:transfer, _, _, _}), do: :transfer
   defp kind({:attack, _, _, _, _, _, _}), do: :attack
+  defp kind({:bonus, _, _, _}), do: :bonus
   defp kind({:eliminated, _}), do: :eliminated
   defp kind({:ended, _}), do: :ended
 
@@ -92,6 +93,7 @@ defmodule GlobalCombatWeb.GameLive.Replay do
   defp event_area_numbers({:assign, area, _amount}), do: [area]
   defp event_area_numbers({:transfer, from, to, _amount}), do: [from, to]
   defp event_area_numbers({:attack, from, to, _amount, _al, _dl, _c}), do: [from, to]
+  defp event_area_numbers({:bonus, _player, _new_armies, _region_bonus}), do: []
   defp event_area_numbers({:eliminated, _player}), do: []
   defp event_area_numbers({:ended, _winner}), do: []
 
@@ -115,6 +117,12 @@ defmodule GlobalCombatWeb.GameLive.Replay do
 
     "#{area_name(from, areas_by_number)} attacked #{area_name(to, areas_by_number)} " <>
       "with #{armies_text(amount)}: #{attacker_lost} lost, #{defender_lost} defenders lost#{outcome}"
+  end
+
+  # Legacy `RunTurn`'s per-player "Army Bonuses" line, word for word.
+  defp describe({:bonus, player, new_armies, region_bonus}, _areas_by_number, player_names) do
+    "#{player_name(player, player_names)}: #{new_armies} new armies " <>
+      "(#{region_bonus} from Region Bonuses)"
   end
 
   defp describe({:eliminated, player}, _areas_by_number, player_names) do

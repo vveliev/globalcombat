@@ -92,6 +92,16 @@ defmodule GlobalCombatWeb.GameLive.ReplayTest do
                "Ural attacked Ukraine with 12 armies: 4 lost, 6 defenders lost, Ukraine captured"
     end
 
+    test "bonus narrates legacy's per-player Army Bonuses line, with no from/to" do
+      [step] = Replay.steps([{:bonus, 1, 7, 3}], areas(), @players, :original)
+
+      assert step.kind == :bonus
+      assert step.text == "Alice: 7 new armies (3 from Region Bonuses)"
+      assert step.from == nil
+      assert step.to == nil
+      assert step.counts == []
+    end
+
     test "eliminated and ended have no from/to but are still narrated" do
       steps =
         Replay.steps([{:eliminated, 2}, {:ended, 1}], areas(), @players, :original)

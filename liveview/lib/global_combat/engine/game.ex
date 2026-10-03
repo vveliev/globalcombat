@@ -225,6 +225,10 @@ defmodule GlobalCombat.Engine.Game do
     * `{:assign, area_number, amount}` — reinforcements landing (`assign_armies`)
     * `{:transfer, from_area_number, to_area_number, amount}` — a completed transfer
     * `{:attack, from_area_number, to_area_number, amount, attacker_lost, defender_lost, captured?}`
+    * `{:bonus, player_number, new_armies, region_bonus}` — one per surviving player, in player
+      order, interleaved with `:eliminated` exactly as `RunTurn`'s reinforcement loop visits them:
+      the reinforcement `RunTurn` reports on its "Army Bonuses" line (`new_armies` is already
+      floored to `minimum_armies`; `region_bonus` is the part of it from fully-held regions)
     * `{:eliminated, player_number}`
     * `{:ended, winner_player_number}`
 
@@ -469,7 +473,8 @@ defmodule GlobalCombat.Engine.Game do
             {game, alive_players, Enum.reverse(new_events, events)}
 
           true ->
-            {reinforce(game, player.number), alive_players + 1, events}
+            {game, bonus_event} = reinforce(game, player.number)
+            {game, alive_players + 1, [bonus_event | events]}
         end
       end)
 
@@ -483,20 +488,26 @@ defmodule GlobalCombat.Engine.Game do
     end
   end
 
+  # Returns the reinforced game plus a `{:bonus, player_number, new_armies, region_bonus}` event —
+  # the same two numbers `RunTurn`'s `armyBonusMessage` line reports per surviving player
+  # ("N new armies (M from Region Bonuses)"), `new_armies` already floored to `minimum_armies`.
   defp reinforce(game, player_number) do
     player = player!(game, player_number)
-    new_armies = div(player.areas, 2) + region_bonus(game, player_number)
-    new_armies = max(new_armies, game.minimum_armies)
+    bonus = region_bonus(game, player_number)
+    new_armies = max(div(player.areas, 2) + bonus, game.minimum_armies)
 
     total_armies =
       areas_in_order(game)
       |> Enum.filter(&owned_by?(&1, player_number))
       |> Enum.reduce(0, &(&2 + &1.armies))
 
-    update_player(game, player_number, fn p ->
-      unassigned = p.unassigned_armies + new_armies
-      %{p | unassigned_armies: unassigned, armies: total_armies + unassigned}
-    end)
+    game =
+      update_player(game, player_number, fn p ->
+        unassigned = p.unassigned_armies + new_armies
+        %{p | unassigned_armies: unassigned, armies: total_armies + unassigned}
+      end)
+
+    {game, {:bonus, player_number, new_armies, bonus}}
   end
 
   defp region_bonus(game, player_number) do
