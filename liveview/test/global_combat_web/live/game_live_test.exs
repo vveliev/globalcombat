@@ -1297,6 +1297,25 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
     end
 
+    test "the invite box takes a comma-separated list, inviting the good logins and naming the bad",
+         %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+      carl = account_fixture(%{"name" => "Carl"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      render_submit(view, "invite", %{"login" => "Bob, no-such-account, Carl"})
+
+      assert has_element?(view, "#flash-info", "Invited Bob, Carl.")
+      assert has_element?(view, "#flash-error", "No account found for \"no-such-account\".")
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(carl.id)
+    end
+
     test "inviting an unknown login shows an error instead of crashing", %{conn: conn} do
       alice = account_fixture(%{"name" => "Alice"})
 
@@ -1439,7 +1458,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
       render_click(bob_view, "quit")
 
       wait_for_element(alice_view, "#game-over", "Game Over")
-      assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+      # Bob leaving ended this two-player game, and a finished game takes no more quits.
+      assert {:error, :game_ended} = Games.quit(game_id, bob.id)
     end
   end
 

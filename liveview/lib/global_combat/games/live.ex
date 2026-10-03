@@ -78,6 +78,13 @@ defmodule GlobalCombat.Games.Live do
   def invite(game_id, account_id, login),
     do: with_game(game_id, &Server.invite(&1, account_id, login))
 
+  @doc """
+  `invite/3` for a comma/newline separated list of logins, as the original's invite box took —
+  see `GlobalCombat.Games.Server.invite_many/3` for the per-login result list.
+  """
+  def invite_many(game_id, account_id, logins),
+    do: with_game(game_id, &Server.invite_many(&1, account_id, logins))
+
   @doc "Port of `GameController.Quit` + `Game.Unjoin`/`Game.EliminatePlayer` (GIF-114)."
   def quit(game_id, account_id), do: with_game(game_id, &Server.quit(&1, account_id))
 

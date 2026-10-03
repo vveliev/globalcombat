@@ -6,6 +6,38 @@ defmodule GlobalCombat.GamesTest do
 
   alias GlobalCombat.Games
 
+  describe "seat/2" do
+    test "seating an account twice is fine (already seated), and leaves one row" do
+      account = account_fixture()
+      {:ok, game} = Games.create_game(%{status: :new})
+
+      assert :ok = Games.seat(game.id, account.id)
+      assert :ok = Games.seat(game.id, account.id)
+      assert [%{id: id}] = Games.list_player_games(account.id)
+      assert id == game.id
+    end
+
+    test "any other failure is returned, not swallowed" do
+      account = account_fixture()
+      {:ok, game} = Games.create_game(%{status: :new})
+      :ok = Games.delete_game(game.id)
+
+      assert {:error, %Ecto.Changeset{errors: [game_id: _]}} = Games.seat(game.id, account.id)
+    end
+  end
+
+  describe "invite/2" do
+    test "records a pending invite with server-set fields" do
+      account = account_fixture()
+      {:ok, game} = Games.create_game(%{status: :new})
+
+      assert {:ok, invite} = Games.invite(game.id, account.id)
+      assert {invite.game_id, invite.account_id, invite.is_invite} == {game.id, account.id, true}
+      assert [%{id: id}] = Games.list_invited_games(account.id)
+      assert id == game.id
+    end
+  end
+
   describe "list_new_games/0" do
     test "ports GameServer.GetNewGames — open, public games, most recent first" do
       open = game_fixture(%{game_name: "Open Game"})

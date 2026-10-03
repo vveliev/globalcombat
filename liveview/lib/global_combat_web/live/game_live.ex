@@ -183,13 +183,9 @@ defmodule GlobalCombatWeb.GameLive do
         {:noreply, socket}
 
       {_login, {:ok, account}} ->
-        case Games.invite(socket.assigns.game_id, account.id, login) do
-          {:ok, invitee} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Invited #{invitee.name}.")
-             |> assign(:invite_login, "")
-             |> refresh_view()}
+        case Games.invite_many(socket.assigns.game_id, account.id, login) do
+          results when is_list(results) ->
+            {:noreply, invite_flashes(socket, results)}
 
           {:error, reason} ->
             {:noreply, put_flash(socket, :error, invite_error_message(reason, login))}
@@ -464,6 +460,27 @@ defmodule GlobalCombatWeb.GameLive do
       nil -> :error
       account -> {:ok, account}
     end
+  end
+
+  # The invite box takes a comma/newline separated list (`Games.invite_many/3`): one info flash
+  # naming everyone invited, one error flash with a line per login that failed.
+  defp invite_flashes(socket, results) do
+    invited = for {_login, {:ok, invitee}} <- results, do: invitee.name
+
+    errors =
+      for {login, {:error, reason}} <- results, do: invite_error_message(reason, login)
+
+    socket =
+      if invited == [] do
+        socket
+      else
+        socket
+        |> put_flash(:info, "Invited #{Enum.join(invited, ", ")}.")
+        |> assign(:invite_login, "")
+        |> refresh_view()
+      end
+
+    if errors == [], do: socket, else: put_flash(socket, :error, Enum.join(errors, " "))
   end
 
   defp invite_error_message(:account_not_found, login), do: "No account found for \"#{login}\"."
