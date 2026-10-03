@@ -144,6 +144,65 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
+  describe "a finished game is read-only" do
+    # Bob quitting a two-player game eliminates him and ends it, with Alice the winner.
+    defp finished_two_player_game do
+      alice = account_fixture()
+      bob = account_fixture()
+      game_id = Games.create_game(%{map_name: :original, max_players: 2})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+      :ok = Games.quit(game_id, bob.id)
+
+      # Past the turn deadline, so a Force Turn would otherwise be honoured.
+      :sys.replace_state(Server.via(game_id), fn state ->
+        %{state | turn_started_at: DateTime.add(DateTime.utc_now(), -2, :day)}
+      end)
+
+      {game_id, alice, bob}
+    end
+
+    test "done, force_turn, orders and quit change nothing and run no turn" do
+      {game_id, alice, bob} = finished_two_player_game()
+      {:playing, before} = Games.player_view(game_id, alice.id)
+      assert before.ended
+      row_before = GamesDb.get_game!(game_id)
+      server_before = :sys.get_state(Server.via(game_id))
+
+      Games.subscribe_account(alice.id)
+      Games.subscribe(game_id)
+
+      Games.force_turn(game_id, alice.id)
+      Games.set_done(game_id, alice.id)
+      Games.assign(game_id, alice.id, 1, 1)
+      Games.unassign(game_id, alice.id, 1)
+      Games.transfer(game_id, alice.id, 1, 3, 1)
+      Games.attack(game_id, alice.id, 1, 2, 1)
+      assert {:error, :game_ended} = Games.quit(game_id, alice.id)
+      assert {:error, :game_ended} = Games.quit(game_id, bob.id)
+
+      assert :sys.get_state(Server.via(game_id)) == server_before
+      assert GamesDb.get_game!(game_id) == row_before
+      {:playing, after_view} = Games.player_view(game_id, alice.id)
+      assert after_view == before
+
+      refute_received {:notification, _title, _text, _uri}
+      refute_received {:add_message, _message}
+      refute_received :reload
+    end
+
+    test "a stale scheduler claim on a finished game is refused" do
+      {game_id, _alice, _bob} = finished_two_player_game()
+      row_before = GamesDb.get_game!(game_id)
+
+      assert {:error, :not_playing} =
+               Server.run_scheduled_turn(game_id, row_before.last_turn_time)
+
+      assert GamesDb.get_game!(game_id) == row_before
+    end
+  end
+
   # deal_areas/2's round-robin on :original (42 areas) gives a 2-player game player 1
   # every odd-numbered area, player 2 every even one. Area 1 links to [2, 3, 37]
   # (`MapInfo.areas(:original)`), so area 1 <-> area 3 is an owned-adjacent pair for
