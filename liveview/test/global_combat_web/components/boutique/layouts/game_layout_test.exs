@@ -3,6 +3,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
 
   import Phoenix.Component
   import Phoenix.LiveViewTest
+  import GlobalCombatWeb.HTMLAssertions
 
   alias GlobalCombatWeb.Components.Boutique.Layouts.GameLayout
 
@@ -17,7 +18,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       </GameLayout.game_layout>
       """)
 
-    assert html =~ "[grid-template-areas:&#39;status&#39;_&#39;board&#39;_&#39;players&#39;]"
+    assert "[grid-template-areas:'status'_'board'_'players']" in grid_classes(html)
   end
 
   test "players_first flips to status/players/board below lg: without touching the lg: side-by-side order" do
@@ -31,8 +32,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       </GameLayout.game_layout>
       """)
 
-    assert html =~ "[grid-template-areas:&#39;status&#39;_&#39;players&#39;_&#39;board&#39;]"
-    assert html =~ "lg:[grid-template-areas:&#39;status_status&#39;_&#39;board_players&#39;]"
+    grid = grid_classes(html)
+
+    assert "[grid-template-areas:'status'_'players'_'board']" in grid
+    assert "lg:[grid-template-areas:'status_status'_'board_players']" in grid
   end
 
   test "the :players slot renders once, inside the game-drawer dialog with a Close button" do
@@ -78,7 +81,9 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       </GameLayout.game_layout>
       """)
 
-    refute html =~ "game-drawer"
+    document = LazyHTML.from_fragment(html)
+
+    assert document |> LazyHTML.query("dialog, #game-drawer, .game-drawer") |> Enum.empty?()
   end
 
   describe "stage mode (mobile battle mode WP3)" do
@@ -95,14 +100,15 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
         </GameLayout.game_layout>
         """)
 
-      assert html =~ "[grid-template-areas:&#39;status&#39;_&#39;board&#39;_&#39;dock&#39;]"
-      assert html =~ "h-[100dvh]"
-      assert html =~ "overflow-hidden"
-      assert html =~ "pt-[env(safe-area-inset-top)]"
+      grid = grid_classes(html)
+
+      assert "[grid-template-areas:'status'_'board'_'dock']" in grid
+      assert "h-[100dvh]" in grid
+      assert "overflow-hidden" in grid
+      assert "pt-[env(safe-area-inset-top)]" in grid
       # lg: gets a second rail row for :dock above :players — the side-by-side
       # shape (board next to the rail) is otherwise untouched.
-      assert html =~
-               "lg:[grid-template-areas:&#39;status_status&#39;_&#39;board_dock&#39;_&#39;board_players&#39;]"
+      assert "lg:[grid-template-areas:'status_status'_'board_dock'_'board_players']" in grid
     end
 
     test "stage's dock renders once — a bottom sheet below lg:, repositioned to the top of the rail at lg: via grid-area, never duplicated" do
@@ -120,13 +126,20 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       # Exactly one dock section, exactly one id="end-turn" — never duplicated
       # (a duplicate would also mean order-panel/order-form ids collide once
       # GameLive wires a real order form into :dock).
-      assert length(:binary.matches(html, "aria-label=\"Actions\"")) == 1
-      assert length(:binary.matches(html, ~s(id="end-turn"))) == 1
+      document = LazyHTML.from_fragment(html)
 
-      assert html =~
-               ~r/<section[^>]*aria-label="Actions"[^>]*class="[^"]*\[grid-area:dock\][^"]*max-h-\[45dvh\][^"]*overflow-y-auto[^"]*lg:max-h-none[^"]*lg:overflow-visible[^"]*lg:border-l[^"]*"[^>]*>/
+      assert document |> LazyHTML.query(~s([aria-label="Actions"])) |> Enum.count() == 1
+      assert document |> LazyHTML.query(~s([id="end-turn"])) |> Enum.count() == 1
 
-      assert html =~ ~r/pb-\[max\(var\(--space-3\),env\(safe-area-inset-bottom\)\)\]/
+      dock = document |> LazyHTML.query(~s(section[aria-label="Actions"])) |> classes()
+
+      for class <- ~w|
+            [grid-area:dock] max-h-[45dvh] overflow-y-auto
+            lg:max-h-none lg:overflow-visible lg:border-l
+            pb-[max(var(--space-3),env(safe-area-inset-bottom))]
+          | do
+        assert class in dock
+      end
     end
 
     test "stage mode doesn't disturb the :players drawer — it's still the one game-drawer dialog" do
@@ -160,9 +173,15 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
         </GameLayout.game_layout>
         """)
 
-      refute html =~ "End Turn"
-      refute html =~ ~s(aria-label="Actions")
-      refute html =~ "h-[100dvh]"
+      document = LazyHTML.from_fragment(html)
+
+      refute LazyHTML.text(document) =~ "End Turn"
+      assert document |> LazyHTML.query(~s([aria-label="Actions"])) |> Enum.empty?()
+      assert document |> LazyHTML.query(~s([class~="h-[100dvh]"])) |> Enum.empty?()
     end
   end
+
+  # The shell's outer grid container — the one top-level element of the fragment.
+  defp grid_classes(html),
+    do: html |> LazyHTML.from_fragment() |> LazyHTML.filter("div") |> classes()
 end

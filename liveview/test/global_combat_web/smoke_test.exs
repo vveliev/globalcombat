@@ -108,9 +108,20 @@ defmodule GlobalCombatWeb.SmokeTest do
     assert after_source.armies < source.armies or after_source.owner_number != source.owner_number
 
     # --- Home lists it under the player's current games ------------------------------------
-    home = conn |> get(~p"/") |> html_response(200)
-    assert home =~ "Your Current Games"
-    assert home =~ "Game ##{game_id}"
+    home = conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
+
+    current_games =
+      home
+      |> LazyHTML.query("section")
+      |> Enum.find(fn card ->
+        card |> LazyHTML.query("h2") |> LazyHTML.text() |> String.trim() == "Your Current Games"
+      end)
+
+    assert current_games, "no \"Your Current Games\" card on Home"
+
+    assert current_games
+           |> LazyHTML.query(~s(a[href="/Game-#{game_id}/"]))
+           |> LazyHTML.text() =~ "Game ##{game_id}"
   end
 
   # An owned, visible territory with at least 2 armies and an adjacent enemy territory —

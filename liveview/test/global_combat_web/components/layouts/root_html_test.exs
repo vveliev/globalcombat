@@ -5,18 +5,16 @@ defmodule GlobalCombatWeb.Components.Layouts.RootHtmlTest do
   # PWA install metas (mobile-battle-mode.md §4.6) belong on every page,
   # not just the game screen.
   test "carries the PWA manifest link and install metas", %{conn: conn} do
-    body = get(conn, ~p"/") |> html_response(200)
+    doc = get(conn, ~p"/") |> html_response(200) |> LazyHTML.from_document()
 
-    assert body =~ ~s[<link rel="manifest" href="/manifest.webmanifest">]
-    assert body =~ ~s[<meta name="apple-mobile-web-app-capable" content="yes">]
-
-    assert body =~
-             ~s[<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">]
-
-    assert body =~
-             ~s[<meta name="theme-color" content="#416180" media="(prefers-color-scheme: light)">]
-
-    assert body =~
-             ~s[<meta name="theme-color" content="#94bce3" media="(prefers-color-scheme: dark)">]
+    for selector <- [
+          ~s{head link[rel="manifest"][href="/manifest.webmanifest"]},
+          ~s{head meta[name="apple-mobile-web-app-capable"][content="yes"]},
+          ~s{head meta[name="apple-mobile-web-app-status-bar-style"][content="black-translucent"]},
+          ~s{head meta[name="theme-color"][content="#416180"][media="(prefers-color-scheme: light)"]},
+          ~s{head meta[name="theme-color"][content="#94bce3"][media="(prefers-color-scheme: dark)"]}
+        ] do
+      assert doc |> LazyHTML.query(selector) |> Enum.count() == 1, "missing #{selector}"
+    end
   end
 end
