@@ -1555,7 +1555,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       wait_for_element(bob_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
     end
 
-    test "a turn with no orders queued shows neither replay controls nor a results list",
+    test "a turn with no orders queued still lists every player's army bonus, like legacy's results post",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
       %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
@@ -1565,8 +1565,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       wait_for(alice_view, "Turn 2")
 
-      refute has_element?(alice_view, "#turn-results-list")
-      refute has_element?(alice_view, "button", "Turn 2 results ▶")
+      assert has_element?(alice_view, "#turn-results-list li", ~r/^Alice: \d+ new armies/)
+      assert has_element?(alice_view, "#turn-results-list li", ~r/^Bob: \d+ new armies/)
+      refute has_element?(alice_view, ".world-map-replay-arrow")
     end
   end
 
