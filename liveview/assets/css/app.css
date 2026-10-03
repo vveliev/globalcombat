@@ -202,6 +202,17 @@
    every owner colour comes from the dark stroke under the count (GIF-83), not
    from the fill, so the palette can change without a contrast re-audit. */
 :root {
+  /* Army tokens and the queued-reinforcements tab (see "Game HUD" below):
+     a dark plate and light ink that hold on every owner colour, and the gold
+     of a pending "+N". */
+  --map-token-plate: var(--black);
+  --map-token-ink: var(--white);
+  --map-pending: var(--yellow-3);
+  /* Game HUD sizes: the smallest comfortable touch target (WCAG 2.5.8 asks
+     for 24px; thumbs want 44), a roster avatar, and the End Turn button. */
+  --hud-target: 2.75rem;
+  --hud-avatar: 1.625rem;
+  --hud-end-turn: 5.25rem;
   --map-sea: var(--gray-1);
   --map-fog-a: var(--stone-3);
   --map-fog-b: var(--stone-5);
@@ -761,7 +772,7 @@
 }
 
 .world-map-token-ring {
-  fill: color-mix(in oklab, var(--black) 72%, transparent);
+  fill: color-mix(in oklab, var(--map-token-plate) 72%, transparent);
   stroke: var(--map-owner-fill, var(--map-owner-0));
   stroke-width: 2.2px;
 }
@@ -782,19 +793,19 @@
 
 /* Reinforcements queued on a territory this turn: a gold "+N" tab. */
 .world-map-pending rect {
-  fill: var(--yellow-3);
-  stroke: var(--black);
+  fill: var(--map-pending);
+  stroke: var(--map-token-plate);
   stroke-width: 0.8px;
 }
 
 .world-map-pending text {
   font-size: 7.5px;
   font-weight: 800;
-  fill: var(--black);
+  fill: var(--map-token-plate);
 }
 
 .world-map-order-badge circle {
-  stroke: var(--black);
+  stroke: var(--map-token-plate);
   stroke-width: 1px;
 }
 
@@ -828,27 +839,36 @@
   stroke-opacity: 1;
 }
 
-.world-map.is-dragging
-  .world-map-territory:not(.is-drag-source):not(.is-drop-target)
-  .world-map-area {
-  opacity: 0.35;
+/* `.MapViewport` fills the drag layer while a drag is under way: a veil over
+   the board, then the source and each neighbour it can reach redrawn on top. */
+.world-map-drag {
+  pointer-events: none;
 }
 
-.world-map-territory.is-drag-source .world-map-area {
+.world-map-drag-veil {
+  fill: var(--map-sea);
+  opacity: 0.6;
+}
+
+.world-map-drag-area {
+  fill: var(--map-owner-fill, var(--map-owner-0));
+  stroke: var(--map-ink);
+  stroke-linejoin: round;
+}
+
+.world-map-drag-area--source {
   filter: brightness(1.2);
   stroke: var(--color-focus-ring);
-  stroke-opacity: 1;
   stroke-width: 2.2;
 }
 
-.world-map-territory.is-drop-target .world-map-area {
-  stroke: var(--map-ink);
+.world-map-drag-area--target {
   stroke-opacity: 0.9;
   stroke-width: 1.6;
   stroke-dasharray: 4 2;
 }
 
-.world-map-territory.is-drop-hover .world-map-area {
+.world-map-drag-area--target.is-hover {
   filter: brightness(1.25) saturate(1.15);
   stroke-width: 2.6;
   stroke-dasharray: none;
@@ -872,17 +892,17 @@
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 1.625rem;
-  height: 1.625rem;
+  width: var(--hud-avatar);
+  height: var(--hud-avatar);
   border-radius: var(--radius-full);
   border: 2px solid var(--color-surface);
   background: var(--map-owner-fill, var(--map-owner-0));
-  color: var(--white);
-  font-size: 0.75rem;
+  color: var(--map-token-ink);
+  font-size: var(--text-xs);
   font-weight: 800;
   text-shadow:
-    0 0 2px var(--black),
-    0 0 2px var(--black);
+    0 0 2px var(--map-token-plate),
+    0 0 2px var(--map-token-plate);
 }
 
 .hud-avatar[data-done]::after {
@@ -929,7 +949,7 @@
   position: relative;
   display: inline-grid;
   place-items: center;
-  min-height: 2.75rem;
+  min-height: var(--hud-target);
   padding: 0 var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-primary);
@@ -949,7 +969,7 @@
 
 .end-turn.is-armed {
   background: var(--color-warning);
-  color: var(--black);
+  color: var(--map-token-plate);
 }
 
 /* The order panel: the exact number beside a slider, then quick picks. */
@@ -967,12 +987,18 @@
 .order-amount-range {
   flex: 1;
   min-width: 0;
-  height: 2.75rem;
+  height: var(--hud-target);
   accent-color: var(--color-primary);
 }
 
 .order-panel--attack .order-amount-range {
   accent-color: var(--color-danger);
+}
+
+.order-replaces {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 
 .order-stepper,
@@ -1002,7 +1028,7 @@
   }
 
   /* Top: the status strip floats over the map; only its controls catch taps. */
-  [data-hud] > section[aria-label="Game status"] {
+  [data-hud] > [data-slot="status"] {
     position: absolute;
     inset: 0 0 auto;
     z-index: 10;
@@ -1015,9 +1041,9 @@
     pointer-events: none;
   }
 
-  [data-hud] > section[aria-label="Game status"] button,
-  [data-hud] > section[aria-label="Game status"] .turn-pill,
-  [data-hud] > section[aria-label="Game status"] [data-status-pill] {
+  [data-hud] > [data-slot="status"] button,
+  [data-hud] > [data-slot="status"] .turn-pill,
+  [data-hud] > [data-slot="status"] [data-status-pill] {
     pointer-events: auto;
   }
 
@@ -1056,22 +1082,22 @@
   }
 
   [data-hud] .turn-hint {
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
   }
 
   [data-hud] .hud-chip {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 2.75rem;
-    min-height: 2.75rem;
+    min-width: var(--hud-target);
+    min-height: var(--hud-target);
     padding: 0 var(--space-2);
     color: var(--color-text);
   }
 
   /* Bottom: the dock floats over the map — the coach line and End Turn when
      idle, the order panel once a territory is picked. */
-  [data-hud] > section[aria-label="Actions"] {
+  [data-hud] > [data-slot="dock"] {
     position: absolute;
     inset: auto 0 0;
     z-index: 10;
@@ -1081,13 +1107,28 @@
     pointer-events: none;
   }
 
-  [data-hud] > section[aria-label="Actions"] > * {
+  [data-hud] > [data-slot="dock"] > * {
     pointer-events: auto;
   }
 
   [data-hud] #order-panel {
     box-shadow: var(--shadow-lg);
     animation: game-sheet-up 180ms ease-out;
+  }
+
+  /* A transfer/attack floats beside its arrow: `.MapViewport` works out where
+     (`positionOrderPanel`) and hands the spot over as root custom properties.
+     Until it has, `top`/`left` are invalid and the card stays in the dock. */
+  [data-hud] #order-panel[data-anchor] {
+    position: fixed;
+    left: var(--order-panel-left);
+    top: var(--order-panel-top);
+    width: min(19rem, calc(100vw - var(--space-4)));
+    min-width: 0;
+  }
+
+  [data-hud] #order-panel[data-anchor] #order-form {
+    gap: var(--space-2);
   }
 
   [data-hud] .turn-controls {
@@ -1107,9 +1148,9 @@
   }
 
   [data-hud] .turn-controls-force {
-    min-height: 2rem;
+    min-height: var(--space-7);
     padding-block: 0;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     border-radius: var(--radius-full);
     box-shadow: var(--shadow-md);
   }
@@ -1117,21 +1158,21 @@
   /* End Turn as a round thumb button with a ring that fills as
      reinforcements go out; it breathes once there's nothing left to place. */
   [data-hud] .end-turn {
-    width: 5.25rem;
-    height: 5.25rem;
+    width: var(--hud-end-turn);
+    height: var(--hud-end-turn);
     padding: 0;
     border-radius: var(--radius-full);
     box-shadow: var(--shadow-lg);
     text-align: center;
     line-height: 1;
-    font-size: 0.95rem;
+    font-size: var(--text-sm);
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
 
   [data-hud] .end-turn-label {
-    max-width: 4rem;
+    max-width: calc(var(--hud-end-turn) - var(--space-5));
   }
 
   [data-hud] .end-turn-ring {
@@ -1154,7 +1195,7 @@
   }
 
   [data-hud] .end-turn-ring-fill {
-    stroke: var(--yellow-3);
+    stroke: var(--map-pending);
     stroke-dasharray: 100;
     stroke-linecap: round;
     transition: stroke-dashoffset 0.35s ease;
@@ -1165,7 +1206,7 @@
   }
 
   [data-hud] .end-turn.is-armed .end-turn-label {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     text-transform: none;
   }
 }

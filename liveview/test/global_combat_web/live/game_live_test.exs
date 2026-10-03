@@ -582,7 +582,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       html = render_click(alice_view, "select_area", %{"area" => "3"})
 
       assert html =~ "Transfer how many armies to #{area_three_name}?"
-      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Transfer\s+\d+\s*<\/button>/
+      assert has_element?(alice_view, ~s(#order-submit[type="submit"]), "Transfer 4")
     end
 
     test "a second click on an adjacent enemy territory switches the panel to attack mode",
@@ -599,7 +599,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       html = render_click(alice_view, "select_area", %{"area" => "2"})
 
       assert html =~ "Attack #{area_two_name} with how many armies?"
-      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Attack\s+\d+\s*<\/button>/
+      assert has_element?(alice_view, ~s(#order-submit[type="submit"]), "Attack 4")
     end
 
     test "a second click on a non-adjacent enemy territory is a no-op (order panel stays in assign mode)",
@@ -884,6 +884,208 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "#your-orders")
     end
 
+    test "a drag onto the target already ordered reopens that order without resetting its amount",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      render_submit(alice_view, "submit_order", %{"amount" => "2"})
+      sync_game(game_id, alice_view)
+
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).order.amount == 2
+      assert has_element?(alice_view, ~s(#order-amount[value="2"]))
+      assert has_element?(alice_view, "#remove-order")
+    end
+
+    test "a drag to a second target queues nothing until submitted, and says which order it would replace",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      area_two_name = Enum.find(view.areas, &(&1.number == 2)).name
+
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      render_click(alice_view, "cancel_order")
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "3"})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).order == %{command: :attack, target: 2, amount: 4}
+      assert has_element?(alice_view, "#order-replaces", area_two_name)
+      refute has_element?(alice_view, "#remove-order")
+
+      render_submit(alice_view, "submit_order", %{"amount" => "3"})
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).order == %{command: :transfer, target: 3, amount: 3}
+    end
+
+    test "Remove only ever removes the order the panel is showing", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      # Drag 1 -> 2, then tap another neighbour: the panel now drafts 1 -> 3,
+      # which isn't queued, so there is no Remove and the event does nothing.
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      render_click(alice_view, "select_area", %{"area" => "3"})
+      sync_game(game_id, alice_view)
+
+      refute has_element?(alice_view, "#remove-order")
+      render_click(alice_view, "remove_order")
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).order == %{command: :attack, target: 2, amount: 4}
+    end
+
+    test "undoing a placement puts back as much of that territory's order as it can still send",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      # 5 standing + 1 + 1 placed = 7, so the drag queues 6.
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      render_click(alice_view, "cancel_order")
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).order.amount == 6
+
+      # One placement back: 6 armies, so 5 can still go — not the 4 the
+      # engine's own clear trims it to.
+      render_click(alice_view, "undo_assign")
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).pending_armies == 1
+      assert area(game_id, alice, 1).order.amount == 5
+    end
+
+    test "the Undo history follows the order panel: its Assign can be undone, its Unassign leaves nothing to undo",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_submit(alice_view, "submit_order", %{"amount" => "3"})
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).pending_armies == 4
+
+      render_click(alice_view, "undo_assign")
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).pending_armies == 1
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_click(alice_view, "unassign_order")
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).pending_armies == 0
+      refute has_element?(alice_view, "#undo-assign")
+    end
+
+    test "Undo survives a reconnect: placements already queued can still be taken back",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 5})
+      sync_game(game_id, alice_view)
+
+      {:ok, fresh_view, _html} =
+        Phoenix.ConnTest.build_conn() |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      assert has_element?(fresh_view, "#undo-assign")
+      render_click(fresh_view, "undo_assign")
+      sync_game(game_id, fresh_view)
+
+      assert area(game_id, alice, 1).pending_armies == 0
+      refute has_element?(fresh_view, "#undo-assign")
+    end
+
+    test "a player who has ended their turn can no longer place, undo or drag", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_click(alice_view, "done")
+      sync_game(game_id, alice_view)
+
+      # No `data-unassigned`: the map's gesture layer is off for this viewer.
+      refute has_element?(alice_view, "#world-map[data-unassigned]")
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_click(alice_view, "undo_assign")
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).pending_armies == 1
+      assert area(game_id, alice, 1).order == nil
+    end
+
+    test "End Turn with armies unplaced arms first, then ends the turn; with none left it ends it outright",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(#end-turn[phx-click="arm_end_turn"]), "End Turn")
+
+      alice_view |> element("#end-turn") |> render_click()
+      assert has_element?(alice_view, ~s(#end-turn.is-armed[phx-click="done"]), "25 unplaced")
+
+      # The arming lapses on its own, and any placement cancels it.
+      send(alice_view.pid, :disarm_end_turn)
+      assert has_element?(alice_view, ~s(#end-turn[phx-click="arm_end_turn"]))
+      refute has_element?(alice_view, "#end-turn.is-armed")
+
+      alice_view |> element("#end-turn") |> render_click()
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      refute has_element?(alice_view, "#end-turn.is-armed")
+
+      alice_view |> element("#end-turn") |> render_click()
+      alice_view |> element("#end-turn") |> render_click()
+      sync_game(game_id, alice_view)
+      assert has_element?(alice_view, "#turn-hint", "Waiting on others")
+      refute has_element?(alice_view, "#end-turn")
+    end
+
+    test "the order panel for a transfer or attack carries the arrow's midpoint as its anchor",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      refute has_element?(alice_view, "#order-panel[data-anchor]")
+
+      render_click(alice_view, "select_area", %{"area" => "2"})
+      assert has_element?(alice_view, "#order-panel[data-anchor]")
+    end
+
+    test "the turn hint is kept out of the status strip's live announcements", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(
+               alice_view,
+               ~s([data-slot="status"][aria-live="polite"] #turn-hint[aria-live="off"])
+             )
+    end
+
     test "drag_order ignores a source the viewer doesn't own and a target that isn't adjacent",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
@@ -910,7 +1112,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       render_click(alice_view, "select_area", %{"area" => "1"})
       render_submit(alice_view, "submit_order", %{"amount" => "20"})
       sync_game(game_id, alice_view)
-      assert has_element?(alice_view, "#turn-coach", "Drag from your territory")
+      assert has_element?(alice_view, "#turn-coach", "Drag an army token")
       assert has_element?(alice_view, ~s(#end-turn.end-turn--ready[data-unplaced="0"]))
 
       render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})

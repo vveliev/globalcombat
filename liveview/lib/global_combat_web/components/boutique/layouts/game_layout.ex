@@ -72,7 +72,8 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   wrapper carries `data-hud`, and `assets/css/app.css` lays `:board` full-bleed
   under the whole viewport with `:status` floating over its top edge and
   `:dock` over its bottom edge, both see-through except for their own
-  controls. The grid classes above still describe the shape at `lg:` and up.
+  controls. The two carry `data-slot="status"`/`data-slot="dock"` for that
+  stylesheet to select on, so it never depends on their accessible names. The grid classes above still describe the shape at `lg:` and up.
   """
   use Phoenix.Component
 
@@ -128,6 +129,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         :if={@status != []}
         aria-label="Game status"
         aria-live="polite"
+        data-slot="status"
         tabindex="-1"
         data-focus-landmark
         class={[
@@ -152,6 +154,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       <section
         :if={@stage and @dock != []}
         aria-label="Actions"
+        data-slot="dock"
         class="[grid-area:dock] max-h-[45dvh] overflow-y-auto bg-surface border-t border-border p-[var(--space-3)] pb-[max(var(--space-3),env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:border-t-0 lg:border-l lg:p-[var(--space-4)] lg:pb-0"
       >
         {render_slot(@dock)}

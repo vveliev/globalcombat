@@ -157,11 +157,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: nil,
     doc: "used only as the `.MapViewport` hook's sessionStorage key; nil disables persistence"
 
-  attr :unassigned, :integer,
-    default: 0,
+  attr :unassigned, :any,
+    default: nil,
     doc:
-      "the viewer's unplaced reinforcements — while above zero a tap on an own territory " <>
-        "places one (`quick_assign`) instead of selecting it"
+      "the viewer's unplaced reinforcements, or nil when they can't act (spectating, " <>
+        "eliminated, turn ended) — a number turns on the phone gestures, and while it is " <>
+        "above zero a tap on an own territory places one (`quick_assign`) instead of selecting it"
 
   def world_map(assigns) do
     lens = effective_lens(assigns.lens, assigns.viewer_number)
@@ -190,6 +191,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-game-id={@game_id}
       data-zoomed="false"
       data-unassigned={@interactive && @unassigned}
+      data-curve={curve_json(@map_name)}
       tabindex="0"
       phx-hook=".MapViewport"
     >
@@ -307,6 +309,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             class="world-map-highlight world-map-highlight--target"
           />
         </g>
+        <%!-- While a drag-to-order is under way `.MapViewport` veils the board
+        here and redraws the source and the neighbours it can land on over
+        the veil. Client-owned like the ghost arrow below, so LiveView never
+        patches it mid-gesture. --%>
+        <g id="world-map-drag" class="world-map-drag" phx-update="ignore" aria-hidden="true"></g>
         <g :if={Enum.any?(@areas, &queued_order?/1)} class="world-map-orders">
           <.order_arrow
             :for={area <- @areas}
@@ -379,14 +386,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".MapViewport">
         // The map's gesture layer. One finger pans, two pinch-zoom, a double
-        // tap on open board zooms in or back out — and, for the viewer's own
-        // territories, the two game gestures:
+        // tap on open board zooms in or back out — and, below `lg` (the phone
+        // HUD; from `lg` up a click selects and a drag pans, as it always
+        // has), the two game gestures on the viewer's own territories:
         //
         //   * tap places one reinforcement while any are unplaced, hold places
         //     five (`quick_assign`), instead of opening the order panel;
-        //   * a drag that starts on an own territory with armies to spare
-        //     draws a live arrow and, released over a neighbour, queues an
-        //     attack or transfer with everything it can send (`drag_order`).
+        //   * a drag that starts on an own territory's army token draws a live
+        //     arrow and, released over a neighbour, opens that order
+        //     (`drag_order`). A drag from anywhere else pans, own land included.
         //
         // A tap only ever gets cancelled when the pointer actually moved, when
         // it was a hold, or when it completes a double tap.
@@ -406,6 +414,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         const HOLD_MS = 450
         const HOLD_AMOUNT = 5
         const TOKEN_REACH_PX = 22
+        const TOKEN_GRAB_PX = 30
+        const PLACE_COOLDOWN_MS = 500
+        const PANEL_GAP_PX = 28
+        const PANEL_MARGIN_PX = 8
         const EDGE_SLACK = 0.12
         const PORTRAIT_HEIGHT = 1.15
         const ANIMATE_MS = 200
@@ -425,6 +437,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           mounted() {
             this.svg = this.el.querySelector("svg")
             this.ghost = this.el.querySelector("#world-map-ghost")
+            this.dragLayer = this.el.querySelector("#world-map-drag")
+            this.curveShape = JSON.parse(this.el.dataset.curve)
+            this.desktop = window.matchMedia(DESKTOP_QUERY)
+            this.lastPlaceAt = 0
             this.base = this.parseViewBox(this.el.dataset.viewBox)
             this.pointers = new Map()
             this.moved = false
@@ -474,9 +490,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           updated() {
             this.svg = this.el.querySelector("svg")
             this.ghost = this.el.querySelector("#world-map-ghost")
-            this.pendingPlacements = 0
+            this.dragLayer = this.el.querySelector("#world-map-drag")
             this.applyViewBox()
-            if (this.drag) this.markDrag()
             this.bumpChangedCounts()
           },
 
@@ -484,6 +499,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             window.removeEventListener("gc:map-fit", this.onFitEvent)
             this.resizeObserver?.disconnect()
             this.cancelHold()
+            this.clearPanelPosition()
             if (this.raf) cancelAnimationFrame(this.raf)
           },
 
@@ -524,7 +540,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           // the viewer's territories; anywhere else the whole board fits.
           home() {
             const aspect = this.aspect()
-            if (aspect >= 1 || window.matchMedia(DESKTOP_QUERY).matches) return this.fit()
+            if (aspect >= 1 || this.desktop.matches) return this.fit()
 
             const mine = [...this.el.querySelectorAll(".world-map-territory[data-mine]")]
               .map((t) => this.labelOf(t.dataset.area))
@@ -594,6 +610,47 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             const unitsPerPx = width > 0 ? w / width : 1
             const scale = Math.min(Math.max((TOKEN_PX * unitsPerPx) / TOKEN_UNITS, 0.7), 1.6)
             this.el.style.setProperty("--token-scale", scale.toFixed(3))
+            this.positionOrderPanel()
+          },
+
+          // On a phone the order panel for a transfer/attack floats beside its
+          // arrow instead of sitting in the dock: `GameLive` puts the arrow's
+          // midpoint (board units) in the card's `data-anchor`, and this turns
+          // it into screen pixels, below the arrow when there is room and
+          // above it when not. The position goes out as custom properties on
+          // the root element — outside anything LiveView patches — and
+          // `app.css` (`#order-panel[data-anchor]`) reads them.
+          positionOrderPanel() {
+            const panel = document.querySelector("#order-panel[data-anchor]")
+            if (!panel || this.desktop.matches || !this.svg) {
+              this.clearPanelPosition()
+              return
+            }
+
+            const [x, y] = panel.dataset.anchor.split(",").map(Number)
+            const rect = this.svg.getBoundingClientRect()
+            const pxPerUnit = rect.width / this.current.w
+            const cx = rect.left + (x - this.current.x) * pxPerUnit
+            const cy = rect.top + (y - this.current.y) * pxPerUnit
+            const w = panel.offsetWidth
+            const h = panel.offsetHeight
+            const maxLeft = window.innerWidth - w - PANEL_MARGIN_PX
+            const maxTop = window.innerHeight - h - PANEL_MARGIN_PX
+            const left = Math.max(PANEL_MARGIN_PX, Math.min(cx - w / 2, maxLeft))
+            const below = cy + PANEL_GAP_PX
+            const top = below <= maxTop ? below : cy - PANEL_GAP_PX - h
+            const root = document.documentElement.style
+            root.setProperty("--order-panel-left", `${Math.round(left)}px`)
+            root.setProperty(
+              "--order-panel-top",
+              `${Math.round(Math.max(PANEL_MARGIN_PX, Math.min(top, maxTop)))}px`
+            )
+          },
+
+          clearPanelPosition() {
+            const root = document.documentElement.style
+            root.removeProperty("--order-panel-left")
+            root.removeProperty("--order-panel-top")
           },
 
           // A view smaller than the board stays over it (with a little sea at
@@ -715,9 +772,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             return best ? this.el.querySelector(`#territory-${best}`) : null
           },
 
-          // `data-unassigned` is only rendered while the board takes orders.
-          interactive() {
-            return this.el.dataset.unassigned !== undefined
+          // The game gestures are on only where the phone HUD is (below `lg`),
+          // and only while the viewer can act: `data-unassigned` is rendered
+          // for a seated player who hasn't ended their turn.
+          gestures() {
+            return this.el.dataset.unassigned !== undefined && !this.desktop.matches
           },
 
           unplaced() {
@@ -753,15 +812,28 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           },
 
           pressAt(clientX, clientY) {
-            if (!this.interactive()) return null
+            if (!this.gestures()) return null
             const territory = this.territoryAt(clientX, clientY)
             if (!territory) return null
             const mine = territory.dataset.mine !== undefined
+            const area = territory.dataset.area
+
+            // An order is dragged from the army token, not from anywhere on the
+            // land: a big territory (or a screen full of your own) still pans.
+            const token = this.el
+              .querySelector(`.world-map-count[data-area="${area}"]`)
+              ?.getBoundingClientRect()
+            const onToken =
+              !!token &&
+              Math.hypot(
+                token.left + token.width / 2 - clientX,
+                token.top + token.height / 2 - clientY
+              ) <= TOKEN_GRAB_PX
 
             return {
-              area: territory.dataset.area,
+              area,
               canPlace: mine && this.unplaced() > 0,
-              canDrag: mine && Number(territory.dataset.armies || 0) > 1,
+              canDrag: mine && onToken && Number(territory.dataset.armies || 0) > 1,
               adjacent: (territory.dataset.adjacent || "").split(",").filter(Boolean),
               timer: null
             }
@@ -891,20 +963,40 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               target: null,
               kind: null
             }
-            this.markDrag()
+            this.showDropTargets()
             buzz(8)
           },
 
-          // Re-run after every patch too: LiveView resets the class attributes
-          // it rendered, which would drop these mid-gesture.
-          markDrag() {
-            this.el.classList.add("is-dragging")
-            this.el.querySelectorAll(".world-map-territory").forEach((t) => {
-              const area = t.dataset.area
-              t.classList.toggle("is-drag-source", area === this.drag.from)
-              t.classList.toggle("is-drop-target", this.drag.adjacent.has(area))
-              t.classList.toggle("is-drop-hover", area === this.drag.target)
-            })
+          // Veil the board and redraw the source and each neighbour it can
+          // reach on top, as clones in the client-owned drag layer — the real
+          // territories are LiveView's to patch and are left alone.
+          showDropTargets() {
+            if (!this.dragLayer) return
+            const svgNs = "http://www.w3.org/2000/svg"
+            const veil = document.createElementNS(svgNs, "rect")
+            const { x, y, w, h } = this.fit()
+            veil.setAttribute("x", x - w)
+            veil.setAttribute("y", y - h)
+            veil.setAttribute("width", w * 3)
+            veil.setAttribute("height", h * 3)
+            veil.setAttribute("class", "world-map-drag-veil")
+
+            const clone = (area, role) => {
+              const territory = this.el.querySelector(`#territory-${area}`)
+              if (!territory) return null
+              const use = document.createElementNS(svgNs, "use")
+              use.setAttribute("href", `#gc-area-${area}`)
+              use.setAttribute("class", `world-map-owner world-map-drag-area world-map-drag-area--${role}`)
+              use.dataset.area = area
+              if (territory.dataset.owner) use.dataset.owner = territory.dataset.owner
+              return use
+            }
+
+            const clones = [
+              ...[...this.drag.adjacent].map((area) => clone(area, "target")),
+              clone(this.drag.from, "source")
+            ]
+            this.dragLayer.replaceChildren(veil, ...clones.filter(Boolean))
           },
 
           updateDrag(clientX, clientY) {
@@ -920,7 +1012,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
                   : "attack"
                 : null
               if (target) buzz(4)
-              this.markDrag()
+              this.dragLayer?.querySelectorAll(".world-map-drag-area--target").forEach((use) => {
+                use.classList.toggle("is-hover", use.dataset.area === target)
+              })
             }
 
             const end = (target && this.labelOf(target)) || this.clientToViewBox(clientX, clientY)
@@ -931,10 +1025,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             if (!this.drag) return
             const { from, target } = this.drag
             this.drag = null
-            this.el.classList.remove("is-dragging")
-            this.el
-              .querySelectorAll(".is-drag-source, .is-drop-target, .is-drop-hover")
-              .forEach((t) => t.classList.remove("is-drag-source", "is-drop-target", "is-drop-hover"))
+            this.dragLayer?.replaceChildren()
             this.ghost?.replaceChildren()
 
             if (commit && target) {
@@ -946,21 +1037,20 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           // Same bow as `WorldMap.order_curve/3`, so the preview lands exactly
           // where the queued arrow will be drawn.
           curve(a, b) {
+            const { trim, trimRatio, bow: bowRatio, wrap } = this.curveShape
             let x2 = b.x
-            if (this.el.dataset.map === "original" && Math.abs(x2 - a.x) > 400) {
-              x2 += x2 > a.x ? -800 : 800
-            }
+            if (wrap && Math.abs(x2 - a.x) > wrap / 2) x2 += x2 > a.x ? -wrap : wrap
             const dx = x2 - a.x
             const dy = b.y - a.y
             const len = Math.max(Math.hypot(dx, dy), 1)
-            const cut = Math.min(11, len * 0.3)
+            const cut = Math.min(trim, len * trimRatio)
             const ux = dx / len
             const uy = dy / len
             const sx = a.x + ux * cut
             const sy = a.y + uy * cut
             const ex = x2 - ux * cut
             const ey = b.y - uy * cut
-            const bow = len * 0.14
+            const bow = len * bowRatio
             const cx = (sx + ex) / 2 - uy * bow
             const cy = (sy + ey) / 2 + ux * bow
             return `M${sx} ${sy} Q${cx} ${cy} ${ex} ${ey}`
@@ -994,9 +1084,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             // still selects — `.TerritoryKeyboard` — so the order panel stays
             // reachable). Never a double-tap zoom: tapping fast is how you
             // place several.
-            if (e.detail > 0 && this.interactive() && this.unplaced() > 0) {
+            if (e.detail > 0 && this.gestures()) {
               const territory = this.territoryAt(e.clientX, e.clientY)
-              if (territory?.dataset.mine !== undefined) {
+              const mine = territory?.dataset.mine !== undefined
+              // The tap after the last army is placed is still part of the
+              // same burst: swallow it rather than pop the order panel open.
+              const justPlaced = Date.now() - this.lastPlaceAt < PLACE_COOLDOWN_MS
+              if (mine && (this.unplaced() > 0 || justPlaced)) {
                 e.stopPropagation()
                 e.preventDefault()
                 this.lastTap = null
@@ -1022,16 +1116,23 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.lastTap = { time: now, x: e.clientX, y: e.clientY }
           },
 
-          // Optimistic: the pool shrinks locally right away so a burst of taps
-          // can't overshoot it before the server's patch catches up (the server
-          // clamps regardless).
+          // Optimistic: placements still on their way to the server count
+          // against the pool locally, so a burst of taps can't overshoot it.
+          // Each one stops counting when its own reply lands — by then the
+          // server-rendered `data-unassigned` already includes it.
           place(area, amount) {
             const n = Math.min(amount, this.unplaced())
             if (n <= 0) return
             this.pendingPlacements += n
+            this.lastPlaceAt = Date.now()
             buzz(n > 1 ? [12, 40, 12] : 10)
             this.bump(area)
-            this.pushEvent("quick_assign", { area, amount: n })
+            const settle = () => {
+              this.pendingPlacements = Math.max(0, this.pendingPlacements - n)
+            }
+            // Settles on a failed push too (socket down), or the pool would
+            // stay short by `n` for good.
+            this.pushEvent("quick_assign", { area, amount: n }).then(settle, settle)
           },
 
           doubleTapZoom(clientX, clientY) {
@@ -1140,7 +1241,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             const flipped = aspect >= 1 !== this.lastAspect >= 1
             this.lastAspect = aspect
             this.current =
-              flipped && !window.matchMedia(DESKTOP_QUERY).matches
+              flipped && !this.desktop.matches
                 ? this.home()
                 : this.withAspect(this.current)
             this.applyViewBox()
@@ -1233,7 +1334,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # the board; the inner one is what `.MapViewport` bumps when the count changes.
   defp army_count(assigns) do
     {x, y} = Geometry.label(assigns.map_name, assigns.area.number)
-    assigns = assign(assigns, x: x, y: y)
+    assigns = assign(assigns, x: x, y: y, pending: Map.get(assigns.area, :pending_armies, 0))
 
     # `paint-order`/`stroke-linejoin` are presentation attributes here (they need
     # no theme token) so the outline-under-glyphs contract is visible in the
@@ -1260,7 +1361,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           {@area.armies}
           <tspan :if={@delta} dx="10" class="world-map-delta">{delta_text(@delta)}</tspan>
         </text>
-        <g :if={Map.get(@area, :pending_armies, 0) > 0} class="world-map-pending">
+        <g :if={@pending > 0} class="world-map-pending">
           <rect x={@x + 3} y={@y - 15} width="16" height="10" rx="5" />
           <text
             x={@x + 11}
@@ -1268,7 +1369,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             text-anchor="middle"
             dominant-baseline="central"
           >
-            +{Map.get(@area, :pending_armies, 0)}
+            +{@pending}
           </text>
         </g>
       </g>
@@ -1561,22 +1662,41 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # them. The world map's Alaska <-> Pevek lane wraps off the board edges, so a
   # link spanning more than half the board aims at the wrapped copy of its
   # target and runs off the near edge instead of across the whole world.
-  # `.MapViewport`'s drag preview draws the same curve client-side.
+  # `.MapViewport`'s drag preview draws the same curve client-side from the
+  # same numbers, handed over in `data-curve` (`curve_json/1`).
+  @curve_trim 11.0
+  @curve_trim_ratio 0.3
+  @curve_bow 0.14
+  @curve_wrap %{original: 800}
+
+  defp curve_json(map_name) do
+    Jason.encode!(%{
+      trim: @curve_trim,
+      trimRatio: @curve_trim_ratio,
+      bow: @curve_bow,
+      wrap: Map.get(@curve_wrap, map_name)
+    })
+  end
+
   @doc false
   def order_curve(map_name, {x1, y1}, {x2, y2}) do
     x2 =
-      if map_name == :original and abs(x2 - x1) > 400,
-        do: if(x2 > x1, do: x2 - 800, else: x2 + 800),
-        else: x2
+      case Map.get(@curve_wrap, map_name) do
+        wrap when is_number(wrap) and abs(x2 - x1) > wrap / 2 ->
+          if(x2 > x1, do: x2 - wrap, else: x2 + wrap)
+
+        _ ->
+          x2
+      end
 
     dx = x2 - x1
     dy = y2 - y1
     len = max(:math.sqrt(dx * dx + dy * dy), 1.0)
-    cut = min(11.0, len * 0.3)
+    cut = min(@curve_trim, len * @curve_trim_ratio)
     {ux, uy} = {dx / len, dy / len}
     {sx, sy} = {x1 + ux * cut, y1 + uy * cut}
     {ex, ey} = {x2 - ux * cut, y2 - uy * cut}
-    bow = len * 0.14
+    bow = len * @curve_bow
     {cx, cy} = {(sx + ex) / 2 - uy * bow, (sy + ey) / 2 + ux * bow}
     r = &Float.round(&1 * 1.0, 1)
 
@@ -1586,10 +1706,26 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     }
   end
 
-  # An order cut to zero armies is the "removed" state (the engine has no
-  # separate cancel — `GameLive`'s Remove resubmits 0), so it draws no arrow.
-  defp queued_order?(%{order: %{amount: amount}}) when amount > 0, do: true
-  defp queued_order?(_area), do: false
+  @doc """
+  The board point (`"x,y"`) at the middle of the arrow an order from area
+  `from` to area `to` draws — where `GameLive`'s order panel anchors itself on
+  a phone.
+  """
+  def order_anchor(map_name, from, to) do
+    %{mid: {x, y}} =
+      order_curve(map_name, Geometry.label(map_name, from), Geometry.label(map_name, to))
+
+    "#{x},#{y}"
+  end
+
+  @doc """
+  True when `area` (a `PlayerView` area) carries a live queued order. An order
+  cut to zero armies is the "removed" state — the engine has no separate
+  cancel, so `GameLive`'s Remove resubmits zero — and counts as no order:
+  no arrow, no line in Your orders, not counted as ready.
+  """
+  def queued_order?(%{order: %{amount: amount}}) when amount > 0, do: true
+  def queued_order?(_area), do: false
 
   defp mine?(_area, nil), do: false
   defp mine?(area, viewer_number), do: area.visible and area.owner_number == viewer_number
