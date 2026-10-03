@@ -77,6 +77,43 @@ defmodule GlobalCombat.Games.LiveTest do
       assert {:error, :already_invited} = Games.invite(game_id, alice.id, bob.name)
     end
 
+    test "invite_many/3 takes a comma/newline separated list, inviting each login on its own",
+         %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+
+      assert [
+               {bob_login, {:ok, %{id: bob_id}}},
+               {"nobody-like-this", {:error, :account_not_found}},
+               {carl_login, {:ok, %{id: carl_id}}}
+             ] =
+               Games.invite_many(
+                 game_id,
+                 alice.id,
+                 " #{bob.name}, nobody-like-this,\n\n#{carl.email} ,"
+               )
+
+      assert {bob_login, bob_id} == {bob.name, bob.id}
+      assert {carl_login, carl_id} == {carl.email, carl.id}
+      assert [%{id: ^game_id}] = GamesDb.list_invited_games(bob.id)
+      assert [%{id: ^game_id}] = GamesDb.list_invited_games(carl.id)
+    end
+
+    test "each invite posts legacy's chat line from the Computer", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.subscribe(game_id)
+
+      {:ok, _} = Games.invite(game_id, alice.id, bob.name)
+
+      text = "#{alice.name} invited #{bob.name} to this game."
+      computer_id = GlobalCombat.Accounts.computer_account_id()
+      assert_received {:add_message, %{source_id: ^computer_id, text: ^text}}
+    end
+
     test "invites are refused once the game has started", %{game_id: game_id} do
       alice = account_fixture()
       bob = account_fixture()
@@ -334,6 +371,20 @@ defmodule GlobalCombat.Games.LiveTest do
     test "the same account can't join twice", %{game_id: game_id} do
       assert {:ok, 1} = Games.join(game_id, 101, "Alice")
       assert {:error, :already_joined} = Games.join(game_id, 101, "Alice")
+    end
+
+    test "a seat row that can't be written refuses the join instead of half-seating", %{
+      game_id: game_id
+    } do
+      alice = account_fixture()
+      bob = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      # The row goes away under the live lobby, so Bob's seat insert fails its FK check.
+      :ok = GamesDb.delete_game(game_id)
+
+      assert {:error, :seat_failed} = Games.join(game_id, bob.id, bob.name)
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert Enum.map(view.players, & &1.name) == [alice.name]
     end
 
     test "join fails once the lobby is full", %{game_id: game_id} do

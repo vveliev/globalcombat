@@ -110,9 +110,32 @@ defmodule GlobalCombat.Games.Server do
   `join/3` would refuse the invitee anyway. Returns `{:ok, invitee}` or `{:error, reason}`
   with `reason` one of `:not_playing`, `:account_not_found`, `:cannot_invite_self`,
   `:already_playing`, `:already_invited`, `:not_in_lobby`.
+
+  Each successful invite also posts "<inviter> invited <invitee> to this game." to the game's
+  chat, like the original's `game.SendForumMessage`.
   """
   def invite(game_id, account_id, login) do
-    GenServer.call(via(game_id), {:invite, account_id, login})
+    [{_login, result}] = GenServer.call(via(game_id), {:invite, account_id, [login]})
+    result
+  end
+
+  @doc """
+  `invite/3` for the original's whole input box: `logins` is split on commas and newlines
+  (`inviteEmail.Split(',', '\\n')`), each piece trimmed, blanks dropped. Each login is invited
+  independently — one bad name doesn't stop the rest, matching the original's per-invite
+  `AddErrorMessage(...); continue;`. Returns `[{login, {:ok, invitee} | {:error, reason}}]` in
+  input order, with the same reasons as `invite/3`.
+  """
+  def invite_many(game_id, account_id, logins) do
+    GenServer.call(via(game_id), {:invite, account_id, split_logins(logins)})
+  end
+
+  @doc false
+  def split_logins(logins) do
+    logins
+    |> String.split([",", "\n"])
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
   end
 
   @doc """
@@ -366,18 +389,7 @@ defmodule GlobalCombat.Games.Server do
         {:reply, {:error, :not_invited}, state}
 
       true ->
-        number = length(state.players) + 1
-        players = state.players ++ [{number, %{account_id: account_id, name: name}}]
-        # Only touch the invite row when this seat actually had one: an unconditional
-        # `DELETE ... WHERE` for a row that doesn't exist takes an InnoDB gap lock on the
-        # `(account_id, game_id)` index, which deadlocks against the seat insert below under
-        # concurrent transactions (seen as MyXQL 1213 across async tests).
-        invited? = Enum.any?(state.invites, &(&1.account_id == account_id))
-        invites = Enum.reject(state.invites, &(&1.account_id == account_id))
-        if invited?, do: GamesDb.clear_invite(state.game_id, account_id)
-        :ok = GamesDb.seat(state.game_id, account_id)
-        state = commit_lobby(%{state | players: players, invites: invites})
-        {:reply, {:ok, number}, state}
+        seat_player(state, account_id, name)
     end
   end
 
@@ -385,16 +397,22 @@ defmodule GlobalCombat.Games.Server do
     {:reply, {:error, :already_started}, state}
   end
 
-  def handle_call({:invite, account_id, login}, _from, %{status: :lobby} = state) do
-    if find_player_number(state, account_id) do
-      handle_invite(state, account_id, login)
+  def handle_call({:invite, account_id, logins}, _from, %{status: :lobby} = state) do
+    if inviter = find_player(state, account_id) do
+      {results, state} =
+        Enum.map_reduce(logins, state, fn login, state ->
+          {result, state} = invite_one(state, inviter, login)
+          {{login, result}, state}
+        end)
+
+      {:reply, results, state}
     else
-      {:reply, {:error, :not_playing}, state}
+      {:reply, Enum.map(logins, &{&1, {:error, :not_playing}}), state}
     end
   end
 
-  def handle_call({:invite, _account_id, _login}, _from, state) do
-    {:reply, {:error, :not_in_lobby}, state}
+  def handle_call({:invite, _account_id, logins}, _from, state) do
+    {:reply, Enum.map(logins, &{&1, {:error, :not_in_lobby}}), state}
   end
 
   def handle_call({:quit, account_id}, _from, %{status: :lobby} = state) do
@@ -645,29 +663,58 @@ defmodule GlobalCombat.Games.Server do
     state
   end
 
-  # Shared tail of {:invite, ...} once the inviter's own seat is confirmed — split out so
-  # the :lobby/otherwise dispatch above stays a plain function-head match like every other
-  # handle_call/3 clause in this module.
-  defp handle_invite(state, account_id, login) do
+  # The accepting half of `{:join, ...}`. A seat-row write that fails for any reason other than
+  # "already seated" (see `GamesDb.seat/2`) refuses the join, so the roster and `game_players`
+  # never disagree.
+  defp seat_player(state, account_id, name) do
+    # The invite row shares the seat's `(account_id, game_id)` unique index, so it has to go
+    # first. Only touch it when this seat actually had one: an unconditional `DELETE ... WHERE`
+    # for a row that doesn't exist takes an InnoDB gap lock on that index, which deadlocks
+    # against the seat insert under concurrent transactions (seen as MyXQL 1213 across async
+    # tests).
+    invited? = Enum.any?(state.invites, &(&1.account_id == account_id))
+    if invited?, do: GamesDb.clear_invite(state.game_id, account_id)
+
+    case GamesDb.seat(state.game_id, account_id) do
+      :ok ->
+        number = length(state.players) + 1
+        players = state.players ++ [{number, %{account_id: account_id, name: name}}]
+        invites = Enum.reject(state.invites, &(&1.account_id == account_id))
+        state = commit_lobby(%{state | players: players, invites: invites})
+        {:reply, {:ok, number}, state}
+
+      {:error, _changeset} ->
+        if invited?, do: {:ok, _} = GamesDb.invite(state.game_id, account_id)
+        {:reply, {:error, :seat_failed}, state}
+    end
+  end
+
+  # One invite of an `{:invite, ...}` call, once the inviter's own seat is confirmed. Returns
+  # `{result, state}` so a whole comma-separated list folds through one call.
+  defp invite_one(state, inviter, login) do
     case Accounts.get_account_by_login(String.trim(login)) do
       nil ->
-        {:reply, {:error, :account_not_found}, state}
+        {{:error, :account_not_found}, state}
 
-      %{id: ^account_id} ->
-        {:reply, {:error, :cannot_invite_self}, state}
+      %{id: id} when id == inviter.account_id ->
+        {{:error, :cannot_invite_self}, state}
 
       invitee ->
         cond do
           find_player_number(state, invitee.id) ->
-            {:reply, {:error, :already_playing}, state}
+            {{:error, :already_playing}, state}
 
           Enum.any?(state.invites, &(&1.account_id == invitee.id)) ->
-            {:reply, {:error, :already_invited}, state}
+            {{:error, :already_invited}, state}
 
           true ->
             {:ok, _} = GamesDb.invite(state.game_id, invitee.id)
             invites = state.invites ++ [%{account_id: invitee.id, name: invitee.name}]
-            state = commit_lobby(%{state | invites: invites})
+
+            state =
+              %{state | invites: invites}
+              |> post_system_message("#{inviter.name} invited #{invitee.name} to this game.")
+              |> commit_lobby()
 
             GamePubSub.broadcast_notification(
               invitee.id,
@@ -676,7 +723,7 @@ defmodule GlobalCombat.Games.Server do
               "/Game-#{state.game_id}/"
             )
 
-            {:reply, {:ok, invitee}, state}
+            {{:ok, invitee}, state}
         end
     end
   end
@@ -724,6 +771,13 @@ defmodule GlobalCombat.Games.Server do
     |> Enum.map(fn {_n, p} -> p end)
     |> Enum.with_index(1)
     |> Enum.map(fn {p, i} -> {i, p} end)
+  end
+
+  defp find_player(state, account_id) do
+    case Enum.find(state.players, fn {_n, p} -> p.account_id == account_id end) do
+      {_number, player} -> player
+      nil -> nil
+    end
   end
 
   defp find_player_number(state, account_id) do
