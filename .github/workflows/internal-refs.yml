@@ -17,8 +17,10 @@ on:
     # `edited` is not in the default set, and a title or body rewritten after
     # opening is published just the same.
     types: [opened, synchronize, reopened, edited]
+  # Every branch, not just main: a branch on a public fork is published the
+  # moment it is pushed, whether or not a PR ever follows.
   push:
-    branches: [main]
+    branches: ["**"]
 
 permissions:
   contents: read
@@ -26,11 +28,12 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    # A branch deletion publishes nothing (and has no commit to check out).
+    if: github.event.deleted != true
     # Everything event-derived enters through env, never through ${{ }} inside
     # `run`: PR title/body are attacker-controlled, and even owner-controlled
     # values like a branch name are legal shell metacharacters.
     env:
-      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
       BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
       PR_TITLE: ${{ github.event.pull_request.title }}
@@ -54,13 +57,18 @@ jobs:
           node scripts/check-internal-refs.mjs --text PR_BODY
 
       # A brand-new branch reports an all-zero base, and the first push after a
-      # history rewrite reports a base that no longer exists; the scanner then
-      # re-bases on the merge-base with the default branch, so what a push ADDS
-      # is the thing being scanned — never the whole history.
+      # history rewrite reports a base this clone never fetched. The scanner
+      # then treats every remote branch EXCEPT the pushed one as already
+      # published and scans each commit of HEAD that none of them contains —
+      # what the push ADDS, never the whole history. (The old fallback, the
+      # merge-base with origin/<default>, is HEAD itself when the default
+      # branch is the one rewritten: an empty range that reported "clean".)
+      # Every branch is fetched explicitly to keep that set complete; a failed
+      # fetch only shrinks it, which scans more, never less.
       - name: Scan changed content, commit messages, and branch name
         run: |
-          git fetch --no-tags --quiet origin "$DEFAULT_BRANCH" || true
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' || true
           node scripts/check-internal-refs.mjs \
             --range "$BASE_SHA..HEAD" \
-            --base-fallback "origin/$DEFAULT_BRANCH" \
+            --published-remote origin \
             --branch "$BRANCH_NAME"

@@ -13,35 +13,60 @@
  * INTERNAL_REFS_WORDLIST, and are optional.
  *
  * Usage:
- *   node scripts/check-internal-refs.mjs --range A..B [--base-fallback REF] [--branch NAME]
+ *   node scripts/check-internal-refs.mjs --range A..B [--base-fallback REF | --published-remote NAME] [--branch NAME]
  *   node scripts/check-internal-refs.mjs --text ENVVAR        # PR title/body
  *   node scripts/check-internal-refs.mjs --branch NAME        # a branch name alone
  *
- * --range scans the lines A..B ADDS (never whole files: a change that merely
- * touches a file carrying a legacy reference publishes nothing new), plus the
- * full commit messages and author identities of A..B. When A is missing or
- * unreachable (a brand-new branch, or the first push after a history rewrite)
- * the range is re-based on the merge-base of B with --base-fallback, or on B's
- * root commit if that is unavailable too.
+ * --range scans the lines each commit of A..B ADDS — commit by commit, so a
+ * reference added by one commit and removed by a later one in the same push is
+ * still caught (the first commit publishes it) — never whole files: a change
+ * that merely touches a file carrying a legacy reference publishes nothing new.
+ * It also scans the full commit messages and the author AND committer
+ * identities of A..B. When A is missing or unreachable see resolveRange().
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const ZERO_SHA = /^0{40}$/;
-// git's well-known empty tree: diffing against it yields every line of B as
-// added, which is what "publishing a whole new history" means.
-const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+// Same shape as a tracker id, but not one: standards, licences, protocols and
+// model names, this repo's own ADR numbering, and placeholder prefixes used as
+// test fixtures (PROJ- is upstream's fixture convention).
+const NOT_TRACKERS = "UTF|ISO|RFC|CVE|SHA|HTTP|API|SDK|ACP|UI|CI|BSD|GPL|LGPL|MPL|AGPL|EPL|CC|MIT|ECMA|RGB|AES|TLS|SSL|GPT|DNS|SMTP|OTP|ADR|PROJ|TEST|FOO|BAR|ISSUE|CHAT";
+// Ordinary words that lead lower-case branch segments in this repo (a plan's
+// `task-3-dock`, a `step-2` spike). An allowlist of benign words, never a
+// denylist of internal names.
+const BENIGN_WORDS = "task|step|part|phase|stage|round|turn|item|page|pre|post|wip|try|fix|feat|chore|draft|demo|spike|issue";
+
+// A DNS label, lower-case only: `Foo.Internal` is an Elixir module, not a host.
+const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+// A host starts where no host/identifier/email character precedes it (so the
+// `user@host` of an email is left to the internal-email rule) and ends where
+// no further label, identifier character or call follows — `foo.localhost`
+// and `a.local.b` are not `.local` hosts.
+const HOST_START = "(?<![\\w@.$-])";
+const HOST_END = "(?![\\w-]|\\.[\\w]|\\()";
 
 export const PATTERNS = [
   {
     id: "tracker-id",
     re: /\b[A-Z]{2,5}-\d{1,5}\b/g,
     why: "internal tracker id",
-    // Same shape, not tracker ids: standards, licences, protocols and model
-    // names, this repo's own ADR numbering, and placeholder prefixes used as
-    // test fixtures (PROJ- is upstream's fixture convention).
-    ignore: /^(UTF|ISO|RFC|CVE|SHA|HTTP|API|SDK|ACP|UI|CI|BSD|GPL|LGPL|MPL|AGPL|EPL|CC|MIT|ECMA|RGB|AES|TLS|SSL|GPT|DNS|SMTP|OTP|ADR|PROJ|TEST|FOO|BAR|ISSUE|CHAT)-/,
+    ignore: new RegExp(`^(?:${NOT_TRACKERS})-`),
+  },
+  {
+    // Lower/mixed case (a `fix/` branch named after a ticket). Matching every lower-case `xx-N`
+    // would drown in Tailwind classes (`mt-2`, `space-4`, `red-6`), so only
+    // the positions a tracker id takes in a reference count: the start of a
+    // branch name or of a path segment (`fix/…`, `owner/…`, a tracker URL),
+    // and the quoted branch of a local merge message (`Merge branch '…'`).
+    // An all-upper match is left to the rule above.
+    id: "tracker-id",
+    re: /(?<=^|\/|\bbranch ')(?![A-Z]{2,5}-)[A-Za-z]{2,5}-\d{1,5}\b/g,
+    why: "internal tracker id",
+    ignore: new RegExp(`^(?:${NOT_TRACKERS}|${BENIGN_WORDS})-`, "i"),
   },
   {
     id: "agent-trailer",
@@ -64,6 +89,28 @@ export const PATTERNS = [
     id: "instance-uuid",
     re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
     why: "instance/company/agent UUID",
+  },
+  {
+    // Private-network host suffixes that never name a public host: any
+    // `*.arpa` zone other than the reverse-DNS ones (`home.arpa` is RFC 8375's
+    // home-network zone), and the conventional LAN/corporate suffixes.
+    id: "internal-host",
+    re: new RegExp(
+      `${HOST_START}(?:${LABEL}\\.)+(?:(?!in-addr\\.|ip6\\.)${LABEL}\\.arpa|lan|corp|intranet|localdomain)${HOST_END}`,
+      "g",
+    ),
+    why: "internal hostname",
+  },
+  {
+    // `.internal` and `.local` are also ordinary identifiers (`assigns.local`,
+    // `opts.internal`), so they count only with evidence of being a host: a
+    // URL (`//host`), a port or path after it, or a label carrying a digit or
+    // hyphen (a `db-N` or `nasNN` first label) — which identifiers lack.
+    id: "internal-host",
+    re: new RegExp(`${HOST_START}(?:${LABEL}\\.)+(?:internal|local)${HOST_END}`, "g"),
+    why: "internal hostname",
+    keep: (m, text) =>
+      /[\d-]/.test(m[0]) || text.slice(Math.max(0, m.index - 2), m.index) === "//" || /^(?::\d|\/)/.test(text.slice(m.index + m[0].length)),
   },
 ];
 
@@ -107,30 +154,60 @@ const commitExists = (rev) => git(["cat-file", "-e", `${rev}^{commit}`], { allow
  *   company/agent ids leaking into published *content*, and applying it to a
  *   branch name would forbid the safest template available.
  */
-export function scan(text, label, findings, { exclude = [], line = null } = {}) {
+export function scan(text, label, findings, { exclude = [], line = null, commit = null } = {}) {
   for (const p of PATTERNS) {
     if (exclude.includes(p.id)) continue;
     p.re.lastIndex = 0;
     for (const m of text.matchAll(p.re)) {
       if (p.ignore && p.ignore.test(m[0])) continue;
+      if (p.keep && !p.keep(m, text)) continue;
       const at = line ?? text.slice(0, m.index).split("\n").length;
-      findings.push({ where: `${label}:${at}`, match: m[0].split("\n")[0].slice(0, 90), why: p.why, id: p.id });
+      const finding = { where: `${label}:${at}`, match: m[0].split("\n")[0].slice(0, 90), why: p.why, id: p.id };
+      if (commit) finding.commit = commit;
+      findings.push(finding);
     }
   }
 }
 
 /**
- * Resolves "A..B" to `{ from, to }` where `from` actually exists: a missing,
- * all-zero or unreachable A (new branch; first push after a history rewrite)
- * becomes the merge-base of B with `fallback`. With no usable fallback either,
- * `from` is null: the whole of B is being published, so every line (diffed
- * against the empty tree) and every commit is scanned — a plain `root..B`
- * would silently exclude the root commit itself.
+ * Resolves "A..B" to the set of commits being published, as `{ from, to }`
+ * (the commits of from..to) or `{ from: null, to, not }` (the commits of `to`
+ * reachable from none of the refs in `not`; with `not` absent or empty, the
+ * whole history of `to`). A usable A is taken as is. Otherwise:
+ *
+ * - With `publishedRemote` (CI): A is all-zero (new branch) or no longer
+ *   exists in the clone (a history rewrite — GitHub's `before` is the
+ *   pre-force-push tip, which a fresh clone never fetched). What the remote
+ *   already published is then every remote-tracking ref EXCEPT the pushed
+ *   branch itself (and symrefs to it, e.g. `origin/HEAD`): CI fetches after
+ *   the push, so the pushed ref already points at B, and treating it as
+ *   "published" is what made a rewritten default branch scan an empty range.
+ *   A new branch cut from main resolves to nothing; a branch reset onto main
+ *   resolves to nothing; a rewritten main scans every rewritten commit not on
+ *   some other branch. Known gap: a commit that ONLY exists on branches all
+ *   created or rewritten by the same multi-ref push is excused by whichever
+ *   of them is not the ref being scanned; the pre-push hook still covers it.
+ *   Without `branch` the pushed ref cannot be named, so every ref whose tip IS
+ *   B is distrusted instead.
+ * - With `fallback` (pre-push hook, which reads the remote's state BEFORE the
+ *   push): the merge-base of B with it.
+ * - Otherwise the whole history of B — every commit including the root, whose
+ *   diff `git log --root` shows against the empty tree.
  */
-export function resolveRange(range, fallback) {
+export function resolveRange(range, fallback, { publishedRemote, branch } = {}) {
   const [a, b = "HEAD"] = range.split("..");
-  const to = git(["rev-parse", "--verify", `${b}^{commit}`]).trim();
-  if (a && !ZERO_SHA.test(a) && commitExists(a)) return { from: a, to };
+  const to = git(["rev-parse", "--verify", "--end-of-options", `${b}^{commit}`]).trim();
+  if (a && !ZERO_SHA.test(a) && commitExists(a)) return { from: git(["rev-parse", "--verify", "--end-of-options", `${a}^{commit}`]).trim(), to };
+  if (publishedRemote) {
+    const self = branch ? `refs/remotes/${publishedRemote}/${branch}` : null;
+    const not = git(["for-each-ref", "--format=%(refname)%00%(symref)%00%(objectname)", `refs/remotes/${publishedRemote}/`])
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.split("\0"))
+      .filter(([ref, symref, sha]) => (self ? ref !== self && symref !== self : sha !== to))
+      .map(([ref]) => ref);
+    return { from: null, to, not };
+  }
   if (fallback && commitExists(fallback)) {
     const mb = git(["merge-base", fallback, to], { allowFail: true });
     if (mb) return { from: mb.trim(), to };
@@ -138,55 +215,103 @@ export function resolveRange(range, fallback) {
   return { from: null, to };
 }
 
-/** Added lines of `{from, to}`, as { file, line, text } — renames included, headers parsed by shape. */
-export function addedLines({ from, to }) {
+const revArgs = ({ from, to, not = [] }) => (from ? [`${from}..${to}`] : not.length ? [to, "--not", ...not] : [to]);
+
+// Undoes git's C-style quoting of a path ("caf\303\251.md", "t\tab.md"): with
+// core.quotePath=false non-ASCII is left raw, but tabs, newlines, quotes and
+// backslashes are still escaped, and octal escapes are UTF-8 BYTES.
+function unquote(s) {
+  if (!s.startsWith('"')) return s;
+  const bytes = [];
+  for (const [, esc, plain] of s.slice(1, s.lastIndexOf('"')).matchAll(/\\([0-7]{3}|.)|([^\\]+)/gs)) {
+    if (plain !== undefined) bytes.push(...Buffer.from(plain, "utf8"));
+    else if (/^[0-7]{3}$/.test(esc)) bytes.push(parseInt(esc, 8));
+    else bytes.push({ a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 }[esc] ?? esc.charCodeAt(0));
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+// Label for added lines whose file header could not be parsed. The lines are
+// still scanned (and never treated as vendored): a header the parser fails to
+// read must not make the scan silently "clean".
+export const UNPARSED_PATH = "(unparsed path)";
+
+/**
+ * Parses `git log -p --cc --format=%x01%H` output into added lines,
+ * { commit, file, line, text }. Headers are recognised by position (between a
+ * `diff ` line and the first hunk), never by content: an ADDED line whose text
+ * starts with "++" (C's `++i;`) is "+++i;" and must be scanned, not taken for
+ * a header. Merge commits arrive as combined diffs (`@@@`, one prefix column
+ * per parent); only lines added relative to EVERY parent are new content —
+ * the rest was published by the parents themselves.
+ */
+export function parsePatch(patch) {
   const out = [];
-  // Explicit prefixes: the default `+++ b/` header depends on the user's
-  // diff.noprefix / diff.mnemonicPrefix settings, and a mis-parsed header
-  // would make the whole scan silently "clean".
-  const diff = git([
-    "diff", "-U0", "--diff-filter=ACMR", "--src-prefix=a/", "--dst-prefix=b/", from ?? EMPTY_TREE, to,
-  ]);
+  let commit = null;
   let file = null;
+  let inHeader = false;
+  let cols = 1;
   let lineNo = 0;
-  let afterMinusHeader = false;
-  for (const raw of diff.split("\n")) {
-    if (raw.startsWith("diff --git ")) {
+  for (const raw of patch.split("\n")) {
+    if (raw.startsWith("\x01")) {
+      commit = raw.slice(1, 13);
       file = null;
-      afterMinusHeader = false;
+      inHeader = false;
       continue;
     }
-    if (raw.startsWith("--- ")) {
-      afterMinusHeader = true;
+    if (raw.startsWith("diff ")) {
+      file = null;
+      inHeader = true;
       continue;
     }
-    // Only a `+++ b/` that directly follows the `--- ` line is a header: an
-    // ADDED line whose content starts with "++" (C's `++i;`, a diff quoted in
-    // markdown) is "+++i;" and must be scanned, not swallowed.
-    if (afterMinusHeader && raw.startsWith("+++ b/")) {
-      file = raw.slice(6);
-      afterMinusHeader = false;
-      continue;
-    }
-    afterMinusHeader = false;
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(raw);
+    const hunk = /^(@@+) -.*? \+(\d+)(?:,\d+)? \1/.exec(raw);
     if (hunk) {
-      lineNo = Number(hunk[1]);
+      inHeader = false;
+      cols = hunk[1].length - 1;
+      lineNo = Number(hunk[2]);
       continue;
     }
-    if (!raw.startsWith("+")) continue;
-    if (file && !skipped(file)) out.push({ file, line: lineNo, text: raw.slice(1) });
+    if (inHeader) {
+      if (raw.startsWith("+++ ")) {
+        const path = unquote(raw.slice(4));
+        file = path === "/dev/null" ? null : path.startsWith("b/") ? path.slice(2) : path;
+      }
+      continue;
+    }
+    const prefix = raw.slice(0, cols);
+    if (prefix.length < cols || !/^[ +-]+$/.test(prefix) || prefix.includes("-")) continue;
+    if (/^\++$/.test(prefix) && !(file && skipped(file))) {
+      out.push({ commit, file: file ?? UNPARSED_PATH, line: lineNo, text: raw.slice(cols) });
+    }
     lineNo++;
   }
   return out;
 }
 
-export function scanRange(range, { fallback, branch } = {}) {
+/** Lines each commit of the resolved range adds, as { commit, file, line, text }. */
+export function addedLines(resolved) {
+  // core.quotePath=false keeps non-ASCII paths readable (parsePatch unquotes
+  // whatever git still escapes). Explicit prefixes: the default `+++ b/`
+  // depends on diff.noprefix / diff.mnemonicPrefix. No textconv/ext-diff/
+  // relative/signature output: user config must not reshape what is scanned.
+  const patch = git([
+    "-c", "core.quotePath=false",
+    "log", "-p", "--cc", "--root", "-M", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
+    "--no-show-signature", "--diff-filter=ACMR", "--src-prefix=a/", "--dst-prefix=b/", "--format=%x01%H",
+    ...revArgs(resolved),
+  ]);
+  return parsePatch(patch);
+}
+
+export function scanRange(range, { fallback, publishedRemote, branch } = {}) {
   const findings = [];
-  const resolved = resolveRange(range, fallback);
-  for (const { file, line, text } of addedLines(resolved)) scan(text, file, findings, { line });
-  const logRange = resolved.from ? `${resolved.from}..${resolved.to}` : resolved.to;
-  scan(git(["log", "--format=%B%n%an <%ae>", logRange]), "commit messages", findings);
+  const resolved = resolveRange(range, fallback, { publishedRemote, branch });
+  for (const { commit, file, line, text } of addedLines(resolved)) scan(text, file, findings, { line, commit });
+  scan(
+    git(["log", "--no-show-signature", "--format=%B%n%an <%ae>%n%cn <%ce>", ...revArgs(resolved)]),
+    "commit messages",
+    findings,
+  );
   if (branch) scan(branch, "branch name", findings, { exclude: ["instance-uuid"], line: 1 });
   return { findings, resolved };
 }
@@ -197,7 +322,7 @@ function report(findings) {
     return 0;
   }
   console.error(`\n  Refusing to publish ${findings.length} internal reference(s) to a public repository.\n`);
-  for (const f of findings.slice(0, 40)) console.error(`  ${f.where}  ${f.match}   (${f.why})`);
+  for (const f of findings.slice(0, 40)) console.error(`  ${f.where}${f.commit ? ` (commit ${f.commit})` : ""}  ${f.match}   (${f.why})`);
   if (findings.length > 40) console.error(`  …and ${findings.length - 40} more`);
   console.error("\n  Rewrite the reference, or set INTERNAL_REFS_ALLOW=1 for a reviewed exception.\n");
   return process.env.INTERNAL_REFS_ALLOW === "1" ? 0 : 1;
@@ -214,12 +339,13 @@ function main(argv) {
   };
   const range = opt("--range");
   const fallback = opt("--base-fallback");
+  const publishedRemote = opt("--published-remote");
   const branch = opt("--branch");
   const textVar = opt("--text");
   const findings = [];
 
   if (range) {
-    findings.push(...scanRange(range, { fallback, branch }).findings);
+    findings.push(...scanRange(range, { fallback, publishedRemote, branch }).findings);
   } else if (textVar) {
     // Reads from an env var, never argv: PR titles and bodies are attacker-
     // controlled text and must not be interpolated into a shell command.
@@ -227,12 +353,26 @@ function main(argv) {
   } else if (branch) {
     scan(branch, "branch name", findings, { exclude: ["instance-uuid"], line: 1 });
   } else {
-    console.error("usage: check-internal-refs.mjs --range A..B [--base-fallback REF] [--branch NAME] | --text ENVVAR | --branch NAME");
+    console.error("usage: check-internal-refs.mjs --range A..B [--base-fallback REF | --published-remote NAME] [--branch NAME] | --text ENVVAR | --branch NAME");
     return 2;
   }
   return report(findings);
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Run main() only when executed, not when imported by the tests. Compared as
+// real paths: a URL-built `file://${argv[1]}` never equals import.meta.url
+// once the path holds a space (percent-encoded in the URL) or the script is
+// reached through a symlink (node resolves it), and the gate would then exit
+// 0 without scanning anything.
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   process.exit(main(process.argv.slice(2)));
 }
