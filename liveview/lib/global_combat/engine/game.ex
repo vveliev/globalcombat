@@ -228,6 +228,9 @@ defmodule GlobalCombat.Engine.Game do
     * `{:eliminated, player_number}`
     * `{:ended, winner_player_number}`
 
+  Zero-amount transfers and attacks resolve exactly as the original does but get no event:
+  nothing moved, so there is nothing to show.
+
   `game.turn` (already incremented by the time this returns, same as `run_turn/1`) is the turn
   number these events belong to. A no-op once the game has ended, matching `run_turn/1`.
   """
@@ -282,7 +285,7 @@ defmodule GlobalCombat.Engine.Game do
       Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
         if area.command == :transfer do
           {game, event} = do_transfer(game, area.number)
-          {game, [event | events]}
+          {game, if(event, do: [event | events], else: events)}
         else
           {game, events}
         end
@@ -291,7 +294,8 @@ defmodule GlobalCombat.Engine.Game do
     {game, Enum.reverse(events)}
   end
 
-  # Port of `Game.DoTransfer`.
+  # Port of `Game.DoTransfer`. A transfer of 0 moves nothing, so it gets no event (the state
+  # update below is still applied unconditionally, exactly as the original does).
   defp do_transfer(game, area_number) do
     area = area!(game, area_number)
 
@@ -300,7 +304,10 @@ defmodule GlobalCombat.Engine.Game do
       |> update_area(area.target_number, &%{&1 | armies: &1.armies + area.amount})
       |> update_area(area_number, &%{&1 | armies: &1.armies - area.amount})
 
-    {game, {:transfer, area_number, area.target_number, area.amount}}
+    event =
+      if area.amount > 0, do: {:transfer, area_number, area.target_number, area.amount}
+
+    {game, event}
   end
 
   # Stable sort by Amount (descending, or ascending under ReverseAttackOrder),
@@ -340,9 +347,12 @@ defmodule GlobalCombat.Engine.Game do
   end
 
   # Same resolution as `do_attack/2`, plus the `{:attack, ...}` event describing it
-  # — `nil` for the two ways an attack order can resolve to nothing happening at all (already-
-  # same-owner, or clamped down to a non-positive amount), since no event is more useful there
-  # than a misleading "0 losses, no capture" record of an attack that never actually rolled.
+  # — `nil` for every way an attack order can resolve to nothing happening at all: already-
+  # same-owner, clamped down to a non-positive amount, or an Amount-0 order that needed no clamp
+  # (`RandomAi`'s `set_attack(..., 1000)` from a 1-army area produces these routinely). No event
+  # is more useful there than a misleading "0 losses, no capture" record the board would draw as
+  # an arrow. Only the event is dropped: the Amount-0 case still rolls its defend dice below (see
+  # the RNG note), so resolution stays identical to the original.
   defp do_attack_and_event(game, attacker_number) do
     attacker = area!(game, attacker_number)
     defender = area!(game, attacker.target_number)
@@ -405,9 +415,13 @@ defmodule GlobalCombat.Engine.Game do
         # `attack_damage` is capped to `defender.armies` above, and `captured?` requires
         # `attack_damage >= defender.armies` — so on capture, `attack_damage == defender.armies`
         # exactly: the defender's *entire* garrison is lost either way, not just the capped roll.
+        # With `amount == 0` nothing above changed any state (zero attack damage, defend damage
+        # capped to zero, never a capture) — the order only consumed RNG draws.
         event =
-          {:attack, attacker_number, defender.number, amount, defend_damage, attack_damage,
-           captured?}
+          if amount > 0,
+            do:
+              {:attack, attacker_number, defender.number, amount, defend_damage, attack_damage,
+               captured?}
 
         {game, event}
       end

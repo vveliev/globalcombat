@@ -258,6 +258,80 @@ defmodule GlobalCombat.Engine.GameTest do
       assert Game.player!(resolved, 1).place == 1
     end
 
+    test "an Amount-0 attack that needs no clamp emits no event, but still rolls the defender's dice" do
+      # Area 1 (2 armies) attacks with Amount 0: no clamp (0 <= Armies - 1), so Game.cs falls
+      # through and rolls the defender's dice for nothing. The state and RNG must match that
+      # exactly; only the event (which the board would draw as an arrow) is dropped.
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(42),
+        is_non_random: false,
+        minimum_armies: 0,
+        areas: %{
+          1 => %Area{
+            number: 1,
+            owner_number: 1,
+            armies: 2,
+            command: :attack,
+            target_number: 2,
+            amount: 0
+          },
+          2 => %Area{number: 2, owner_number: 2, armies: 7}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 1},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      refute Enum.any?(events, &match?({:attack, _, _, _, _, _, _}, &1))
+      assert Game.area!(resolved, 1).armies == 2
+      assert Game.area!(resolved, 2).armies == 7
+      assert Game.area!(resolved, 2).owner_number == 2
+
+      # The defender's 7 defend-roll draws were still consumed.
+      rng_after_draws =
+        Enum.reduce(1..7, DotnetRandom.new(42), fn _, rng ->
+          {_roll, rng} = DotnetRandom.next(rng, 1, 5)
+          rng
+        end)
+
+      assert resolved.rng == rng_after_draws
+    end
+
+    test "a transfer of 0 armies emits no event" do
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(1),
+        is_non_random: true,
+        minimum_armies: 0,
+        areas: %{
+          2 => %Area{
+            number: 2,
+            owner_number: 1,
+            armies: 6,
+            command: :transfer,
+            target_number: 3,
+            amount: 0
+          },
+          3 => %Area{number: 3, owner_number: 1, armies: 4},
+          4 => %Area{number: 4, owner_number: 2, armies: 4}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 2},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      refute Enum.any?(events, &match?({:transfer, _, _, _}, &1))
+      assert Game.area!(resolved, 2).armies == 6
+      assert Game.area!(resolved, 3).armies == 4
+    end
+
     test "run_turn/1 still returns only the resolved state, unaffected by resolve_turn/1's event log" do
       # Two still-standing players (not one) — a single-player game would hit
       # `resolve_reinforcements_and_eliminations/1`'s `alive_players <= 1` end-game path here,
