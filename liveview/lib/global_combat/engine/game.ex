@@ -27,6 +27,7 @@ defmodule GlobalCombat.Engine.Game do
   clamped amount).
   """
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.{DotnetRandom, MapInfo}
 
   defmodule Area do
@@ -255,10 +256,10 @@ defmodule GlobalCombat.Engine.Game do
     {game, assign_events ++ transfer_events ++ attack_events ++ end_events}
   end
 
-  @doc "Port of `Game.ResetDoneFlags`. AccountId 1 is the reserved \"Computer\" convention — always treated as done, never waited on."
+  @doc "Port of `Game.ResetDoneFlags`. The reserved \"Computer\" account (`GlobalCombat.Accounts.computer_account_id/0`) is always treated as done, never waited on."
   def reset_done_flags(game) do
     Enum.reduce(players_in_order(game), game, fn player, game ->
-      done = player.account_id == 1 or eliminated?(player)
+      done = Accounts.computer_account?(player.account_id) or eliminated?(player)
       update_player(game, player.number, &%{&1 | done: done})
     end)
   end
