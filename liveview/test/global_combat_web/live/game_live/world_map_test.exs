@@ -205,6 +205,73 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
     end
   end
 
+  describe "keyboard navigation (roving tabindex)" do
+    defp tabindex(html, id) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query_by_id(id)
+      |> LazyHTML.attribute("tabindex")
+    end
+
+    test "only one territory is in the Tab order: the first area when nothing is selected" do
+      assigns = %{areas: [board_area(1), board_area(2), board_area(3)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      assert tabindex(html, "territory-1") == ["0"]
+      assert tabindex(html, "territory-2") == ["-1"]
+      assert tabindex(html, "territory-3") == ["-1"]
+    end
+
+    test "the Tab stop follows the selected area" do
+      assigns = %{areas: [board_area(1), board_area(2)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} selected_area={2} />
+        """)
+
+      assert tabindex(html, "territory-1") == ["-1"]
+      assert tabindex(html, "territory-2") == ["0"]
+    end
+
+    test "each territory carries its label anchor for spatial arrow-key moves" do
+      assigns = %{areas: [board_area(1)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      {x, y} = GlobalCombatWeb.GameLive.MapGeometry.label(:original, 1)
+      assert LazyHTML.attribute(territory(html), "data-cx") == [to_string(x)]
+      assert LazyHTML.attribute(territory(html), "data-cy") == [to_string(y)]
+    end
+  end
+
+  describe "replay hook surface" do
+    test "the svg carries the replay hook and each army count its own id and server value" do
+      assigns = %{areas: [board_area(1, armies: 7)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      document = LazyHTML.from_fragment(html)
+      svg = LazyHTML.query(document, "#world-map svg#world-map-board")
+      assert [hook] = LazyHTML.attribute(svg, "phx-hook")
+      assert hook =~ ~r/MapReplay$/
+
+      count = LazyHTML.query(document, "svg text#territory-count-1.world-map-count")
+      assert LazyHTML.attribute(count, "data-area") == ["1"]
+      assert LazyHTML.attribute(count, "data-armies") == ["7"]
+    end
+  end
+
   describe "region bonus legend" do
     for map_name <- [:original, :elements] do
       test "#{map_name}: lists every region's bonus in one aria-hidden legend inside the view box" do

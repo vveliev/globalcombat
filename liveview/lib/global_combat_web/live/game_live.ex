@@ -737,6 +737,13 @@ defmodule GlobalCombatWeb.GameLive do
         // turn (comparing `data-turn`) whether or not the *previous* turn had
         // any visible events of its own.
         //
+        // This hook only owns its own buttons and announcement. Where the
+        // replay is goes out as a `gc:replay` window event
+        // (`{current, animate, counts}`); the board (`WorldMap`'s
+        // `.MapReplay`) and the results list (`.TurnResultsList`) each apply
+        // it to their own markup and re-apply it after LiveView patches them.
+        // `gc:replay-sync` asks for a resend (a listener mounting late).
+        //
         // Delegates clicks from the wrapper rather than binding the buttons
         // directly: the buttons themselves come and go (rendered only when
         // `@steps != []`), but this element's `id` never does, so LiveView
@@ -747,6 +754,8 @@ defmodule GlobalCombatWeb.GameLive do
             this.timer = null
             this.seenTurn = this.el.dataset.turn
             this.el.addEventListener("click", (e) => this.onClick(e))
+            this.onSync = () => this.broadcast()
+            window.addEventListener("gc:replay-sync", this.onSync)
             this.render()
           },
 
@@ -775,6 +784,7 @@ defmodule GlobalCombatWeb.GameLive do
 
           destroyed() {
             this.stop()
+            window.removeEventListener("gc:replay-sync", this.onSync)
           },
 
           onClick(e) {
@@ -811,44 +821,28 @@ defmodule GlobalCombatWeb.GameLive do
             this.render()
           },
 
-          render() {
-            const steps = this.steps()
-            const animate = !this.reducedMotion()
-            const board = document.getElementById("world-map-replay")
-
-            if (board) {
-              board.classList.toggle("world-map-replay--js", animate)
-
-              board.querySelectorAll("[data-step]").forEach((el) => {
-                const step = Number(el.dataset.step)
-                el.classList.toggle("is-revealed", step <= this.current)
-
-                if (el.classList.contains("world-map-replay-pulse")) {
-                  // Landing on the capture step always shows *some* indicator —
-                  // reduced motion (media query, `app.css`) drops the animating
-                  // keyframe but keeps a static ring rather than suppressing it
-                  // outright, so "no animation" doesn't also mean "no signal".
-                  el.classList.remove("is-active")
-                  if (step === this.current) { void el.offsetWidth; el.classList.add("is-active") }
-                }
-              })
-            }
-
-            document.querySelectorAll("#turn-results-list [data-step]").forEach((el) => {
-              const step = Number(el.dataset.step)
-              el.classList.toggle("is-current", step === this.current)
-              if (step === this.current) el.setAttribute("aria-current", "step")
-              else el.removeAttribute("aria-current")
-            })
-
+          // The running army count of every area touched up to the current
+          // step; areas no step has touched yet keep their live count.
+          counts(steps) {
             const counts = {}
             for (let i = 0; i <= this.current; i++) {
               (steps[i]?.counts || []).forEach(({area, value}) => { counts[area] = value })
             }
-            Object.entries(counts).forEach(([area, value]) => {
-              const el = document.querySelector(`#territory-${area} .world-map-count`)
-              if (el?.firstChild) el.firstChild.textContent = value
-            })
+            return counts
+          },
+
+          broadcast() {
+            const detail = {
+              current: this.current,
+              animate: !this.reducedMotion(),
+              counts: this.counts(this.steps())
+            }
+            window.dispatchEvent(new CustomEvent("gc:replay", { detail }))
+          },
+
+          render() {
+            const steps = this.steps()
+            this.broadcast()
 
             const announce = document.getElementById("turn-replay-announce")
             if (announce) announce.textContent = this.current >= 0 ? (steps[this.current]?.text || "") : ""
@@ -857,6 +851,40 @@ defmodule GlobalCombatWeb.GameLive do
             const forward = this.el.querySelector("[data-replay-forward]")
             if (back) back.disabled = this.current <= -1
             if (forward) forward.disabled = this.current >= steps.length - 1
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".TurnResultsList">
+        // Marks the step the replay is on in the accessible results list
+        // (`turn_results/1`), from `.TurnReplay`'s `gc:replay` broadcast, and
+        // re-applies it after LiveView patches the list (the drawer it sits
+        // in re-renders on every chat message).
+        export default {
+          mounted() {
+            this.current = -1
+            this.onReplay = (e) => {
+              this.current = e.detail.current
+              this.apply()
+            }
+            window.addEventListener("gc:replay", this.onReplay)
+            window.dispatchEvent(new CustomEvent("gc:replay-sync"))
+          },
+
+          updated() {
+            this.apply()
+          },
+
+          destroyed() {
+            window.removeEventListener("gc:replay", this.onReplay)
+          },
+
+          apply() {
+            this.el.querySelectorAll("[data-step]").forEach((el) => {
+              const isCurrent = Number(el.dataset.step) === this.current
+              el.classList.toggle("is-current", isCurrent)
+              if (isCurrent) el.setAttribute("aria-current", "step")
+              else el.removeAttribute("aria-current")
+            })
           }
         }
       </script>
@@ -1385,8 +1413,9 @@ defmodule GlobalCombatWeb.GameLive do
   # The accessible equivalent of the board's replay arrows/counts — every
   # `GameLive.Replay.steps/4` line as ordinary, always-present text next to the
   # board (works with no JS, and is exactly what `prefers-reduced-motion` falls
-  # back to). The `.TurnReplay` hook toggles `aria-current`/`.is-current` on each
-  # `<li>` as the sighted replay steps through them; nothing here depends on it.
+  # back to). The `.TurnResultsList` hook toggles `aria-current`/`.is-current`
+  # on each `<li>` as the sighted replay steps through them (following
+  # `.TurnReplay`'s `gc:replay` broadcast); nothing here depends on it.
   attr :turn, :integer, required: true
   attr :steps, :list, required: true
 
@@ -1396,6 +1425,7 @@ defmodule GlobalCombatWeb.GameLive do
       <:header>Turn {@turn} results</:header>
       <ol
         id="turn-results-list"
+        phx-hook=".TurnResultsList"
         class="flex flex-col gap-[var(--space-1)] text-sm list-decimal pl-[var(--space-4)]"
       >
         <li :for={step <- @steps} data-step={step.index}>{step.text}</li>
