@@ -87,7 +87,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
   end
 
   describe "stage mode (mobile battle mode WP3)" do
-    test "stage renders the status/board/dock grid below lg:, h-[100dvh], and no page scroll" do
+    test "stage renders the status/board/dock grid below lg:, --size-stage tall, and no page scroll" do
       assigns = %{}
 
       html =
@@ -103,7 +103,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       grid = grid_classes(html)
 
       assert "[grid-template-areas:'status'_'board'_'dock']" in grid
-      assert "h-[100dvh]" in grid
+      assert "h-[var(--size-stage)]" in grid
       assert "overflow-hidden" in grid
       assert "pt-[env(safe-area-inset-top)]" in grid
       # lg: gets a second rail row for :dock above :players — the side-by-side
@@ -134,7 +134,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       dock = document |> LazyHTML.query(~s(section[aria-label="Actions"])) |> classes()
 
       for class <- ~w|
-            [grid-area:dock] max-h-[45dvh] overflow-y-auto
+            [grid-area:dock] max-h-[var(--size-dock-max)] overflow-y-auto
             lg:max-h-none lg:overflow-visible lg:border-l
             pb-[max(var(--space-3),env(safe-area-inset-bottom))]
           | do
@@ -177,7 +177,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
 
       refute LazyHTML.text(document) =~ "End Turn"
       assert document |> LazyHTML.query(~s([aria-label="Actions"])) |> Enum.empty?()
-      assert document |> LazyHTML.query(~s([class~="h-[100dvh]"])) |> Enum.empty?()
+      assert document |> LazyHTML.query(~s|[class~="h-[var(--size-stage)]"]|) |> Enum.empty?()
     end
   end
 

@@ -552,7 +552,7 @@ defmodule GlobalCombatWeb.GameLive do
               <span
                 data-unread-dot
                 aria-hidden="true"
-                class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-red-600"
+                class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-danger"
               />
             </button>
             <button

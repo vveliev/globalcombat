@@ -49,10 +49,12 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   `stage` (boolean attr, default `false`) turns the shell into a full-height
   map stage with a bottom-sheet `:dock` below `lg:` — the mobile battle mode
   spec (`docs/mobile-battle-mode.md` §4.1). Below `lg:` the grid becomes
-  `status/board/dock` (`h-[100dvh]`, `overflow-hidden`, a safe-area top inset
+  `status/board/dock` (`--size-stage` tall, `overflow-hidden`, a safe-area top inset
   on `:status`), `:board` drops its padding and its own scroll (the board
-  itself owns panning), and `:dock` is a `max-h-[45dvh]` internal-scroll sheet
-  with a safe-area bottom inset, `aria-label="Actions"`. `:players` needs no
+  itself owns panning), and `:dock` is a `--size-dock-max` internal-scroll sheet
+  with a safe-area bottom inset, `aria-label="Actions"`. The status strip and
+  dock carry `game-status`/`game-dock` classes as their styling hooks, so
+  app CSS never keys on their accessible names. `:players` needs no
   special handling from `stage` at all here — the `<dialog>` drawer above is
   already closed by default below `lg:` (native `dialog:not([open])`
   behavior; the `.Drawer` hook only opens it on a genuine user action), so it
@@ -98,7 +100,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         "grid-cols-1",
         if(@stage,
           do:
-            "h-[100dvh] grid-rows-[auto_minmax(0,1fr)_auto] [grid-template-areas:'status'_'board'_'dock'] overflow-hidden pt-[env(safe-area-inset-top)]",
+            "h-[var(--size-stage)] grid-rows-[auto_minmax(0,1fr)_auto] [grid-template-areas:'status'_'board'_'dock'] overflow-hidden pt-[env(safe-area-inset-top)]",
           else: [
             "grid-rows-[auto_minmax(0,1fr)_auto]",
             if(@players_first,
@@ -124,8 +126,8 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         tabindex="-1"
         data-focus-landmark
         class={[
-          "[grid-area:status] flex flex-wrap items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring",
-          if(@stage, do: "bg-surface/90 backdrop-blur-[6px]", else: "bg-surface")
+          "game-status [grid-area:status] flex flex-wrap items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring",
+          if(@stage, do: "bg-surface/90 backdrop-blur-[var(--blur-strip)]", else: "bg-surface")
         ]}
       >
         {render_slot(@status)}
@@ -145,7 +147,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       <section
         :if={@stage and @dock != []}
         aria-label="Actions"
-        class="[grid-area:dock] max-h-[45dvh] overflow-y-auto bg-surface border-t border-border p-[var(--space-3)] pb-[max(var(--space-3),env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:border-t-0 lg:border-l lg:p-[var(--space-4)] lg:pb-0"
+        class="game-dock [grid-area:dock] max-h-[var(--size-dock-max)] overflow-y-auto bg-surface border-t border-border p-[var(--space-3)] pb-[max(var(--space-3),env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:border-t-0 lg:border-l lg:p-[var(--space-4)] lg:pb-0"
       >
         {render_slot(@dock)}
       </section>
@@ -160,7 +162,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
           <button
             type="button"
             data-drawer-close
-            class="rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            class="rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-[length:var(--text-sm)] font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           >
             Close
           </button>
