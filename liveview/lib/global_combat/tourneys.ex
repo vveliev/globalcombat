@@ -24,6 +24,10 @@ defmodule GlobalCombat.Tourneys do
   alias GlobalCombat.Games.Live, as: GamesLive
   alias GlobalCombat.Tourneys.{Bracket, Tourney, TourneyGame, TourneyPlayer}
 
+  @doc "Whether `game_id` is a bracket slot of some tourney (legacy `Game.TourneyId > 0`)."
+  def tourney_game?(game_id),
+    do: Repo.exists?(from tg in TourneyGame, where: tg.game_id == ^game_id)
+
   @doc "Port of `Tourney.CreateTournament`'s DB insert half; validation lives in `Tourney.create_changeset/2`."
   def create_tourney(attrs) do
     %Tourney{}

@@ -209,6 +209,9 @@ defmodule GlobalCombatWeb.GameLive do
           :ok ->
             {:noreply, refresh_view(socket)}
 
+          {:error, :tourney_game} ->
+            {:noreply, put_flash(socket, :error, "Unable to quit a tournament game.")}
+
           {:error, _reason} ->
             {:noreply, socket}
         end

@@ -117,8 +117,8 @@ defmodule GlobalCombat.Games.Server do
 
   @doc """
   Port of `GameController.Quit` + `Game.Unjoin` (lobby) / `Game.EliminatePlayer` (mid-play).
-  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_playing`, `:already_eliminated`,
-  `:game_ended`.
+  Refused in a tourney game's lobby, like the original. Returns `:ok` or `{:error, reason}` with
+  `reason` one of `:not_playing`, `:tourney_game`, `:already_eliminated`, `:game_ended`.
   """
   def quit(game_id, account_id) do
     GenServer.call(via(game_id), {:quit, account_id})
@@ -126,9 +126,10 @@ defmodule GlobalCombat.Games.Server do
 
   @doc """
   Port of `GameController.Kick` + `Game.Unjoin` — host only (`account_id` must resolve to
-  seat 1), lobby only, same restrictions as the original (`IsHost && !game.Started`).
-  Returns `:ok` or `{:error, reason}` with `reason` one of `:not_host`, `:not_found`,
-  `:not_in_lobby`.
+  seat 1), lobby only, never a tourney game, same restrictions as the original (`IsHost &&
+  !game.Started && game.TourneyId == 0`); the host can't kick their own seat. Returns `:ok` or
+  `{:error, reason}` with `reason` one of `:not_host`, `:cannot_kick_host`, `:not_found`,
+  `:tourney_game`, `:not_in_lobby`.
   """
   def kick(game_id, account_id, player_number) do
     GenServer.call(via(game_id), {:kick, account_id, player_number})
@@ -397,25 +398,18 @@ defmodule GlobalCombat.Games.Server do
   end
 
   def handle_call({:quit, account_id}, _from, %{status: :lobby} = state) do
-    case find_player_number(state, account_id) do
-      nil ->
+    cond do
+      is_nil(find_player_number(state, account_id)) ->
         {:reply, {:error, :not_playing}, state}
 
-      number ->
-        players = renumber_players(Enum.reject(state.players, fn {n, _p} -> n == number end))
-        state = %{state | players: players}
-        GamesDb.unseat(state.game_id, account_id)
+      # `GameController.Quit`'s "Unable to quit a tournament game." — the bracket seated this
+      # player; leaving would strand the slot (or, as the last seat, delete the game and with it
+      # the bracket's `tourneygame` row).
+      Tourneys.tourney_game?(state.game_id) ->
+        {:reply, {:error, :tourney_game}, state}
 
-        if players == [] do
-          # Port of `GameServer.PlayerUnjoined`'s `if (game.Players.Count <= 0) KillGame(...)`:
-          # an emptied lobby is deleted outright rather than left as a joinable-looking row.
-          # `:normal` keeps the `:transient` child from being restarted by the supervisor.
-          GamesDb.delete_game(state.game_id)
-          GamePubSub.broadcast_reload(state.game_id)
-          {:stop, :normal, :ok, state}
-        else
-          {:reply, :ok, commit_lobby(state)}
-        end
+      true ->
+        remove_from_lobby(state, find_player_number(state, account_id))
     end
   end
 
@@ -444,17 +438,20 @@ defmodule GlobalCombat.Games.Server do
       find_player_number(state, account_id) != 1 ->
         {:reply, {:error, :not_host}, state}
 
+      # The host leaves through `quit/2`, never by kicking seat 1 — which would also hand the
+      # lobby to whoever renumbers into it.
+      player_number == 1 ->
+        {:reply, {:error, :cannot_kick_host}, state}
+
       not Enum.any?(state.players, fn {n, _p} -> n == player_number end) ->
         {:reply, {:error, :not_found}, state}
 
+      # `GameController.Kick`'s `game.TourneyId == 0`: bracket seats aren't the host's to clear.
+      Tourneys.tourney_game?(state.game_id) ->
+        {:reply, {:error, :tourney_game}, state}
+
       true ->
-        {^player_number, kicked} = Enum.find(state.players, fn {n, _p} -> n == player_number end)
-
-        players =
-          renumber_players(Enum.reject(state.players, fn {n, _p} -> n == player_number end))
-
-        GamesDb.unseat(state.game_id, kicked.account_id)
-        {:reply, :ok, commit_lobby(%{state | players: players})}
+        remove_from_lobby(state, player_number)
     end
   end
 
@@ -696,6 +693,26 @@ defmodule GlobalCombat.Games.Server do
     if engine.ended, do: GamesDb.finish_game(state.game_id)
     GamePubSub.broadcast_reload(state.game_id)
     state
+  end
+
+  # Shared tail of a lobby quit/kick: port of `Game.Unjoin` + `GameServer.PlayerUnjoined`. An
+  # emptied lobby is deleted outright (`if (game.Players.Count <= 0) KillGame(...)`) rather than
+  # persisted as an empty row — which would also let the next visitor take seat 1 of a private
+  # game through `join/3`'s founding-join exemption. `:normal` keeps the `:transient` child from
+  # being restarted by the supervisor.
+  defp remove_from_lobby(state, number) do
+    {^number, leaving} = Enum.find(state.players, fn {n, _p} -> n == number end)
+    players = renumber_players(Enum.reject(state.players, fn {n, _p} -> n == number end))
+    state = %{state | players: players}
+    GamesDb.unseat(state.game_id, leaving.account_id)
+
+    if players == [] do
+      GamesDb.delete_game(state.game_id)
+      GamePubSub.broadcast_reload(state.game_id)
+      {:stop, :normal, :ok, state}
+    else
+      {:reply, :ok, commit_lobby(state)}
+    end
   end
 
   # Port of `Game.UpdatePlayerNumbers` — reassigns 1..n by list position after a lobby
