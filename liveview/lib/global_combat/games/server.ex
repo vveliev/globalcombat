@@ -792,9 +792,15 @@ defmodule GlobalCombat.Games.Server do
   # areas — the unscoped `think/1` (no player number) is whole-board-random by design, but
   # that's only correct for `Harness`'s oracle-lockstep diffing, not for a live opponent
   # whose orders should be constrained to its own territories like a real player's would be.
-  defp run_ai_turns(%Engine{ended: true} = engine), do: engine
+  @doc """
+  Queues the Computer seat's orders for the turn that just started and marks it done (see the
+  comment above). Every path that starts a turn must call this — this server's own `run_turn`
+  and `GlobalCombat.Games.LiveResolver`'s offline resolution alike — or a training game's
+  Computer sits out the next turn.
+  """
+  def run_ai_turns(%Engine{ended: true} = engine), do: engine
 
-  defp run_ai_turns(engine) do
+  def run_ai_turns(engine) do
     Enum.reduce(Engine.players_in_order(engine), engine, fn player, engine ->
       if computer_seat?(player) and not Engine.eliminated?(player) do
         engine
