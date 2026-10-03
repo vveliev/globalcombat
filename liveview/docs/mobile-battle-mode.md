@@ -266,3 +266,31 @@ Depends on: WP1 to WP5. Effort: half a day.
 | Should tablets in portrait (768px) get the stage? | Yes, anything below `lg` | Play testing shows the stacked layout is better on iPad |
 | Default zoom on phones: fit whole map or fill height? | Fit whole map, then double tap | Players consistently double tap first thing; then start at 1.5x centred on the viewer's territories |
 | Drawer side | Right | Left-handed feedback |
+
+## 8. Game HUD (follow-up)
+
+Status: implemented after WP1–WP6, chosen from a three-way clickable prototype
+(floating HUD with drag to order, a command bar with tap-then-tap, an order
+tray with hold-and-drag). The floating HUD won.
+
+Below `lg`, stage mode lays the board full-bleed under the whole viewport:
+`GameLayout` marks the shell `data-hud` and `app.css` floats `:status` over
+the top edge and `:dock` over the bottom edge, see-through except for their
+own controls.
+
+| Piece | Behaviour |
+|---|---|
+| Turn pill | "Turn 7" plus where the viewer is in the turn: "Place 4 armies", "2 orders ready", "Waiting on others" |
+| Roster | The drawer opener shows each seat's colour and initial, with a tick once they have ended their turn |
+| Lens | One button that steps owner → region → frontier (`cycle_lens`); the segmented control stays at `lg` |
+| Tap an own territory | While reinforcements are unplaced, places one (`quick_assign`); hold for five. Keyboard Enter/Space still selects, so the order panel stays reachable |
+| Drag from an own territory | Draws a live arrow; released over a neighbour it queues the attack/transfer with everything the source can spare (`drag_order`) and opens the order panel on it to trim the amount. Remove resubmits zero, which draws no arrow |
+| Undo | Takes back the latest tap/hold placement (`undo_assign`): clears that area's assignment and re-queues the rest |
+| Coach line | One sentence on what to do next |
+| End Turn | Round thumb button whose ring fills as reinforcements go out; with armies unplaced the first tap arms it and a second tap ends the turn (`.EndTurn`) |
+| Tokens | Army counts sit on owner-ringed tokens with a gold `+N` while reinforcements are queued; `.MapViewport` sets `--token-scale` so they keep a readable size at any zoom, and bumps a token when its count changes |
+
+The viewBox always takes the stage's aspect ratio, so nothing letterboxes:
+"fit" is the whole board (a phone held sideways shows all of it), and a phone
+held upright starts zoomed to fill its height around the viewer's territories.
+Turning the phone between the two starts over from that home view.

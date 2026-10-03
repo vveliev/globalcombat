@@ -582,7 +582,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       html = render_click(alice_view, "select_area", %{"area" => "3"})
 
       assert html =~ "Transfer how many armies to #{area_three_name}?"
-      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Transfer\s*<\/button>/
+      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Transfer\s+\d+\s*<\/button>/
     end
 
     test "a second click on an adjacent enemy territory switches the panel to attack mode",
@@ -599,7 +599,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       html = render_click(alice_view, "select_area", %{"area" => "2"})
 
       assert html =~ "Attack #{area_two_name} with how many armies?"
-      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Attack\s*<\/button>/
+      assert html =~ ~r/<button[^>]*type="submit"[^>]*>\s*Attack\s+\d+\s*<\/button>/
     end
 
     test "a second click on a non-adjacent enemy territory is a no-op (order panel stays in assign mode)",
@@ -763,6 +763,179 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  describe "game HUD gestures (tap to place, drag to order)" do
+    # Same board as the order-panel blocks above: Alice owns area 1 (Alaska,
+    # 5 armies, 25 unassigned) and area 3; area 2 is Bob's; all three border
+    # each other. The map's `.MapViewport` hook pushes these events.
+
+    defp area(game_id, account, number) do
+      {:playing, view} = Games.player_view(game_id, account.id)
+      Enum.find(view.areas, &(&1.number == number))
+    end
+
+    defp unassigned(game_id, account) do
+      {:playing, view} = Games.player_view(game_id, account.id)
+      Enum.find(view.players, &(&1.number == view.viewer_number)).unassigned_armies
+    end
+
+    test "the map marks the viewer's own territories, their armies and adjacency for the gesture layer",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(#world-map[data-unassigned="25"]))
+
+      assert has_element?(
+               alice_view,
+               ~s(#territory-1[data-mine][data-armies="5"][data-adjacent="2,3,37"])
+             )
+
+      refute has_element?(alice_view, ~s(#territory-2[data-mine]))
+
+      assert has_element?(
+               alice_view,
+               ~s(.world-map-token[data-area="1"] text.world-map-count),
+               "5"
+             )
+    end
+
+    test "quick_assign places a tap's one or a hold's five on an own territory and badges its token",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 5})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).pending_armies == 6
+      assert unassigned(game_id, alice) == 19
+
+      assert has_element?(
+               alice_view,
+               ~s(.world-map-token[data-area="1"] .world-map-pending),
+               "+6"
+             )
+
+      assert has_element?(alice_view, "#turn-hint", "Place 19 armies")
+      assert has_element?(alice_view, ~s(#end-turn[data-unplaced="19"]))
+
+      # A client can't stretch a hold past five, or place on someone else's land.
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 50})
+      render_hook(alice_view, "quick_assign", %{"area" => "2", "amount" => 1})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).pending_armies == 11
+      assert unassigned(game_id, alice) == 14
+    end
+
+    test "undo_assign takes back only the latest placement, then disappears", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      refute has_element?(alice_view, "#undo-assign")
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 1})
+      render_hook(alice_view, "quick_assign", %{"area" => "3", "amount" => 5})
+      sync_game(game_id, alice_view)
+      assert has_element?(alice_view, "#undo-assign")
+
+      render_click(alice_view, "undo_assign")
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 3).pending_armies == 0
+      assert area(game_id, alice, 1).pending_armies == 1
+      assert unassigned(game_id, alice) == 24
+
+      render_click(alice_view, "undo_assign")
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).pending_armies == 0
+      assert unassigned(game_id, alice) == 25
+      refute has_element?(alice_view, "#undo-assign")
+    end
+
+    test "drag_order queues the order with everything the source can spare and opens it for editing",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).order == %{command: :attack, target: 2, amount: 4}
+      assert has_element?(alice_view, ~s([aria-label="Actions"] #order-panel), "Attack")
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
+      assert has_element?(alice_view, "#remove-order")
+      assert has_element?(alice_view, "g.world-map-order[data-area=\"1\"]")
+      assert has_element?(alice_view, "#turn-hint", "Place 25 armies")
+
+      # Remove cuts the order to nothing: no arrow, and the panel closes.
+      render_click(alice_view, "remove_order")
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).order.amount == 0
+      refute has_element?(alice_view, "g.world-map-order")
+      refute has_element?(alice_view, "#order-panel")
+      refute has_element?(alice_view, "#your-orders")
+    end
+
+    test "drag_order ignores a source the viewer doesn't own and a target that isn't adjacent",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "drag_order", %{"from" => "2", "to" => "1"})
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "10"})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).order == nil
+      refute has_element?(alice_view, "#order-panel")
+    end
+
+    test "the coach line says what to do next as the turn goes on", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, game_id: game_id} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, "#turn-coach", "place 25 armies")
+
+      render_hook(alice_view, "quick_assign", %{"area" => "1", "amount" => 5})
+      render_click(alice_view, "select_area", %{"area" => "1"})
+      render_submit(alice_view, "submit_order", %{"amount" => "20"})
+      sync_game(game_id, alice_view)
+      assert has_element?(alice_view, "#turn-coach", "Drag from your territory")
+      assert has_element?(alice_view, ~s(#end-turn.end-turn--ready[data-unplaced="0"]))
+
+      render_hook(alice_view, "drag_order", %{"from" => "1", "to" => "2"})
+      render_click(alice_view, "cancel_order")
+      sync_game(game_id, alice_view)
+      assert has_element?(alice_view, "#turn-coach", "1 order ready")
+      assert has_element?(alice_view, "#turn-hint", "1 order ready")
+
+      render_click(alice_view, "done")
+      sync_game(game_id, alice_view)
+      assert has_element?(alice_view, "#turn-coach", "Orders locked in")
+      assert has_element?(alice_view, "#turn-hint", "Waiting on others")
+    end
+
+    test "the phone lens button steps owner → region → frontier → owner", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      for lens <- ~w(region frontier owner) do
+        render_click(alice_view, "cycle_lens")
+        assert has_element?(alice_view, ~s(#lens-form input[value="#{lens}"][checked]))
+      end
+    end
+  end
+
   describe "stage mode dock (mobile battle mode WP3)" do
     test "with nothing selected, the dock holds End Turn and Force Turn and no order panel",
          %{conn: conn1} do
@@ -881,7 +1054,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
                ~s(g.world-map-order[data-area="1"][aria-label="Attack #{area_two_name} with 4 armies from Alaska"])
              )
 
-      assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
+      assert has_element?(alice_view, ~s(g.world-map-order path.world-map-order-line--attack))
 
       # role/tabindex/phx-hook prove the arrow is a keyboard-reachable target through
       # the same .TerritoryKeyboard hook a territory uses — its Enter/Space handler
@@ -909,8 +1082,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
       render_submit(alice_view, "submit_order", %{"amount" => "4"})
       sync_game(game_id, alice_view)
 
-      assert has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--transfer))
-      refute has_element?(alice_view, ~s(g.world-map-order line.world-map-order-line--attack))
+      assert has_element?(alice_view, ~s(g.world-map-order path.world-map-order-line--transfer))
+      refute has_element?(alice_view, ~s(g.world-map-order path.world-map-order-line--attack))
     end
 
     test "an assign-only order (no target) draws no arrow", %{conn: conn1} do

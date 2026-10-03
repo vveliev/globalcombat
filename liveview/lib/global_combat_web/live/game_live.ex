@@ -61,6 +61,8 @@ defmodule GlobalCombatWeb.GameLive do
        |> assign(:selected_area, nil)
        |> assign(:target_area, nil)
        |> assign(:order_amount, "")
+       |> assign(:editing_order, false)
+       |> assign(:assign_history, [])
        |> assign(:lens, :owner)
        |> refresh_view()}
     else
@@ -104,7 +106,9 @@ defmodule GlobalCombatWeb.GameLive do
     # actually resolving invalidates a pending selection (orders don't survive
     # `run_turn`'s `clear_commands/1`, and area ownership can only change there).
     socket =
-      if playing_turn(socket.assigns) != previous_turn, do: clear_selection(socket), else: socket
+      if playing_turn(socket.assigns) != previous_turn,
+        do: socket |> clear_selection() |> assign(:assign_history, []),
+        else: socket
 
     {:noreply, socket}
   end
@@ -300,7 +304,8 @@ defmodule GlobalCombatWeb.GameLive do
              assign(socket,
                selected_area: area.number,
                target_area: order.target,
-               order_amount: to_string(order.amount)
+               order_amount: to_string(order.amount),
+               editing_order: true
              )}
 
           _ ->
@@ -337,10 +342,122 @@ defmodule GlobalCombatWeb.GameLive do
 
   def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
 
+  # Tap-to-place from the map (`.MapViewport`): a tap on an own territory while
+  # reinforcements are unplaced queues one there, a hold queues five — the
+  # mobile-game shortcut for the order panel's assign mode. Each placement is
+  # remembered so the dock's Undo can take back the latest one. The local view
+  # is adjusted straight away so the coach line and End Turn ring respond
+  # before the server's `:reload` lands (which then replaces it with the truth).
+  def handle_event(
+        "quick_assign",
+        %{"area" => area_str} = params,
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    with {:ok, account} <- require_account(socket),
+         {area_number, ""} <- Integer.parse(to_string(area_str)),
+         %{} = area <- find_area(view, area_number),
+         true <- own_area?(view, area),
+         %{unassigned_armies: pool} when pool > 0 <- my_player(view) do
+      amount = params |> Map.get("amount", 1) |> quick_amount() |> min(pool)
+      Games.assign(socket.assigns.game_id, account.id, area_number, amount)
+
+      {:noreply,
+       socket
+       |> update(:assign_history, &[{area_number, amount} | &1])
+       |> assign(:view, adjust_assigned(view, area_number, amount))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("quick_assign", _params, socket), do: {:noreply, socket}
+
+  # The engine can only clear an area's whole assignment (`Games.unassign/3`),
+  # so undoing the latest placement clears it and re-queues whatever came
+  # before. Clearing also trims a queued transfer/attack from that area to
+  # what its standing armies alone allow — same as the order panel's Unassign.
+  def handle_event(
+        "undo_assign",
+        _params,
+        %{
+          assigns: %{
+            status: :playing,
+            view: %{ended: false} = view,
+            assign_history: [{area_number, amount} | rest]
+          }
+        } = socket
+      ) do
+    socket = assign(socket, :assign_history, rest)
+
+    with {:ok, account} <- require_account(socket),
+         %{} = area <- find_area(view, area_number),
+         true <- own_area?(view, area) do
+      undone = min(amount, area.pending_armies)
+      keep = area.pending_armies - undone
+      Games.unassign(socket.assigns.game_id, account.id, area_number)
+      if keep > 0, do: Games.assign(socket.assigns.game_id, account.id, area_number, keep)
+
+      {:noreply, assign(socket, :view, adjust_assigned(view, area_number, -undone))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("undo_assign", _params, socket), do: {:noreply, socket}
+
+  # Drag-to-order from the map (`.MapViewport`): releasing a drag from an own
+  # territory over a neighbour queues the transfer/attack straight away with
+  # everything it can send, then opens the order panel on it so the amount
+  # can be trimmed — the arrow on the board is already the real order.
+  def handle_event(
+        "drag_order",
+        %{"from" => from_str, "to" => to_str},
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    with {:ok, account} <- require_account(socket),
+         {from, ""} <- Integer.parse(to_string(from_str)),
+         {to, ""} <- Integer.parse(to_string(to_str)),
+         %{} = source <- find_area(view, from),
+         true <- own_area?(view, source),
+         %{visible: true} <- find_area(view, to),
+         true <- to in source.adjacent,
+         amount when amount > 0 <- source.armies - 1 do
+      submit_order(socket, account, from, to, amount)
+
+      {:noreply,
+       assign(socket,
+         selected_area: from,
+         target_area: to,
+         order_amount: to_string(amount),
+         editing_order: true
+       )}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("drag_order", _params, socket), do: {:noreply, socket}
+
+  # The engine has no "cancel order": an order cut to zero armies does
+  # nothing when the turn resolves, and the board draws no arrow for it.
+  def handle_event("remove_order", _params, socket) do
+    with {:ok, account} <- require_account(socket),
+         source when not is_nil(source) <- socket.assigns.selected_area,
+         target when not is_nil(target) <- socket.assigns.target_area do
+      submit_order(socket, account, source, target, 0)
+      {:noreply, clear_selection(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   # The amount field, stepper and Max only ever rewrite the draft `order_amount`;
   # nothing reaches the game server until `submit_order`, which validates as before.
   # `change_amount` keeps the draft in step with what was typed, so a step or Max
   # after typing starts from the typed number rather than the prefill.
+  def handle_event("change_amount", %{"_target" => ["amount_range"]} = params, socket),
+    do: {:noreply, assign(socket, :order_amount, Map.get(params, "amount_range", ""))}
+
   def handle_event("change_amount", %{"amount" => amount_str}, socket),
     do: {:noreply, assign(socket, :order_amount, amount_str)}
 
@@ -372,6 +489,12 @@ defmodule GlobalCombatWeb.GameLive do
       "frontier" -> {:noreply, assign(socket, :lens, :frontier)}
       _ -> {:noreply, socket}
     end
+  end
+
+  # The phone HUD's one-button lens control steps through the same three.
+  def handle_event("cycle_lens", _params, socket) do
+    next = %{owner: :region, region: :frontier, frontier: :owner}
+    {:noreply, assign(socket, :lens, Map.fetch!(next, socket.assigns.lens))}
   end
 
   defp handle_area_click(socket, area) do
@@ -446,7 +569,48 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   defp clear_selection(socket),
-    do: assign(socket, selected_area: nil, target_area: nil, order_amount: "")
+    do:
+      assign(socket, selected_area: nil, target_area: nil, order_amount: "", editing_order: false)
+
+  defp own_area?(view, area),
+    do:
+      area.visible and not is_nil(view.viewer_number) and area.owner_number == view.viewer_number
+
+  # A tap places one, a hold five; anything else a client sends is clamped
+  # into that range (the engine clamps to the pool on top of this).
+  defp quick_amount(amount) do
+    case Integer.parse(to_string(amount)) do
+      {n, ""} -> n |> max(1) |> min(5)
+      _ -> 1
+    end
+  end
+
+  # Optimistic local copy of an assign (`delta > 0`) or its undo (`delta < 0`)
+  # on the viewer's own area and pool — replaced wholesale by the next
+  # `refresh_view/1`.
+  defp adjust_assigned(view, area_number, delta) do
+    areas =
+      Enum.map(view.areas, fn
+        %{number: ^area_number} = a ->
+          %{a | armies: a.armies + delta, pending_armies: a.pending_armies + delta}
+
+        a ->
+          a
+      end)
+
+    viewer = view.viewer_number
+
+    players =
+      Enum.map(view.players, fn
+        %{number: ^viewer} = p ->
+          %{p | unassigned_armies: p.unassigned_armies - delta}
+
+        p ->
+          p
+      end)
+
+    %{view | areas: areas, players: players}
+  end
 
   defp require_account(socket) do
     case socket.assigns.current_account do
@@ -533,7 +697,12 @@ defmodule GlobalCombatWeb.GameLive do
       >
         <:status>
           <span id="game-status">{status_line(assigns)}</span>
-          <form :if={@status == :playing} id="lens-form" phx-change="set_lens">
+          <form
+            :if={@status == :playing}
+            id="lens-form"
+            phx-change="set_lens"
+            class={[@stage && "hidden lg:block"]}
+          >
             <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
               <:option value="owner">Owner</:option>
               <:option value="region">Region control</:option>
@@ -542,13 +711,40 @@ defmodule GlobalCombatWeb.GameLive do
           </form>
           <div class="ml-auto flex items-center gap-[var(--space-2)]">
             <button
+              :if={@stage}
+              type="button"
+              id="lens-cycle"
+              phx-click="cycle_lens"
+              aria-label={"Map lens: #{lens_name(@lens)}. Switch lens"}
+              class="hud-chip lg:hidden"
+            >
+              <.icon name={lens_icon(@lens)} class="size-5" />
+            </button>
+            <%!-- The roster as avatars doubles as the drawer opener on a phone:
+            each seat's colour, initial and a tick once they've ended their
+            turn — who you're waiting on, at a glance. --%>
+            <button
               type="button"
               id="drawer-open"
               aria-controls="game-drawer"
               aria-expanded="false"
-              class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+              aria-label="Players and chat"
+              class="hud-chip relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
             >
-              Players
+              <%= if @status == :playing do %>
+                <span class="flex items-center -space-x-1.5" aria-hidden="true">
+                  <span
+                    :for={p <- @view.players}
+                    class={["hud-avatar world-map-owner", p.eliminated && "opacity-40"]}
+                    data-owner={WorldMap.owner_slot(p.number)}
+                    data-done={p.done && !p.eliminated}
+                  >
+                    {String.first(p.name)}
+                  </span>
+                </span>
+              <% else %>
+                Players
+              <% end %>
               <span
                 data-unread-dot
                 aria-hidden="true"
@@ -724,6 +920,57 @@ defmodule GlobalCombatWeb.GameLive do
           }
         }
       </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".EndTurn">
+        // Ending a turn with reinforcements still unplaced throws them away,
+        // so the first tap only arms the button ("3 unplaced · tap again")
+        // and a second tap within a few seconds really ends the turn. Stops
+        // the click before LiveView's window-level phx-click listener sees it.
+        const ARM_MS = 3000
+
+        export default {
+          mounted() {
+            this.armedUntil = 0
+            this.el.addEventListener("click", (e) => {
+              const unplaced = Number(this.el.dataset.unplaced || 0)
+              if (unplaced <= 0 || Date.now() < this.armedUntil) return
+              e.stopImmediatePropagation()
+              e.preventDefault()
+              this.armedUntil = Date.now() + ARM_MS
+              this.showArmed()
+              try {
+                navigator.vibrate?.([10, 40, 10])
+              } catch {
+                // Vibration is a nicety only.
+              }
+              clearTimeout(this.timer)
+              this.timer = setTimeout(() => this.disarm(), ARM_MS)
+            })
+          },
+
+          // A patch re-renders the label; keep showing the armed state.
+          updated() {
+            if (Date.now() < this.armedUntil) this.showArmed()
+          },
+
+          destroyed() {
+            clearTimeout(this.timer)
+          },
+
+          showArmed() {
+            const unplaced = Number(this.el.dataset.unplaced || 0)
+            this.el.classList.add("is-armed")
+            const label = this.el.querySelector(".end-turn-label")
+            if (label) label.textContent = `${unplaced} unplaced · tap again`
+          },
+
+          disarm() {
+            this.armedUntil = 0
+            this.el.classList.remove("is-armed")
+            const label = this.el.querySelector(".end-turn-label")
+            if (label) label.textContent = "End Turn"
+          }
+        }
+      </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".TurnReplay">
         // Replays the last resolved turn from the JSON payload LiveView
         // put in `data-steps` (`GameLive.Replay.steps/4`, already fog-filtered) —
@@ -871,13 +1118,22 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   defp status_line(%{status: :playing} = assigns) do
-    assigns = assign(assigns, :ended_pill, ended_pill(assigns.view))
+    assigns =
+      assign(assigns,
+        ended_pill: ended_pill(assigns.view),
+        turn_hint: !assigns.view.ended && turn_hint(assigns.view)
+      )
 
     ~H"""
-    <span class="heading-3 tabular-nums">
-      Turn {@view.turn}
+    <span class="turn-pill">
+      <span class="heading-3 tabular-nums">
+        Turn {@view.turn}
+      </span>
+      <span :if={@turn_hint} id="turn-hint" class="turn-hint">{@turn_hint}</span>
     </span>
-    <StatusPill.status_pill :if={!@view.ended} tone="active">In progress</StatusPill.status_pill>
+    <StatusPill.status_pill :if={!@view.ended} tone="active" class="hud-desktop-only">
+      In progress
+    </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.ended} tone={@ended_pill.tone}>
       {@ended_pill.label}
     </StatusPill.status_pill>
@@ -888,8 +1144,10 @@ defmodule GlobalCombatWeb.GameLive do
       id="map-fit"
       phx-hook=".MapFit"
       aria-label="Reset map zoom"
+      class="hud-chip"
     >
-      Fit
+      <.icon name="hero-globe-americas" class="size-5 lg:hidden" />
+      <span class="hidden lg:inline">Fit</span>
     </Button.button>
     <script :type={Phoenix.LiveView.ColocatedHook} name=".MapFit">
       // The .MapViewport hook (world_map.ex) lives on a different element,
@@ -945,9 +1203,21 @@ defmodule GlobalCombatWeb.GameLive do
       class="flex items-center gap-[var(--space-2)]"
     >
       <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
-        <Button.button type="button" data-replay-play>Turn {@turn} results ▶</Button.button>
-        <Button.button type="button" intent="neutral" data-replay-back>◀ Step</Button.button>
-        <Button.button type="button" intent="neutral" data-replay-forward>Step ▶</Button.button>
+        <Button.button type="button" data-replay-play class="hud-chip">
+          <span class="lg:hidden">▶ Replay</span>
+          <span class="hidden lg:inline">Turn {@turn} results ▶</span>
+        </Button.button>
+        <Button.button type="button" intent="neutral" data-replay-back class="hidden lg:inline-flex">
+          ◀ Step
+        </Button.button>
+        <Button.button
+          type="button"
+          intent="neutral"
+          data-replay-forward
+          class="hidden lg:inline-flex"
+        >
+          Step ▶
+        </Button.button>
       </span>
       <span id="turn-replay-announce" class="sr-only"></span>
     </div>
@@ -1029,6 +1299,7 @@ defmodule GlobalCombatWeb.GameLive do
         interactive={!@view.ended}
         replay_steps={@replay_steps}
         game_id={@game_id}
+        unassigned={unassigned_armies(@view)}
       />
       <figcaption
         :if={@view.ended && @winner}
@@ -1052,7 +1323,15 @@ defmodule GlobalCombatWeb.GameLive do
   # returns `nil` and a turn-controls row built around `my_player(@view).done`
   # must stay gated on `@view.viewer_number`, same as the original
   # (pre-stage) turn-controls div was.
+  #
+  # The idle row reads like a game HUD: an Undo for the latest tap-placed
+  # reinforcement, a coach line saying what to do next, and End Turn as a big
+  # thumb button whose ring fills as reinforcements are placed. Ending a turn
+  # with armies still unplaced takes a second tap (`.EndTurn`).
   defp dock(assigns) do
+    me = assigns.view.viewer_number && my_player(assigns.view)
+    assigns = assign(assigns, me: me, progress: me && placement_progress(assigns.view, me))
+
     ~H"""
     <.order_panel
       :if={@selected_area}
@@ -1060,26 +1339,110 @@ defmodule GlobalCombatWeb.GameLive do
       selected_area={@selected_area}
       target_area={@target_area}
       order_amount={@order_amount}
+      editing_order={@editing_order}
     />
-    <div
-      :if={!@selected_area && @view.viewer_number}
-      id="turn-controls"
-      class="flex flex-col gap-[var(--space-2)] sm:flex-row"
-    >
-      <Button.button :if={!my_player(@view).done} class="w-full sm:w-auto" phx-click="done">
-        End Turn
-      </Button.button>
-      <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
-      <Button.button
-        intent="neutral"
-        class="w-full sm:w-auto"
-        phx-click="force_turn"
+    <div :if={!@selected_area && @me} id="turn-controls" class="turn-controls">
+      <button
+        :if={@assign_history != [] && !@me.done}
+        type="button"
+        id="undo-assign"
+        phx-click="undo_assign"
+        aria-label="Undo last placement"
+        class="hud-chip turn-controls-undo"
       >
-        Force Turn
-      </Button.button>
+        <.icon name="hero-arrow-uturn-left" class="size-5" />
+      </button>
+      <p id="turn-coach" class="turn-coach">{coach_line(@view, @me)}</p>
+      <div class="turn-controls-actions">
+        <Button.button intent="neutral" class="turn-controls-force" phx-click="force_turn">
+          Force Turn
+        </Button.button>
+        <button
+          :if={!@me.done}
+          type="button"
+          id="end-turn"
+          phx-click="done"
+          phx-hook=".EndTurn"
+          data-unplaced={@me.unassigned_armies}
+          class={["end-turn", @me.unassigned_armies == 0 && "end-turn--ready"]}
+        >
+          <svg class="end-turn-ring" viewBox="0 0 100 100" aria-hidden="true">
+            <circle class="end-turn-ring-track" cx="50" cy="50" r="46" pathLength="100" />
+            <circle
+              class="end-turn-ring-fill"
+              cx="50"
+              cy="50"
+              r="46"
+              pathLength="100"
+              stroke-dashoffset={100 - round(@progress * 100)}
+            />
+          </svg>
+          <span class="end-turn-label">End Turn</span>
+        </button>
+        <span :if={@me.done} class="turn-waiting">Waiting on other players…</span>
+      </div>
     </div>
     """
   end
+
+  # Share of this turn's reinforcements already placed, for End Turn's ring.
+  defp placement_progress(view, me) do
+    placed =
+      view.areas
+      |> Enum.filter(&own_area?(view, &1))
+      |> Enum.map(& &1.pending_armies)
+      |> Enum.sum()
+
+    total = placed + me.unassigned_armies
+    if total == 0, do: 1.0, else: placed / total
+  end
+
+  defp unassigned_armies(view) do
+    case view.viewer_number && my_player(view) do
+      %{unassigned_armies: n} -> n
+      _ -> 0
+    end
+  end
+
+  # What to do next, in the order a turn is played.
+  defp coach_line(_view, %{done: true}),
+    do: "Orders locked in. The turn runs once everyone has ended theirs."
+
+  defp coach_line(_view, %{unassigned_armies: n}) when n > 0,
+    do: "Tap your territories to place #{armies_word(n)} · hold for +5"
+
+  defp coach_line(view, _me) do
+    case Enum.count(view.areas, &(&1.order && &1.order.amount > 0)) do
+      0 -> "Drag from your territory to a neighbour to attack or move"
+      n -> "#{n} #{if n == 1, do: "order", else: "orders"} ready · tap an arrow to change it"
+    end
+  end
+
+  # The status strip's one-line summary of where the viewer is in the turn.
+  defp turn_hint(view) do
+    case view.viewer_number && my_player(view) do
+      %{eliminated: true} -> nil
+      %{done: true} -> "Waiting on others"
+      %{unassigned_armies: n} when n > 0 -> "Place #{armies_word(n)}"
+      %{} -> orders_hint(Enum.count(view.areas, &(&1.order && &1.order.amount > 0)))
+      _ -> nil
+    end
+  end
+
+  defp orders_hint(0), do: "Give your orders"
+  defp orders_hint(1), do: "1 order ready"
+  defp orders_hint(n), do: "#{n} orders ready"
+
+  defp armies_word(1), do: "1 army"
+  defp armies_word(n), do: "#{n} armies"
+
+  defp lens_name(:owner), do: "Owner"
+  defp lens_name(:region), do: "Region control"
+  defp lens_name(:frontier), do: "Frontier"
+
+  defp lens_icon(:owner), do: "hero-flag"
+  defp lens_icon(:region), do: "hero-squares-2x2"
+  defp lens_icon(:frontier), do: "hero-shield-exclamation"
 
   # Region bonuses, your queued orders and the last turn's results, in the
   # `:players` rail between the roster and chat (`docs/mobile-battle-mode.md`
@@ -1229,15 +1592,41 @@ defmodule GlobalCombatWeb.GameLive do
   attr :target_area, :any, required: true
   attr :order_amount, :string, required: true
 
+  attr :editing_order, :boolean,
+    default: false,
+    doc:
+      "the panel was opened on an order that is already queued (drag-to-order, arrow re-select)"
+
+  # A slider and quick picks (1 · Half · Max) sit beside the exact number, so a
+  # thumb can set an amount without the keyboard. Opened on an order that is
+  # already queued (a drag, or tapping its arrow) it edits that order: the
+  # primary button updates it and Remove takes it off the board.
   defp order_panel(assigns) do
     source = find_area(assigns.view, assigns.selected_area)
     target = assigns.target_area && find_area(assigns.view, assigns.target_area)
     mode = order_mode(assigns.view, target)
+    max = max_order_amount(Map.put(assigns, :status, :playing)) || 0
+    amount = max(parse_amount(assigns.order_amount), 0)
 
-    assigns = assign(assigns, source: source, target: target, mode: mode)
+    queued_here? =
+      match?(%{order: %{amount: a}} when a > 0, source) and
+        source.order.target == assigns.target_area
+
+    editing = mode != :assign and (assigns.editing_order or queued_here?)
+
+    assigns =
+      assign(assigns,
+        source: source,
+        target: target,
+        mode: mode,
+        max: max,
+        half: max(div(max, 2), 1),
+        amount: amount,
+        editing: editing
+      )
 
     ~H"""
-    <Card.card id="order-panel" class="min-w-[16rem]">
+    <Card.card id="order-panel" class={["order-panel min-w-[16rem]", "order-panel--#{@mode}"]}>
       <:header>{order_panel_title(@mode, @target)}</:header>
       <form
         id="order-form"
@@ -1245,19 +1634,33 @@ defmodule GlobalCombatWeb.GameLive do
         phx-submit="submit_order"
         class="flex flex-col gap-[var(--space-3)]"
       >
-        <Input.input
-          id="order-amount"
-          name="amount"
-          type="number"
-          min="0"
-          label="Armies"
-          value={@order_amount}
-          inputmode="numeric"
-          pattern="[0-9]*"
-          autocomplete="off"
-          enterkeyhint="done"
-        />
-        <div id="order-stepper" class="flex flex-wrap gap-[var(--space-2)]">
+        <div class="order-amount-row">
+          <Input.input
+            id="order-amount"
+            name="amount"
+            type="number"
+            min="0"
+            label="Armies"
+            value={@order_amount}
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="off"
+            enterkeyhint="done"
+            class="order-amount-input"
+          />
+          <input
+            :if={@max > 0}
+            id="order-amount-range"
+            name="amount_range"
+            type="range"
+            min="0"
+            max={@max}
+            value={min(@amount, @max)}
+            aria-label="Armies"
+            class="order-amount-range"
+          />
+        </div>
+        <div id="order-stepper" class="order-stepper">
           <Button.button
             type="button"
             intent="neutral"
@@ -1276,13 +1679,32 @@ defmodule GlobalCombatWeb.GameLive do
           >
             +
           </Button.button>
+          <Button.button
+            :if={@max > 1}
+            type="button"
+            intent="neutral"
+            phx-click="change_amount"
+            phx-value-amount="1"
+          >
+            1
+          </Button.button>
+          <Button.button
+            :if={@max > 2}
+            type="button"
+            intent="neutral"
+            phx-click="change_amount"
+            phx-value-amount={@half}
+            aria-label={"Half: #{@half}"}
+          >
+            ½
+          </Button.button>
           <Button.button type="button" intent="neutral" phx-click="max_amount">
             Max
           </Button.button>
         </div>
-        <div class="flex flex-wrap gap-[var(--space-2)]">
-          <Button.button type="submit" intent="primary">
-            {order_submit_label(@mode)}
+        <div class="order-actions">
+          <Button.button type="submit" intent="primary" class="order-submit">
+            {order_submit_label(@mode)} {@amount}
           </Button.button>
           <Button.button
             :if={(@mode == :assign and @source) && @source.pending_armies > 0}
@@ -1292,8 +1714,17 @@ defmodule GlobalCombatWeb.GameLive do
           >
             Unassign
           </Button.button>
+          <Button.button
+            :if={@editing}
+            type="button"
+            intent="neutral"
+            id="remove-order"
+            phx-click="remove_order"
+          >
+            Remove
+          </Button.button>
           <Button.button type="button" intent="neutral" phx-click="cancel_order">
-            Cancel
+            {if @editing, do: "Keep", else: "Cancel"}
           </Button.button>
         </div>
       </form>
@@ -1326,7 +1757,8 @@ defmodule GlobalCombatWeb.GameLive do
   defp my_orders(view) do
     area_names = WorldMap.area_names(view.areas)
 
-    for area <- view.areas, area.order do
+    # A removed order is one cut to zero armies (`remove_order`) — not listed.
+    for area <- view.areas, area.order, area.order.amount > 0 do
       WorldMap.order_label(area.name, area.order, Map.fetch!(area_names, area.order.target))
     end
   end
