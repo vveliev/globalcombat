@@ -336,6 +336,38 @@ defmodule GlobalCombat.Games.PlayerViewTest do
       end
     end
 
+    test "last_turn_complete: only areas whose every bordering area the viewer saw" do
+      # Player 1 owns Alaska (1, borders 2, 3, 37), so Alaska and all of its neighbours are
+      # visible: nothing touching Alaska can have been filtered. Northern Territories (2) is
+      # visible too (it borders Alaska), but it also borders Ontario (4) and Quebec (5), which
+      # player 1 can't see — an attack from either into it would be filtered out.
+      engine = engine_with(%{1 => %Engine.Area{number: 1, owner_number: 1, armies: 5}})
+      log = %TurnLog{turn: 3, events: [], before_owners: owners(engine.areas)}
+
+      view = PlayerView.build(engine, 1, game_id: 1, is_fogged: true, last_turn_log: log)
+      complete = for a <- view.areas, a.last_turn_complete, into: MapSet.new(), do: a.number
+
+      assert MapSet.member?(complete, 1)
+      refute MapSet.member?(complete, 2)
+      refute MapSet.member?(complete, 4)
+      assert Enum.find(view.areas, &(&1.number == 2)).visible
+
+      unfogged = PlayerView.build(engine, 1, game_id: 1, is_fogged: false, last_turn_log: log)
+      assert Enum.all?(unfogged.areas, & &1.last_turn_complete)
+    end
+
+    test "last_turn_complete counts an area seen only before the turn as seen" do
+      # Player 1 held Ontario (4) going into the turn and lost it, so the areas around it were
+      # visible before resolution even though they aren't now.
+      engine = engine_with(%{4 => %Engine.Area{number: 4, owner_number: 2, armies: 5}})
+      before_owners = engine.areas |> owners() |> Map.put(4, 1)
+      log = %TurnLog{turn: 3, events: [], before_owners: before_owners}
+
+      view = PlayerView.build(engine, 1, game_id: 1, is_fogged: true, last_turn_log: log)
+
+      assert Enum.find(view.areas, &(&1.number == 4)).last_turn_complete
+    end
+
     test "a non-fogged game exposes every event unfiltered" do
       engine =
         engine_with(%{
