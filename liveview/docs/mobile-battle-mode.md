@@ -52,7 +52,7 @@ Interaction rules:
 
 1. One-finger drag pans the map. Two-finger pinch zooms about the pinch midpoint. Double tap zooms in 2.5x about the tap; double tap again resets to fit. A tap that moved less than 8px is a territory click, exactly as today.
 2. Tapping a territory opens the order panel in the dock. Tapping a second territory sets the target (existing `select_area` behaviour). Cancel clears the selection and the dock returns to the idle row.
-3. The dock's idle row is End Turn (or "Waiting on other players…") plus Force Turn. Quit moves into the drawer so it cannot be hit by accident.
+3. The dock's idle row is End Turn (or "Waiting on other players…") plus Force Turn. Below `lg`, Quit moves into the drawer so it cannot be hit by accident; above `lg` it stays in the turn controls (see §4.3).
 4. The drawer opens from the top strip, traps focus, closes on Escape, backdrop tap, or its Close button, and returns focus to the button that opened it.
 5. The fullscreen button uses the Fullscreen API where available (Android Chrome, desktop). On iPhone Safari it is hidden; there the web app manifest and Apple metas give a chrome-free window when the game is added to the home screen.
 6. The soft keyboard never covers the dock: the stage height tracks `visualViewport.height`.
@@ -107,7 +107,7 @@ New attr `immersive :boolean, default: false`. When true, the topbar and sidebar
 | `game_over/1` | board | board (stage mode is off when ended, so unchanged) |
 | `order_panel/1` | rail column beside the map | `:dock` |
 | Turn controls (End Turn, Waiting, Force Turn) | below the board table | `:dock`, rendered only when no area is selected |
-| Quit button | turn controls | `:players` (drawer), bottom, `intent="danger"` |
+| Quit button | turn controls | below `lg` only: `:players` (drawer), bottom, `intent="danger"`, `lg:hidden`; above `lg` it stays in `#turn-controls` (hidden below `lg`), since above `lg` nothing changes (§2) |
 | `region_bonuses/1` | rail column beside the map | a legend drawn into the map's bottom-left sea (`WorldMap.legend/1`); the list stays in `:players` (drawer) below `md`, screen-reader only from `md` up |
 | `your_orders_card/1`, `turn_results/1` | rail column beside the map | `:players`, after the roster and before chat |
 | `board_table/1` (sr-only) | board | board (unchanged) |
@@ -174,7 +174,7 @@ Do not use `phx-update="ignore"`: territory fills, counts, arrows, and highlight
 LiveView and component tests (ExUnit, no browser):
 
 - `game_layout_test.exs`: `stage` renders the `status/board/dock` grid areas and the dialog-wrapped players; without `stage` today's assertions hold; `:dock` renders inside the players rail above `lg`.
-- `game_live_test.exs`: lens form is inside the status section; with an area selected the order panel is inside `[aria-label="Actions"]` and `#turn-controls` is absent; with no selection `#turn-controls` is in the dock; Quit is inside `#game-drawer`; amount input carries `inputmode="numeric"`; `step_amount` and `max_amount` update the rendered value and never call the engine; ended games do not set `stage`; the horizontal scroll assertions remain green.
+- `game_live_test.exs`: lens form is inside the status section; with an area selected the order panel is inside `[aria-label="Actions"]` and `#turn-controls` is absent; with no selection `#turn-controls` is in the dock; the below-`lg` Quit is inside `#game-drawer` and the desktop one in `#turn-controls`; amount input carries `inputmode="numeric"`; `step_amount` and `max_amount` update the rendered value and never call the engine; ended games do not set `stage`; the horizontal scroll assertions remain green.
 - `world_map_test.exs`: wrapper carries `phx-hook=".MapViewport"`, `data-view-box`, `tabindex="0"`.
 - `site_chrome_test.exs`: `immersive` hides the topbar and sidebar below `lg` and leaves them above.
 - Controller test: `GET /manifest.webmanifest` returns 200 with `application/manifest+json`.

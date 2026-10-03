@@ -824,12 +824,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "main[data-stage]")
     end
 
-    test "Quit lives in the players rail, not the dock", %{conn: conn1} do
+    test "below lg Quit lives in the drawer; above lg it stays in the dock's turn controls",
+         %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
       %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
 
-      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
       refute has_element?(alice_view, ~s([aria-label="Actions"] #quit-button))
+      assert has_element?(alice_view, ~s([aria-label="Actions"] #turn-controls-quit.max-lg\\:hidden))
     end
 
     test "a spectator viewing a live game does not crash the dock (no seated player, nothing selected)",
@@ -1417,16 +1419,14 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#game-drawer a[href="/"]), "Home")
       assert has_element?(alice_view, ~s(#game-drawer a[href="/Game-Manual"]), "Game Manual")
 
-      # The drawer renders once (GameLayout's moduledoc) and is the mobile
-      # sheet *and* the lg: rail alike, so its one Quit button is already
-      # exactly one on both breakpoints — stage mode's :dock emptied
-      # #turn-controls down to End Turn/Force Turn only, so there's no
-      # separate desktop Quit left for the drawer's copy to duplicate.
-      refute has_element?(alice_view, "#turn-controls button", "Quit")
+      # Above lg nothing changes (mobile-battle-mode.md §2): Quit stays in
+      # #turn-controls there and is hidden below lg, while the drawer's copy
+      # is the below-lg one only — exactly one visible per breakpoint.
+      assert has_element?(alice_view, "#turn-controls #turn-controls-quit.max-lg\\:hidden", "Quit")
       assert has_element?(alice_view, "#turn-controls button", "End Turn")
       assert has_element?(alice_view, "#turn-controls button", "Force Turn")
 
-      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
     end
 
     test "an ended game drops the Quit button from the drawer", %{conn: conn1} do

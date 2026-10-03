@@ -607,12 +607,12 @@ defmodule GlobalCombatWeb.GameLive do
             chat_form={@chat_form}
             logged_in={!!@current_account}
           />
-          <%!-- Unconditional, not lg:hidden: :players renders once, inside the one
-          <dialog> GameLayout shows as the mobile drawer and the lg: rail alike
-          (GameLayout's moduledoc), so a single Quit button here is already
-          exactly one on both — stage mode's :dock (above) already emptied
-          #turn-controls of everything but End Turn/Force Turn, so there's no
-          second desktop Quit left to collide with. --%>
+          <%!-- Below lg only: there Quit lives in the drawer so it can't be hit
+          by accident from the dock (docs/mobile-battle-mode.md §2, rule 3).
+          :players renders once, inside the one <dialog> GameLayout shows as
+          the mobile drawer and the lg: rail alike, so lg:hidden keeps the
+          desktop rail unchanged — above lg Quit stays in #turn-controls
+          (dock/1), where it has always been ("above lg nothing changes"). --%>
           <Button.button
             :if={
               @status == :playing && @view.viewer_number && !@view.ended &&
@@ -621,7 +621,7 @@ defmodule GlobalCombatWeb.GameLive do
             id="quit-button"
             intent="danger"
             phx-click="quit"
-            class="mt-[var(--space-4)]"
+            class="mt-[var(--space-4)] lg:hidden"
           >
             Quit
           </Button.button>
@@ -1076,6 +1076,17 @@ defmodule GlobalCombatWeb.GameLive do
         phx-click="force_turn"
       >
         Force Turn
+      </Button.button>
+      <%!-- Desktop only: below lg the drawer carries Quit instead (the
+      #quit-button in render_game/1's :players slot). --%>
+      <Button.button
+        :if={!my_player(@view).eliminated}
+        id="turn-controls-quit"
+        intent="neutral"
+        class="max-lg:hidden"
+        phx-click="quit"
+      >
+        Quit
       </Button.button>
     </div>
     """
