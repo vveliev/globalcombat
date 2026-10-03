@@ -488,10 +488,7 @@ defmodule GlobalCombat.Games.Server do
 
   @impl true
   def handle_cast({:chat, account_id, name, text}, state) do
-    message = %{source_id: account_id, source_name: name, text: text, sent: DateTime.utc_now()}
-    messages = Enum.take([message | state.messages], @max_messages)
-    GamePubSub.broadcast_add_message(state.game_id, message)
-    {:noreply, %{state | messages: messages}}
+    {:noreply, post_message(state, account_id, name, text)}
   end
 
   def handle_cast({:done, account_id}, %{status: :playing} = state) do
@@ -508,17 +505,8 @@ defmodule GlobalCombat.Games.Server do
 
     if player_number && time_left(state) <= 0 do
       player = Engine.player!(state.engine, player_number)
-
-      message = %{
-        source_id: 1,
-        source_name: "Computer",
-        text: "#{player.name} forced the turn to run.",
-        sent: DateTime.utc_now()
-      }
-
-      GamePubSub.broadcast_add_message(state.game_id, message)
-      state = run_turn(%{state | messages: Enum.take([message | state.messages], @max_messages)})
-      {:noreply, state}
+      state = post_system_message(state, "#{player.name} forced the turn to run.")
+      {:noreply, run_turn(state)}
     else
       {:noreply, state}
     end
@@ -599,6 +587,24 @@ defmodule GlobalCombat.Games.Server do
     do: {:noreply, state}
 
   # --- internals -----------------------------------------------------------
+
+  # Port of `Game.SendForumMessage`: appends a line to the game's chat and pushes it to every
+  # subscriber.
+  defp post_message(state, source_id, source_name, text) do
+    message = %{
+      source_id: source_id,
+      source_name: source_name,
+      text: text,
+      sent: DateTime.utc_now()
+    }
+
+    GamePubSub.broadcast_add_message(state.game_id, message)
+    %{state | messages: Enum.take([message | state.messages], @max_messages)}
+  end
+
+  # `SendForumMessage`'s default author: the game's own announcements come from the Computer.
+  defp post_system_message(state, text),
+    do: post_message(state, Accounts.computer_account_id(), Accounts.computer_name(), text)
 
   # Shared by {:start_game, account_id} (host-authorized) and :force_start (unconditional,
   # GIF-115) — everything past "who's allowed to start this" is identical.
@@ -773,7 +779,8 @@ defmodule GlobalCombat.Games.Server do
   # GIF-104: `RandomAi` (GIF-28) was validated by the differential harness in isolation but
   # never wired into live play — a seat's `done` flag only ever flipped via a human's
   # `set_done`/`force_turn` cast, which never arrives for the reserved "Computer" account
-  # (account_id 1, see `Engine.reset_done_flags/1`), so training games stuck on turn 1 forever.
+  # (`Accounts.computer_account_id/0`, see `Engine.reset_done_flags/1`), so training games stuck
+  # on turn 1 forever.
   # Ports `GameController.Create`'s `model.Join(1, "Computer", 0).Done = true` — the Computer
   # seat is marked done the instant its turn starts, not waited on — but additionally runs
   # `RandomAi.think/2` first (the oracle-side-only `RandomAiPlayer.Think` call in
@@ -799,8 +806,8 @@ defmodule GlobalCombat.Games.Server do
     end)
   end
 
-  defp computer_seat?(%Engine.Player{account_id: 1}), do: true
-  defp computer_seat?(%Engine.Player{}), do: false
+  defp computer_seat?(%Engine.Player{account_id: account_id}),
+    do: Accounts.computer_account?(account_id)
 
   defp mark_done(state, player_number) do
     player = Engine.player!(state.engine, player_number)
