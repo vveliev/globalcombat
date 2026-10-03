@@ -9,6 +9,8 @@ defmodule GlobalCombat.Games.LiveTest do
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.PubSub, as: GamePubSub
+  alias GlobalCombat.Tourneys
+  alias GlobalCombat.Tourneys.TourneyGame
 
   setup do
     game_id = Games.create_game(%{max_players: 3})
@@ -162,12 +164,28 @@ defmodule GlobalCombat.Games.LiveTest do
     test "quitting mid-play twice is refused the second time", %{game_id: game_id} do
       alice = account_fixture()
       bob = account_fixture()
+      carl = account_fixture()
       Games.join(game_id, alice.id, alice.name)
       Games.join(game_id, bob.id, bob.name)
+      # A third seat keeps the game running after Bob leaves.
+      Games.join(game_id, carl.id, carl.name)
       :ok = Games.start_game(game_id, alice.id)
 
       assert :ok = Games.quit(game_id, bob.id)
       assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+    end
+
+    test "quitting a game that has ended is refused", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      Games.join(game_id, alice.id, alice.name)
+      Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      # Bob leaving a two-player game ends it.
+      assert :ok = Games.quit(game_id, bob.id)
+      assert {:error, :game_ended} = Games.quit(game_id, bob.id)
+      assert {:error, :game_ended} = Games.quit(game_id, alice.id)
     end
   end
 
@@ -205,6 +223,34 @@ defmodule GlobalCombat.Games.LiveTest do
       assert {:error, :not_found} = Games.kick(game_id, alice.id, 99)
     end
 
+    test "the host can't kick their own seat, even when alone in the lobby", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      assert {:error, :cannot_kick_host} = Games.kick(game_id, alice.id, 1)
+
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert Enum.map(view.players, & &1.name) == [alice.name]
+
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      assert {:error, :cannot_kick_host} = Games.kick(game_id, alice.id, 1)
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert Enum.map(view.players, & &1.name) == [alice.name, bob.name]
+    end
+
+    test "a private lobby emptied by its last seat is gone, not open to the next visitor" do
+      alice = account_fixture()
+      mallory = account_fixture()
+      game_id = Games.create_game(%{max_players: 3, is_private: true})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      assert :ok = Games.quit(game_id, alice.id)
+
+      assert GamesDb.get_game(game_id) == nil
+      assert {:error, :not_found} = Games.join(game_id, mallory.id, mallory.name)
+    end
+
     test "kicking is refused once the game has started", %{game_id: game_id} do
       alice = account_fixture()
       bob = account_fixture()
@@ -213,6 +259,69 @@ defmodule GlobalCombat.Games.LiveTest do
       :ok = Games.start_game(game_id, alice.id)
 
       assert {:error, :not_in_lobby} = Games.kick(game_id, alice.id, 2)
+    end
+  end
+
+  describe "tourney lobbies (GameController.Quit/Kick's TourneyId checks)" do
+    # A lobby that is a bracket slot: what Tourneys' round seeding sets up, minus the seeding.
+    defp tourney_lobby(game_id) do
+      {:ok, tourney} =
+        Tourneys.create_tourney(%{
+          "name" => "Lobby Cup #{System.unique_integer([:positive])}",
+          "initial_games" => 2,
+          "game_size" => 3,
+          "winners" => 1
+        })
+
+      Repo.insert!(%TourneyGame{
+        tourney_id: tourney.id,
+        game_id: game_id,
+        game_num: 1,
+        round: 1,
+        game_size: 3,
+        winners: 1
+      })
+    end
+
+    test "a seated player can't quit a tourney lobby, so the bracket slot survives", %{
+      game_id: game_id
+    } do
+      alice = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      tourney_game = tourney_lobby(game_id)
+
+      assert {:error, :tourney_game} = Games.quit(game_id, alice.id)
+
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert Enum.map(view.players, & &1.name) == [alice.name]
+      assert GamesDb.get_game(game_id)
+      assert Repo.get(TourneyGame, tourney_game.id)
+    end
+
+    test "seat 1 can't kick anyone from a tourney lobby", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      tourney_lobby(game_id)
+
+      assert {:error, :tourney_game} = Games.kick(game_id, alice.id, 2)
+
+      {:lobby, view} = Games.player_view(game_id, alice.id)
+      assert length(view.players) == 2
+    end
+
+    test "quitting a started tourney game is still allowed (elimination)", %{game_id: game_id} do
+      alice = account_fixture()
+      bob = account_fixture()
+      carl = account_fixture()
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      {:ok, 3} = Games.join(game_id, carl.id, carl.name)
+      tourney_lobby(game_id)
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert :ok = Games.quit(game_id, carl.id)
     end
   end
 
