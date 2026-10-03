@@ -159,7 +159,7 @@ Do not use `phx-update="ignore"`: territory fills, counts, arrows, and highlight
 - `priv/static/manifest.webmanifest`: `name`, `short_name` "Global Combat", `display: "standalone"`, `orientation: "any"`, `start_url: "/"`, `background_color`/`theme_color` from the industry theme tokens, icons 192 and 512 PNG under `priv/static/images/` (derive from the existing favicon or logo; maskable variant optional).
 - Add `manifest.webmanifest` to `static_paths/0` in `lib/global_combat_web.ex`.
 - `root.html.heex`: viewport becomes `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`; add `<link rel="manifest">`, `<meta name="apple-mobile-web-app-capable" content="yes">`, `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`, `<meta name="theme-color">` for light and dark via `media`.
-- Keyboard inset: in `.MapViewport` or a tiny `.StageViewport` hook on `#game-board`, listen to `window.visualViewport` `resize` and set `style.height = visualViewport.height + "px"` on the wrapper while in stage mode; clear it on blur. This keeps the dock visible above the iOS keyboard.
+- Keyboard inset: a tiny `.StageViewport` hook on `#game-viewport`, a wrapper around `#game-board` (it must contain the dock, which is a sibling of the board's `<main>`), listens to `window.visualViewport` `resize` and, while a text field inside the shell has focus below `lg` in stage mode, sets the shell's height token (`--size-stage`) to `visualViewport.height + "px"` on the wrapper; it clears it when focus leaves the field. This keeps the dock visible above the iOS keyboard.
 
 ### 4.7 CSS (`assets/css/app.css`)
 

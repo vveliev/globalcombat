@@ -525,114 +525,124 @@ defmodule GlobalCombatWeb.GameLive do
       page_title={"Game #{@game_id}"}
       immersive={@stage}
     >
-      <GameLayout.game_layout
-        id="game-board"
-        players_first={@status == :playing && @view.ended}
-        stage={@stage}
-        phx-hook=".FocusManager"
-      >
-        <:status>
-          <span id="game-status">{status_line(assigns)}</span>
-          <form :if={@status == :playing} id="lens-form" phx-change="set_lens">
-            <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
-              <:option value="owner">Owner</:option>
-              <:option value="region">Region control</:option>
-              <:option value="frontier">Frontier</:option>
-            </SegmentedControl.segmented_control>
-          </form>
-          <div class="ml-auto flex items-center gap-[var(--space-2)]">
-            <button
-              type="button"
-              id="drawer-open"
-              aria-controls="game-drawer"
-              aria-expanded="false"
-              class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
-            >
-              Players
-              <span
-                data-unread-dot
-                aria-hidden="true"
-                class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-danger"
-              />
-            </button>
-            <button
-              id="fullscreen-toggle"
-              type="button"
-              phx-hook=".Fullscreen"
-              aria-pressed="false"
-              aria-label="Full screen"
-              class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-            >
-              <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
-            </button>
-          </div>
-        </:status>
+      <%!-- The keyboard-inset wrapper (.StageViewport, below): it contains the
+      whole shell — board, dock and drawer — so it sees focus land in the dock's
+      amount field, and overriding --size-stage here resizes the shell. --%>
+      <div id="game-viewport" phx-hook=".StageViewport" data-stage={@stage}>
+        <GameLayout.game_layout
+          id="game-board"
+          players_first={@status == :playing && @view.ended}
+          stage={@stage}
+          phx-hook=".FocusManager"
+        >
+          <:status>
+            <span id="game-status">{status_line(assigns)}</span>
+            <form :if={@status == :playing} id="lens-form" phx-change="set_lens">
+              <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
+                <:option value="owner">Owner</:option>
+                <:option value="region">Region control</:option>
+                <:option value="frontier">Frontier</:option>
+              </SegmentedControl.segmented_control>
+            </form>
+            <div class="ml-auto flex items-center gap-[var(--space-2)]">
+              <button
+                type="button"
+                id="drawer-open"
+                aria-controls="game-drawer"
+                aria-expanded="false"
+                phx-mounted={JS.ignore_attributes(["aria-expanded"])}
+                class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+              >
+                Players
+                <span
+                  data-unread-dot
+                  aria-hidden="true"
+                  phx-mounted={JS.ignore_attributes(["class"])}
+                  class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-danger"
+                />
+              </button>
+              <button
+                id="fullscreen-toggle"
+                type="button"
+                phx-hook=".Fullscreen"
+                aria-pressed="false"
+                aria-label="Full screen"
+                class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+              >
+                <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
+              </button>
+            </div>
+          </:status>
 
-        <:board>
-          <%!-- h-full: stage mode's <main> (GameLayout) is the definite-height grid
+          <:board>
+            <%!-- h-full: stage mode's <main> (GameLayout) is the definite-height grid
           row the board's own figure/`.world-map`/<svg> height chain needs
           (board/1's moduledoc) — without it here, this wrapper's own
           auto-by-default height would break that chain one level up. Outside
           stage mode <main> has no definite height either, so this resolves to
           plain `auto` there (CSS percentage-height-of-indefinite-ancestor
           rule) — a no-op. --%>
-          <div id="game-board-surface" phx-hook=".StageViewport" class="h-full">
-            <Layouts.flash_group flash={@flash} />
-            <%= case @status do %>
-              <% :lobby -> %>
-                {lobby(assigns)}
-              <% :playing -> %>
-                {board(assigns)}
-            <% end %>
-          </div>
-        </:board>
+            <div id="game-board-surface" class="h-full">
+              <Layouts.flash_group flash={@flash} />
+              <%= case @status do %>
+                <% :lobby -> %>
+                  {lobby(assigns)}
+                <% :playing -> %>
+                  {board(assigns)}
+              <% end %>
+            </div>
+          </:board>
 
-        <%!-- Seated players only: a spectator has no orders to compose and no
+          <%!-- Seated players only: a spectator has no orders to compose and no
         turn to end, so an always-present slot would render an empty,
         bordered "Actions" sheet for them. --%>
-        <:dock :if={@stage && @view.viewer_number}>
-          {dock(assigns)}
-        </:dock>
+          <:dock :if={@stage && @view.viewer_number}>
+            {dock(assigns)}
+          </:dock>
 
-        <:players>
-          <.player_list
-            players={@view.players}
-            viewer_number={@view.viewer_number}
-            status={@status}
-            ended={@status == :playing and @view.ended}
-            map_name={Map.get(@view, :map_name)}
-          />
-          <%= if @status == :playing do %>
-            {players_extras(assigns)}
-          <% end %>
-          <.chat
-            messages={Map.get(@view, :messages, [])}
-            chat_form={@chat_form}
-            logged_in={!!@current_account}
-          />
-          <%!-- Below lg only: there Quit lives in the drawer so it can't be hit
+          <:players>
+            <.player_list
+              players={@view.players}
+              viewer_number={@view.viewer_number}
+              status={@status}
+              ended={@status == :playing and @view.ended}
+              map_name={Map.get(@view, :map_name)}
+            />
+            <%= if @status == :playing do %>
+              {players_extras(assigns)}
+            <% end %>
+            <.chat
+              messages={Map.get(@view, :messages, [])}
+              chat_form={@chat_form}
+              logged_in={!!@current_account}
+            />
+            <%!-- Below lg only: there Quit lives in the drawer so it can't be hit
           by accident from the dock (docs/mobile-battle-mode.md §2, rule 3).
           :players renders once, inside the one <dialog> GameLayout shows as
           the mobile drawer and the lg: rail alike, so lg:hidden keeps the
           desktop rail unchanged — above lg Quit stays in #turn-controls
           (dock/1), where it has always been ("above lg nothing changes"). --%>
-          <Button.button
-            :if={
-              @status == :playing && @view.viewer_number && !@view.ended &&
-                !my_player(@view).eliminated
-            }
-            id="quit-button"
-            intent="danger"
-            phx-click="quit"
-            class="mt-[var(--space-4)] lg:hidden"
-          >
-            Quit
-          </Button.button>
-          <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
-            <.sidebar_links current_account={@current_account} current_path={assigns[:current_path]} />
-          </div>
-        </:players>
-      </GameLayout.game_layout>
+            <Button.button
+              :if={
+                @status == :playing && @view.viewer_number && !@view.ended &&
+                  !my_player(@view).eliminated
+              }
+              id="quit-button"
+              intent="danger"
+              phx-click="quit"
+              class="mt-[var(--space-4)] lg:hidden"
+            >
+              Quit
+            </Button.button>
+            <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
+              <.sidebar_links
+                current_account={@current_account}
+                current_path={assigns[:current_path]}
+              />
+            </div>
+          </:players>
+        </GameLayout.game_layout>
+      </div>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
         // Join/Start/End Turn/Force Turn all swap out significant subtrees
         // (lobby -> board, a button disappearing once its action no longer
@@ -696,34 +706,64 @@ defmodule GlobalCombatWeb.GameLive do
         }
       </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".StageViewport">
-        // Software keyboards shrink the visual viewport without shrinking the
-        // layout viewport, so a focused input's containing block doesn't
-        // shrink with it and whatever sits below it (the amount stepper's
-        // Assign/Attack button) can end up under the keyboard. Pinning this
-        // wrapper's height to `visualViewport.height` while it holds focus
-        // keeps that content in view. Below `lg` only — same breakpoint the
-        // rest of mobile battle mode collapses at (`--size-collapse`).
+        // iOS Safari's soft keyboard shrinks the visual viewport but not the
+        // layout viewport, so the stage shell (`h-[var(--size-stage)]`, i.e.
+        // 100dvh) keeps its full height and the dock at its bottom — the
+        // amount field and its Assign/Attack button — ends up under the
+        // keyboard. While a text field inside the shell has focus below
+        // `lg`, this sets `--size-stage` on this wrapper to
+        // `visualViewport.height`, so the shell (and its dock) fits above
+        // the keyboard (docs/mobile-battle-mode.md §2 rule 6, §4.6). Android
+        // already resizes the layout (`interactive-widget=resizes-content`),
+        // where the override simply matches. Cleared again once focus leaves
+        // the field, above `lg`, and outside stage mode (`data-stage`).
+        import {DESKTOP_QUERY} from "@/js/breakpoints"
+
+        const TEXT_ENTRY =
+          "input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea"
+
         export default {
           mounted() {
-            this.mq = window.matchMedia("(min-width: 64rem)")
-            this.onViewportResize = () => this.syncHeight()
-            this.onFocusOut = () => this.clearHeight()
-            this.onBreakpointChange = () => this.clearHeight()
-            window.visualViewport?.addEventListener("resize", this.onViewportResize)
+            this.desktop = window.matchMedia(DESKTOP_QUERY)
+            this.sync = () => this.syncHeight()
+            // document.activeElement only settles after focusout has fired.
+            this.onFocusOut = () => requestAnimationFrame(this.sync)
+            window.visualViewport?.addEventListener("resize", this.sync)
+            this.el.addEventListener("focusin", this.sync)
             this.el.addEventListener("focusout", this.onFocusOut)
-            this.mq.addEventListener("change", this.onBreakpointChange)
+            this.desktop.addEventListener("change", this.sync)
           },
-          syncHeight() {
-            if (this.mq.matches || !window.visualViewport) return
-            this.el.style.height = `${window.visualViewport.height}px`
+
+          // A patch resets the style attribute the server never renders.
+          updated() {
+            this.syncHeight()
           },
-          clearHeight() {
-            this.el.style.height = ""
-          },
+
           destroyed() {
-            window.visualViewport?.removeEventListener("resize", this.onViewportResize)
+            window.visualViewport?.removeEventListener("resize", this.sync)
+            this.el.removeEventListener("focusin", this.sync)
             this.el.removeEventListener("focusout", this.onFocusOut)
-            this.mq.removeEventListener("change", this.onBreakpointChange)
+            this.desktop.removeEventListener("change", this.sync)
+          },
+
+          pinned() {
+            const active = document.activeElement
+            return (
+              this.el.dataset.stage !== undefined &&
+              !this.desktop.matches &&
+              !!window.visualViewport &&
+              !!active &&
+              this.el.contains(active) &&
+              active.matches(TEXT_ENTRY)
+            )
+          },
+
+          syncHeight() {
+            if (this.pinned()) {
+              this.el.style.setProperty("--size-stage", `${window.visualViewport.height}px`)
+            } else {
+              this.el.style.removeProperty("--size-stage")
+            }
           }
         }
       </script>

@@ -72,6 +72,8 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   """
   use Phoenix.Component
 
+  alias Phoenix.LiveView.JS
+
   attr :id, :any, default: nil
   attr :class, :any, default: nil
   attr :players_first, :boolean, default: false
@@ -156,6 +158,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         id="game-drawer"
         aria-label="Players and chat"
         phx-hook=".Drawer"
+        phx-mounted={JS.ignore_attributes(["open"])}
         class="game-drawer [grid-area:players] bg-surface p-[var(--space-4)] overflow-y-auto border-t border-border lg:border-t-0 lg:border-l"
       >
         <div class="mb-[var(--space-3)] flex justify-end lg:hidden">
@@ -178,22 +181,22 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         // CSS forces `display:block` there regardless of the `open` attribute,
         // so the rail renders even before this hook mounts.
         //
-        // Every LiveView patch walks the whole page, and neither `open` nor the
-        // opener's `aria-expanded` are ever part of the server-rendered HTML —
-        // so a patch strips them back to their absent/false defaults on every
-        // single re-render while the drawer is open, exactly like `.MapViewport`
-        // resetting `viewBox` (world_map.ex's moduledoc). `updated()` restores
-        // the bare attribute directly rather than re-calling showModal()/show(),
-        // which would steal focus from whatever's focused inside the drawer
-        // (e.g. mid-keystroke in the chat input) on every unrelated broadcast.
+        // `open` is never part of the server-rendered HTML, so the dialog
+        // tells LiveView to leave it alone (`JS.ignore_attributes(["open"])`
+        // on mount): a patch then can't strip it while the drawer is open,
+        // and a modal opened with showModal() stays modal (backdrop, Escape,
+        // inert page). The opener does the same for its `aria-expanded`.
+        import {DESKTOP_QUERY} from "@/js/breakpoints"
+
         export default {
           mounted() {
-            this.mq = window.matchMedia("(min-width: 64rem)")
+            this.mq = window.matchMedia(DESKTOP_QUERY)
             this.opener = document.querySelector(`[aria-controls="${this.el.id}"]`)
             this.wantOpen = false
             this.chatCount = this.chatMessageCount()
 
             this.onModeChange = () => this.applyMode()
+            this.onOpenerClick = () => this.openDrawer()
             this.mq.addEventListener("change", this.onModeChange)
 
             this.el.addEventListener("close", () => this.onNativeClose())
@@ -202,13 +205,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
                 this.el.close()
               }
             })
-            this.opener?.addEventListener("click", () => this.openDrawer())
+            this.opener?.addEventListener("click", this.onOpenerClick)
 
             this.applyMode()
           },
 
           destroyed() {
             this.mq.removeEventListener("change", this.onModeChange)
+            this.opener?.removeEventListener("click", this.onOpenerClick)
           },
 
           chatMessageCount() {
@@ -263,16 +267,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
             this.opener?.querySelector("[data-unread-dot]")?.classList.remove("hidden")
           },
 
+          // Only the unread dot needs work after a patch: `open` and the
+          // opener's `aria-expanded` are ignored by LiveView's patching (see
+          // above), so they already survive it.
           updated() {
-            const shouldBeOpen = this.mq.matches || this.wantOpen
-
-            if (shouldBeOpen !== this.el.hasAttribute("open")) {
-              if (shouldBeOpen) this.el.setAttribute("open", "")
-              else this.el.removeAttribute("open")
-            }
-
-            if (!this.mq.matches) this.syncExpanded(this.wantOpen)
-
             const count = this.chatMessageCount()
             if (count > this.chatCount && !this.mq.matches && !this.wantOpen) {
               this.showUnread()

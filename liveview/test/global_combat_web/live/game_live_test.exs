@@ -433,15 +433,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
            )
   end
 
-  test "the board surface carries the keyboard-inset hook (mobile-battle-mode.md WP5)", %{
-    conn: conn1
-  } do
+  test "the keyboard-inset hook wraps the whole stage shell, dock included (mobile-battle-mode.md WP5)",
+       %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
 
+    # The amount field lives in the dock, a sibling of the board's <main>, so
+    # the hook has to sit above the whole shell to see it take focus.
     assert has_element?(
              alice_view,
-             ~s(#game-board-surface[phx-hook="GlobalCombatWeb.GameLive.StageViewport"])
+             "#game-viewport[data-stage] > #game-board .game-dock #turn-controls"
+           )
+
+    assert has_element?(
+             alice_view,
+             ~s(#game-viewport[phx-hook="GlobalCombatWeb.GameLive.StageViewport"])
            )
   end
 
@@ -1490,6 +1496,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
              )
 
       assert has_element?(alice_view, "#drawer-open [data-unread-dot].hidden")
+
+      # The drawer's `open`, the opener's `aria-expanded` and the dot's class
+      # are client-side state LiveView must not patch away (a reopened dialog
+      # would otherwise lose its modality): each is marked ignored on mount.
+      assert has_element?(
+               alice_view,
+               ~s(dialog#game-drawer[phx-mounted*="ignore_attrs"][phx-mounted*="open"])
+             )
+
+      assert has_element?(alice_view, ~s(#drawer-open[phx-mounted*="aria-expanded"]))
+
+      assert has_element?(
+               alice_view,
+               ~s(#drawer-open [data-unread-dot][phx-mounted*="ignore_attrs"])
+             )
     end
   end
 
