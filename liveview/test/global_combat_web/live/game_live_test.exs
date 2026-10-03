@@ -165,6 +165,11 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#{roster} span", "Score")
       refute has_element?(alice_view, roster, "Thinking")
       refute has_element?(alice_view, "li span", "Done")
+      # Final standings read in finishing order, and Bob's always-zero totals
+      # (elimination zeroes them) are left off rather than shown as "0 (0)".
+      assert has_element?(alice_view, "#player-list li:nth-child(1)", "Alice")
+      assert has_element?(alice_view, "#player-list li:nth-child(2)", "Bob")
+      refute has_element?(alice_view, "#player-list li:nth-child(2)", "0 (0)")
     end
 
     test "a spectator sees the winner named in the headline and no personal outcome line",
@@ -831,7 +836,11 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
       refute has_element?(alice_view, ~s([aria-label="Actions"] #quit-button))
-      assert has_element?(alice_view, ~s([aria-label="Actions"] #turn-controls-quit.max-lg\\:hidden))
+
+      assert has_element?(
+               alice_view,
+               ~s([aria-label="Actions"] #turn-controls-quit.max-lg\\:hidden)
+             )
     end
 
     test "a spectator viewing a live game does not crash the dock (no seated player, nothing selected)",
@@ -843,6 +852,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       refute has_element?(spectator, "#turn-controls")
       refute has_element?(spectator, ~s([aria-label="Actions"] button), "End Turn")
+      # No empty, bordered "Actions" sheet for someone with nothing to do.
+      refute has_element?(spectator, ~s([aria-label="Actions"]))
+      assert has_element?(spectator, "main[data-stage]")
     end
 
     test "an ended game does not use stage: no dock, no data-stage shell, and Quit is gone",
@@ -1243,6 +1255,26 @@ defmodule GlobalCombatWeb.GameLiveTest do
   end
 
   describe "Invite/Quit/Kick (GIF-114)" do
+    test "the lobby's actions and invite form carry stable ids", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      assert has_element?(view, "#lobby-start", "Start Game")
+      assert has_element?(view, "#lobby-quit", "Quit")
+      assert has_element?(view, "#invite-form #invite-submit", "Invite")
+
+      view |> form("#invite-form", %{login: bob.name}) |> render_submit()
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
+
+      {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+      assert has_element?(spectator, "#lobby-join", "Join")
+    end
+
     test "a seated player inviting an existing account by name lands it on the invitee's pending invites",
          %{conn: conn} do
       alice = account_fixture(%{"name" => "Alice"})
@@ -1422,7 +1454,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # Above lg nothing changes (mobile-battle-mode.md §2): Quit stays in
       # #turn-controls there and is hidden below lg, while the drawer's copy
       # is the below-lg one only — exactly one visible per breakpoint.
-      assert has_element?(alice_view, "#turn-controls #turn-controls-quit.max-lg\\:hidden", "Quit")
+      assert has_element?(
+               alice_view,
+               "#turn-controls #turn-controls-quit.max-lg\\:hidden",
+               "Quit"
+             )
+
       assert has_element?(alice_view, "#turn-controls button", "End Turn")
       assert has_element?(alice_view, "#turn-controls button", "Force Turn")
 

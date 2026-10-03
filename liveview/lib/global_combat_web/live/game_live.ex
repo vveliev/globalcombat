@@ -587,7 +587,10 @@ defmodule GlobalCombatWeb.GameLive do
           </div>
         </:board>
 
-        <:dock :if={@stage}>
+        <%!-- Seated players only: a spectator has no orders to compose and no
+        turn to end, so an always-present slot would render an empty,
+        bordered "Actions" sheet for them. --%>
+        <:dock :if={@stage && @view.viewer_number}>
           {dock(assigns)}
         </:dock>
 
@@ -945,9 +948,15 @@ defmodule GlobalCombatWeb.GameLive do
       class="flex items-center gap-[var(--space-2)]"
     >
       <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
-        <Button.button type="button" data-replay-play>Turn {@turn} results ▶</Button.button>
-        <Button.button type="button" intent="neutral" data-replay-back>◀ Step</Button.button>
-        <Button.button type="button" intent="neutral" data-replay-forward>Step ▶</Button.button>
+        <Button.button id="turn-replay-play" type="button" data-replay-play>
+          Turn {@turn} results ▶
+        </Button.button>
+        <Button.button id="turn-replay-back" type="button" intent="neutral" data-replay-back>
+          ◀ Step
+        </Button.button>
+        <Button.button id="turn-replay-forward" type="button" intent="neutral" data-replay-forward>
+          Step ▶
+        </Button.button>
       </span>
       <span id="turn-replay-announce" class="sr-only"></span>
     </div>
@@ -966,6 +975,7 @@ defmodule GlobalCombatWeb.GameLive do
       <div class="flex gap-[var(--space-3)]">
         <Button.button
           :if={@view.viewer_number == nil}
+          id="lobby-join"
           phx-click="join"
           disabled={length(@view.players) >= @view.max_players}
         >
@@ -973,17 +983,28 @@ defmodule GlobalCombatWeb.GameLive do
         </Button.button>
         <Button.button
           :if={@view.viewer_number == 1}
+          id="lobby-start"
           intent="primary"
           phx-click="start"
           disabled={length(@view.players) < 2}
         >
           Start Game
         </Button.button>
-        <Button.button :if={@view.viewer_number != nil} intent="neutral" phx-click="quit">
+        <Button.button
+          :if={@view.viewer_number != nil}
+          id="lobby-quit"
+          intent="neutral"
+          phx-click="quit"
+        >
           Quit
         </Button.button>
       </div>
-      <form :if={@view.viewer_number != nil} phx-submit="invite" class="flex gap-[var(--space-2)]">
+      <form
+        :if={@view.viewer_number != nil}
+        id="invite-form"
+        phx-submit="invite"
+        class="flex gap-[var(--space-2)]"
+      >
         <Input.input
           id="invite-login"
           name="login"
@@ -992,7 +1013,7 @@ defmodule GlobalCombatWeb.GameLive do
           placeholder="Username or email"
           class="min-w-0"
         />
-        <Button.button type="submit">Invite</Button.button>
+        <Button.button id="invite-submit" type="submit">Invite</Button.button>
       </form>
     </div>
     """
@@ -1066,11 +1087,17 @@ defmodule GlobalCombatWeb.GameLive do
       id="turn-controls"
       class="flex flex-col gap-[var(--space-2)] sm:flex-row"
     >
-      <Button.button :if={!my_player(@view).done} class="w-full sm:w-auto" phx-click="done">
+      <Button.button
+        :if={!my_player(@view).done}
+        id="end-turn-button"
+        class="w-full sm:w-auto"
+        phx-click="done"
+      >
         End Turn
       </Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button
+        id="force-turn-button"
         intent="neutral"
         class="w-full sm:w-auto"
         phx-click="force_turn"
@@ -1504,9 +1531,15 @@ defmodule GlobalCombatWeb.GameLive do
     default: nil,
     doc: "the game's map, once known — in play each player's board colour gets a legend dot"
 
+  # Once the game has ended the roster is the final standings, so it reads in
+  # finishing order (legacy `_PlayerList.cshtml` sorts by `Place`) — seat
+  # order otherwise. An eliminated player's totals are always "0 (0)" (the
+  # engine zeroes them), never informative, so they are left off.
   defp player_list(assigns) do
+    assigns = assign(assigns, :players, roster_order(assigns.players, assigns.ended))
+
     ~H"""
-    <ul aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
+    <ul id="player-list" aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class="flex items-center gap-[var(--space-2)]">
           <span
@@ -1520,7 +1553,7 @@ defmodule GlobalCombatWeb.GameLive do
         <span :if={@ended} class="flex items-center gap-[var(--space-2)]">
           <span :if={p.place == 1} aria-hidden="true">🏆</span>
           <span class="text-text-muted">{ordinal(p.place)}</span>
-          <span class="text-text-muted">{p.armies} ({p.areas})</span>
+          <span :if={has_totals?(p)} class="text-text-muted">{p.armies} ({p.areas})</span>
           <span class="text-text-muted">Score {p.score}</span>
         </span>
         <span :if={!@ended} class="flex items-center gap-[var(--space-2)]">
@@ -1544,6 +1577,12 @@ defmodule GlobalCombatWeb.GameLive do
     </ul>
     """
   end
+
+  # Unplaced seats (place 0) sort last, after every finisher.
+  defp roster_order(players, true), do: Enum.sort_by(players, &{&1.place == 0, &1.place})
+  defp roster_order(players, false), do: players
+
+  defp has_totals?(player), do: (player.armies || 0) > 0 or (player.areas || 0) > 0
 
   attr :messages, :list, required: true
   attr :chat_form, Phoenix.HTML.Form, required: true
