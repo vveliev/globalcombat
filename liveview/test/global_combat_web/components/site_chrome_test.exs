@@ -20,12 +20,16 @@ defmodule GlobalCombatWeb.Components.SiteChromeTest do
   test "the sidebar renders a lg:-only nav plus a details disclosure that's hidden at lg:", %{
     conn: conn
   } do
-    html = conn |> get(~p"/") |> html_response(200)
+    doc = conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
 
-    assert html =~ ~r/<nav[^>]*class="[^"]*\bhidden\b[^"]*\blg:flex\b[^"]*"/
-    assert html =~ ~r/<details[^>]*class="[^"]*\blg:hidden\b[^"]*"/
-    assert html =~ ~r/<summary[^>]*class="[^"]*\[&::-webkit-details-marker\]:hidden[^"]*"/
-    refute html =~ ~r/<details[^>]*\sopen/
+    assert doc |> LazyHTML.query(~s(nav[class~="hidden"][class~="lg:flex"])) |> Enum.any?()
+    assert doc |> LazyHTML.query(~s(details[class~="lg:hidden"])) |> Enum.any?()
+
+    assert doc
+           |> LazyHTML.query(~s(summary[class~="[&::-webkit-details-marker]:hidden"]))
+           |> Enum.any?()
+
+    assert doc |> LazyHTML.query("details[open]") |> Enum.empty?()
   end
 
   describe "active sidebar link" do

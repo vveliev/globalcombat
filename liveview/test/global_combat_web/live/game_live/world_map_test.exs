@@ -205,6 +205,73 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
     end
   end
 
+  describe "keyboard navigation (roving tabindex)" do
+    defp tabindex(html, id) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query_by_id(id)
+      |> LazyHTML.attribute("tabindex")
+    end
+
+    test "only one territory is in the Tab order: the first area when nothing is selected" do
+      assigns = %{areas: [board_area(1), board_area(2), board_area(3)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      assert tabindex(html, "territory-1") == ["0"]
+      assert tabindex(html, "territory-2") == ["-1"]
+      assert tabindex(html, "territory-3") == ["-1"]
+    end
+
+    test "the Tab stop follows the selected area" do
+      assigns = %{areas: [board_area(1), board_area(2)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} selected_area={2} />
+        """)
+
+      assert tabindex(html, "territory-1") == ["-1"]
+      assert tabindex(html, "territory-2") == ["0"]
+    end
+
+    test "each territory carries its label anchor for spatial arrow-key moves" do
+      assigns = %{areas: [board_area(1)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      {x, y} = GlobalCombatWeb.GameLive.MapGeometry.label(:original, 1)
+      assert LazyHTML.attribute(territory(html), "data-cx") == [to_string(x)]
+      assert LazyHTML.attribute(territory(html), "data-cy") == [to_string(y)]
+    end
+  end
+
+  describe "replay hook surface" do
+    test "the svg carries the replay hook and each army count its own id and server value" do
+      assigns = %{areas: [board_area(1, armies: 7)], players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map map_name={:original} areas={@areas} players={@players} />
+        """)
+
+      document = LazyHTML.from_fragment(html)
+      svg = LazyHTML.query(document, "#world-map svg#world-map-board")
+      assert [hook] = LazyHTML.attribute(svg, "phx-hook")
+      assert hook =~ ~r/MapReplay$/
+
+      count = LazyHTML.query(document, "svg text#territory-count-1.world-map-count")
+      assert LazyHTML.attribute(count, "data-area") == ["1"]
+      assert LazyHTML.attribute(count, "data-armies") == ["7"]
+    end
+  end
+
   describe "region bonus legend" do
     for map_name <- [:original, :elements] do
       test "#{map_name}: lists every region's bonus in one aria-hidden legend inside the view box" do
@@ -355,6 +422,103 @@ defmodule GlobalCombatWeb.GameLive.WorldMapTest do
       for number <- @australia do
         assert fills[number].owner == WorldMap.owner_slot(nil)
       end
+    end
+  end
+
+  describe ":frontier lens" do
+    # Elements map links are not all symmetric: 7 ("Steam") links to 8
+    # ("Carbon Oxidization"), but 8 does not link back. So a viewer holding 8
+    # never gets 7 revealed by adjacency, yet 7's own outbound link reaches
+    # the viewer's border.
+    defp elements_area(number, opts) do
+      {^number, name, _region, links} =
+        Enum.find(GlobalCombat.Engine.MapInfo.areas(:elements), &(elem(&1, 0) == number))
+
+      board_area(number, Keyword.merge([name: name, adjacent: links], opts))
+    end
+
+    defp one_way_frontier_areas do
+      [
+        elements_area(7, owner_number: nil, visible: false, armies: nil),
+        elements_area(8, owner_number: 1, armies: 5),
+        elements_area(9, owner_number: 2, armies: 3)
+      ]
+    end
+
+    test "a fogged enemy area linking one-way into the viewer's border stays off the frontier" do
+      fills = WorldMap.fills(:frontier, one_way_frontier_areas(), :elements, 1)
+
+      assert fills[7].dim
+      assert fills[7].delta == nil
+      refute fills[8].dim
+      assert fills[8].delta == 2
+      refute fills[9].dim
+      assert fills[9].delta == -2
+    end
+
+    test "rendering the board with that one-way fogged link does not crash" do
+      assigns = %{areas: one_way_frontier_areas(), players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map
+          map_name={:elements}
+          areas={@areas}
+          players={@players}
+          lens={:frontier}
+          viewer_number={1}
+        />
+        """)
+
+      document = LazyHTML.from_fragment(html)
+
+      assert document |> LazyHTML.query(~s(#territory-7[data-frontier="dim"])) |> Enum.count() ==
+               1
+
+      assert document |> LazyHTML.query("#territory-8:not([data-frontier])") |> Enum.count() == 1
+    end
+
+    test "falls back to the owner lens when the viewer has no frontier at all" do
+      owns_everything = [
+        board_area(1, owner_number: 1, armies: 4, adjacent: [2]),
+        board_area(2, owner_number: 1, armies: 3, adjacent: [1])
+      ]
+
+      eliminated = [
+        board_area(1, owner_number: 2, armies: 4, adjacent: [2]),
+        board_area(2, owner_number: 2, armies: 3, adjacent: [1])
+      ]
+
+      assert WorldMap.effective_lens(:frontier, owns_everything, 1) == :owner
+      assert WorldMap.effective_lens(:frontier, eliminated, 1) == :owner
+      assert WorldMap.effective_lens(:frontier, owns_everything, nil) == :owner
+
+      assigns = %{areas: owns_everything, players: players()}
+
+      html =
+        rendered_to_string(~H"""
+        <WorldMap.world_map
+          map_name={:original}
+          areas={@areas}
+          players={@players}
+          lens={:frontier}
+          viewer_number={1}
+        />
+        """)
+
+      assert html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("[data-frontier]")
+             |> Enum.empty?()
+    end
+
+    test "keeps the frontier lens when the viewer does have a border" do
+      areas = [
+        board_area(1, owner_number: 1, armies: 4, adjacent: [2]),
+        board_area(2, owner_number: 2, armies: 3, adjacent: [1])
+      ]
+
+      assert WorldMap.effective_lens(:frontier, areas, 1) == :frontier
     end
   end
 end

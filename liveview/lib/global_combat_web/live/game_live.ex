@@ -525,111 +525,124 @@ defmodule GlobalCombatWeb.GameLive do
       page_title={"Game #{@game_id}"}
       immersive={@stage}
     >
-      <GameLayout.game_layout
-        id="game-board"
-        players_first={@status == :playing && @view.ended}
-        stage={@stage}
-        phx-hook=".FocusManager"
-      >
-        <:status>
-          <span id="game-status">{status_line(assigns)}</span>
-          <form :if={@status == :playing} id="lens-form" phx-change="set_lens">
-            <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
-              <:option value="owner">Owner</:option>
-              <:option value="region">Region control</:option>
-              <:option value="frontier">Frontier</:option>
-            </SegmentedControl.segmented_control>
-          </form>
-          <div class="ml-auto flex items-center gap-[var(--space-2)]">
-            <button
-              type="button"
-              id="drawer-open"
-              aria-controls="game-drawer"
-              aria-expanded="false"
-              class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
-            >
-              Players
-              <span
-                data-unread-dot
-                aria-hidden="true"
-                class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-red-600"
-              />
-            </button>
-            <button
-              id="fullscreen-toggle"
-              type="button"
-              phx-hook=".Fullscreen"
-              aria-pressed="false"
-              aria-label="Full screen"
-              class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-            >
-              <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
-            </button>
-          </div>
-        </:status>
+      <%!-- The keyboard-inset wrapper (.StageViewport, below): it contains the
+      whole shell — board, dock and drawer — so it sees focus land in the dock's
+      amount field, and overriding --size-stage here resizes the shell. --%>
+      <div id="game-viewport" phx-hook=".StageViewport" data-stage={@stage}>
+        <GameLayout.game_layout
+          id="game-board"
+          players_first={@status == :playing && @view.ended}
+          stage={@stage}
+          phx-hook=".FocusManager"
+        >
+          <:status>
+            <span id="game-status">{status_line(assigns)}</span>
+            <form :if={@status == :playing} id="lens-form" phx-change="set_lens">
+              <SegmentedControl.segmented_control name="lens" label="Map lens" value={@lens}>
+                <:option value="owner">Owner</:option>
+                <:option value="region">Region control</:option>
+                <:option value="frontier">Frontier</:option>
+              </SegmentedControl.segmented_control>
+            </form>
+            <div class="ml-auto flex items-center gap-[var(--space-2)]">
+              <button
+                type="button"
+                id="drawer-open"
+                aria-controls="game-drawer"
+                aria-expanded="false"
+                phx-mounted={JS.ignore_attributes(["aria-expanded"])}
+                class="relative rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
+              >
+                Players
+                <span
+                  data-unread-dot
+                  aria-hidden="true"
+                  phx-mounted={JS.ignore_attributes(["class"])}
+                  class="hidden absolute -right-1 -top-1 size-2.5 rounded-full bg-danger"
+                />
+              </button>
+              <button
+                id="fullscreen-toggle"
+                type="button"
+                phx-hook=".Fullscreen"
+                aria-pressed="false"
+                aria-label="Full screen"
+                class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+              >
+                <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
+              </button>
+            </div>
+          </:status>
 
-        <:board>
-          <%!-- h-full: stage mode's <main> (GameLayout) is the definite-height grid
+          <:board>
+            <%!-- h-full: stage mode's <main> (GameLayout) is the definite-height grid
           row the board's own figure/`.world-map`/<svg> height chain needs
           (board/1's moduledoc) — without it here, this wrapper's own
           auto-by-default height would break that chain one level up. Outside
           stage mode <main> has no definite height either, so this resolves to
           plain `auto` there (CSS percentage-height-of-indefinite-ancestor
           rule) — a no-op. --%>
-          <div id="game-board-surface" phx-hook=".StageViewport" class="h-full">
-            <Layouts.flash_group flash={@flash} />
-            <%= case @status do %>
-              <% :lobby -> %>
-                {lobby(assigns)}
-              <% :playing -> %>
-                {board(assigns)}
+            <div id="game-board-surface" class="h-full">
+              <Layouts.flash_group flash={@flash} />
+              <%= case @status do %>
+                <% :lobby -> %>
+                  {lobby(assigns)}
+                <% :playing -> %>
+                  {board(assigns)}
+              <% end %>
+            </div>
+          </:board>
+
+          <%!-- Seated players only: a spectator has no orders to compose and no
+        turn to end, so an always-present slot would render an empty,
+        bordered "Actions" sheet for them. --%>
+          <:dock :if={@stage && @view.viewer_number}>
+            {dock(assigns)}
+          </:dock>
+
+          <:players>
+            <.player_list
+              players={@view.players}
+              viewer_number={@view.viewer_number}
+              status={@status}
+              ended={@status == :playing and @view.ended}
+              map_name={Map.get(@view, :map_name)}
+            />
+            <%= if @status == :playing do %>
+              {players_extras(assigns)}
             <% end %>
-          </div>
-        </:board>
-
-        <:dock :if={@stage}>
-          {dock(assigns)}
-        </:dock>
-
-        <:players>
-          <.player_list
-            players={@view.players}
-            viewer_number={@view.viewer_number}
-            status={@status}
-            ended={@status == :playing and @view.ended}
-            map_name={Map.get(@view, :map_name)}
-          />
-          <%= if @status == :playing do %>
-            {players_extras(assigns)}
-          <% end %>
-          <.chat
-            messages={Map.get(@view, :messages, [])}
-            chat_form={@chat_form}
-            logged_in={!!@current_account}
-          />
-          <%!-- Unconditional, not lg:hidden: :players renders once, inside the one
-          <dialog> GameLayout shows as the mobile drawer and the lg: rail alike
-          (GameLayout's moduledoc), so a single Quit button here is already
-          exactly one on both — stage mode's :dock (above) already emptied
-          #turn-controls of everything but End Turn/Force Turn, so there's no
-          second desktop Quit left to collide with. --%>
-          <Button.button
-            :if={
-              @status == :playing && @view.viewer_number && !@view.ended &&
-                !my_player(@view).eliminated
-            }
-            id="quit-button"
-            intent="danger"
-            phx-click="quit"
-            class="mt-[var(--space-4)]"
-          >
-            Quit
-          </Button.button>
-          <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
-            <.sidebar_links current_account={@current_account} current_path={assigns[:current_path]} />
-          </div>
-        </:players>
-      </GameLayout.game_layout>
+            <.chat
+              messages={Map.get(@view, :messages, [])}
+              chat_form={@chat_form}
+              logged_in={!!@current_account}
+            />
+            <%!-- Below lg only: there Quit lives in the drawer so it can't be hit
+          by accident from the dock (docs/mobile-battle-mode.md §2, rule 3).
+          :players renders once, inside the one <dialog> GameLayout shows as
+          the mobile drawer and the lg: rail alike, so lg:hidden keeps the
+          desktop rail unchanged — above lg Quit stays in #turn-controls
+          (dock/1), where it has always been ("above lg nothing changes"). --%>
+            <Button.button
+              :if={
+                @status == :playing && @view.viewer_number && !@view.ended &&
+                  !my_player(@view).eliminated
+              }
+              id="quit-button"
+              intent="danger"
+              phx-click="quit"
+              class="mt-[var(--space-4)] lg:hidden"
+            >
+              Quit
+            </Button.button>
+            <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
+              <.sidebar_links
+                current_account={@current_account}
+                current_path={assigns[:current_path]}
+              />
+            </div>
+          </:players>
+        </GameLayout.game_layout>
+      </div>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".FocusManager">
         // Join/Start/End Turn/Force Turn all swap out significant subtrees
         // (lobby -> board, a button disappearing once its action no longer
@@ -693,34 +706,64 @@ defmodule GlobalCombatWeb.GameLive do
         }
       </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".StageViewport">
-        // Software keyboards shrink the visual viewport without shrinking the
-        // layout viewport, so a focused input's containing block doesn't
-        // shrink with it and whatever sits below it (the amount stepper's
-        // Assign/Attack button) can end up under the keyboard. Pinning this
-        // wrapper's height to `visualViewport.height` while it holds focus
-        // keeps that content in view. Below `lg` only — same breakpoint the
-        // rest of mobile battle mode collapses at (`--size-collapse`).
+        // iOS Safari's soft keyboard shrinks the visual viewport but not the
+        // layout viewport, so the stage shell (`h-[var(--size-stage)]`, i.e.
+        // 100dvh) keeps its full height and the dock at its bottom — the
+        // amount field and its Assign/Attack button — ends up under the
+        // keyboard. While a text field inside the shell has focus below
+        // `lg`, this sets `--size-stage` on this wrapper to
+        // `visualViewport.height`, so the shell (and its dock) fits above
+        // the keyboard (docs/mobile-battle-mode.md §2 rule 6, §4.6). Android
+        // already resizes the layout (`interactive-widget=resizes-content`),
+        // where the override simply matches. Cleared again once focus leaves
+        // the field, above `lg`, and outside stage mode (`data-stage`).
+        import {DESKTOP_QUERY} from "@/js/breakpoints"
+
+        const TEXT_ENTRY =
+          "input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea"
+
         export default {
           mounted() {
-            this.mq = window.matchMedia("(min-width: 64rem)")
-            this.onViewportResize = () => this.syncHeight()
-            this.onFocusOut = () => this.clearHeight()
-            this.onBreakpointChange = () => this.clearHeight()
-            window.visualViewport?.addEventListener("resize", this.onViewportResize)
+            this.desktop = window.matchMedia(DESKTOP_QUERY)
+            this.sync = () => this.syncHeight()
+            // document.activeElement only settles after focusout has fired.
+            this.onFocusOut = () => requestAnimationFrame(this.sync)
+            window.visualViewport?.addEventListener("resize", this.sync)
+            this.el.addEventListener("focusin", this.sync)
             this.el.addEventListener("focusout", this.onFocusOut)
-            this.mq.addEventListener("change", this.onBreakpointChange)
+            this.desktop.addEventListener("change", this.sync)
           },
-          syncHeight() {
-            if (this.mq.matches || !window.visualViewport) return
-            this.el.style.height = `${window.visualViewport.height}px`
+
+          // A patch resets the style attribute the server never renders.
+          updated() {
+            this.syncHeight()
           },
-          clearHeight() {
-            this.el.style.height = ""
-          },
+
           destroyed() {
-            window.visualViewport?.removeEventListener("resize", this.onViewportResize)
+            window.visualViewport?.removeEventListener("resize", this.sync)
+            this.el.removeEventListener("focusin", this.sync)
             this.el.removeEventListener("focusout", this.onFocusOut)
-            this.mq.removeEventListener("change", this.onBreakpointChange)
+            this.desktop.removeEventListener("change", this.sync)
+          },
+
+          pinned() {
+            const active = document.activeElement
+            return (
+              this.el.dataset.stage !== undefined &&
+              !this.desktop.matches &&
+              !!window.visualViewport &&
+              !!active &&
+              this.el.contains(active) &&
+              active.matches(TEXT_ENTRY)
+            )
+          },
+
+          syncHeight() {
+            if (this.pinned()) {
+              this.el.style.setProperty("--size-stage", `${window.visualViewport.height}px`)
+            } else {
+              this.el.style.removeProperty("--size-stage")
+            }
           }
         }
       </script>
@@ -734,6 +777,13 @@ defmodule GlobalCombatWeb.GameLive do
         // turn (comparing `data-turn`) whether or not the *previous* turn had
         // any visible events of its own.
         //
+        // This hook only owns its own buttons and announcement. Where the
+        // replay is goes out as a `gc:replay` window event
+        // (`{current, animate, counts}`); the board (`WorldMap`'s
+        // `.MapReplay`) and the results list (`.TurnResultsList`) each apply
+        // it to their own markup and re-apply it after LiveView patches them.
+        // `gc:replay-sync` asks for a resend (a listener mounting late).
+        //
         // Delegates clicks from the wrapper rather than binding the buttons
         // directly: the buttons themselves come and go (rendered only when
         // `@steps != []`), but this element's `id` never does, so LiveView
@@ -744,6 +794,8 @@ defmodule GlobalCombatWeb.GameLive do
             this.timer = null
             this.seenTurn = this.el.dataset.turn
             this.el.addEventListener("click", (e) => this.onClick(e))
+            this.onSync = () => this.broadcast()
+            window.addEventListener("gc:replay-sync", this.onSync)
             this.render()
           },
 
@@ -772,6 +824,7 @@ defmodule GlobalCombatWeb.GameLive do
 
           destroyed() {
             this.stop()
+            window.removeEventListener("gc:replay-sync", this.onSync)
           },
 
           onClick(e) {
@@ -808,44 +861,28 @@ defmodule GlobalCombatWeb.GameLive do
             this.render()
           },
 
-          render() {
-            const steps = this.steps()
-            const animate = !this.reducedMotion()
-            const board = document.getElementById("world-map-replay")
-
-            if (board) {
-              board.classList.toggle("world-map-replay--js", animate)
-
-              board.querySelectorAll("[data-step]").forEach((el) => {
-                const step = Number(el.dataset.step)
-                el.classList.toggle("is-revealed", step <= this.current)
-
-                if (el.classList.contains("world-map-replay-pulse")) {
-                  // Landing on the capture step always shows *some* indicator —
-                  // reduced motion (media query, `app.css`) drops the animating
-                  // keyframe but keeps a static ring rather than suppressing it
-                  // outright, so "no animation" doesn't also mean "no signal".
-                  el.classList.remove("is-active")
-                  if (step === this.current) { void el.offsetWidth; el.classList.add("is-active") }
-                }
-              })
-            }
-
-            document.querySelectorAll("#turn-results-list [data-step]").forEach((el) => {
-              const step = Number(el.dataset.step)
-              el.classList.toggle("is-current", step === this.current)
-              if (step === this.current) el.setAttribute("aria-current", "step")
-              else el.removeAttribute("aria-current")
-            })
-
+          // The running army count of every area touched up to the current
+          // step; areas no step has touched yet keep their live count.
+          counts(steps) {
             const counts = {}
             for (let i = 0; i <= this.current; i++) {
               (steps[i]?.counts || []).forEach(({area, value}) => { counts[area] = value })
             }
-            Object.entries(counts).forEach(([area, value]) => {
-              const el = document.querySelector(`#territory-${area} .world-map-count`)
-              if (el?.firstChild) el.firstChild.textContent = value
-            })
+            return counts
+          },
+
+          broadcast() {
+            const detail = {
+              current: this.current,
+              animate: !this.reducedMotion(),
+              counts: this.counts(this.steps())
+            }
+            window.dispatchEvent(new CustomEvent("gc:replay", { detail }))
+          },
+
+          render() {
+            const steps = this.steps()
+            this.broadcast()
 
             const announce = document.getElementById("turn-replay-announce")
             if (announce) announce.textContent = this.current >= 0 ? (steps[this.current]?.text || "") : ""
@@ -854,6 +891,40 @@ defmodule GlobalCombatWeb.GameLive do
             const forward = this.el.querySelector("[data-replay-forward]")
             if (back) back.disabled = this.current <= -1
             if (forward) forward.disabled = this.current >= steps.length - 1
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".TurnResultsList">
+        // Marks the step the replay is on in the accessible results list
+        // (`turn_results/1`), from `.TurnReplay`'s `gc:replay` broadcast, and
+        // re-applies it after LiveView patches the list (the drawer it sits
+        // in re-renders on every chat message).
+        export default {
+          mounted() {
+            this.current = -1
+            this.onReplay = (e) => {
+              this.current = e.detail.current
+              this.apply()
+            }
+            window.addEventListener("gc:replay", this.onReplay)
+            window.dispatchEvent(new CustomEvent("gc:replay-sync"))
+          },
+
+          updated() {
+            this.apply()
+          },
+
+          destroyed() {
+            window.removeEventListener("gc:replay", this.onReplay)
+          },
+
+          apply() {
+            this.el.querySelectorAll("[data-step]").forEach((el) => {
+              const isCurrent = Number(el.dataset.step) === this.current
+              el.classList.toggle("is-current", isCurrent)
+              if (isCurrent) el.setAttribute("aria-current", "step")
+              else el.removeAttribute("aria-current")
+            })
           }
         }
       </script>
@@ -945,9 +1016,15 @@ defmodule GlobalCombatWeb.GameLive do
       class="flex items-center gap-[var(--space-2)]"
     >
       <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
-        <Button.button type="button" data-replay-play>Turn {@turn} results ▶</Button.button>
-        <Button.button type="button" intent="neutral" data-replay-back>◀ Step</Button.button>
-        <Button.button type="button" intent="neutral" data-replay-forward>Step ▶</Button.button>
+        <Button.button id="turn-replay-play" type="button" data-replay-play>
+          Turn {@turn} results ▶
+        </Button.button>
+        <Button.button id="turn-replay-back" type="button" intent="neutral" data-replay-back>
+          ◀ Step
+        </Button.button>
+        <Button.button id="turn-replay-forward" type="button" intent="neutral" data-replay-forward>
+          Step ▶
+        </Button.button>
       </span>
       <span id="turn-replay-announce" class="sr-only"></span>
     </div>
@@ -966,6 +1043,7 @@ defmodule GlobalCombatWeb.GameLive do
       <div class="flex gap-[var(--space-3)]">
         <Button.button
           :if={@view.viewer_number == nil}
+          id="lobby-join"
           phx-click="join"
           disabled={length(@view.players) >= @view.max_players}
         >
@@ -973,17 +1051,28 @@ defmodule GlobalCombatWeb.GameLive do
         </Button.button>
         <Button.button
           :if={@view.viewer_number == 1}
+          id="lobby-start"
           intent="primary"
           phx-click="start"
           disabled={length(@view.players) < 2}
         >
           Start Game
         </Button.button>
-        <Button.button :if={@view.viewer_number != nil} intent="neutral" phx-click="quit">
+        <Button.button
+          :if={@view.viewer_number != nil}
+          id="lobby-quit"
+          intent="neutral"
+          phx-click="quit"
+        >
           Quit
         </Button.button>
       </div>
-      <form :if={@view.viewer_number != nil} phx-submit="invite" class="flex gap-[var(--space-2)]">
+      <form
+        :if={@view.viewer_number != nil}
+        id="invite-form"
+        phx-submit="invite"
+        class="flex gap-[var(--space-2)]"
+      >
         <Input.input
           id="invite-login"
           name="login"
@@ -992,7 +1081,7 @@ defmodule GlobalCombatWeb.GameLive do
           placeholder="Username or email"
           class="min-w-0"
         />
-        <Button.button type="submit">Invite</Button.button>
+        <Button.button id="invite-submit" type="submit">Invite</Button.button>
       </form>
     </div>
     """
@@ -1066,16 +1155,33 @@ defmodule GlobalCombatWeb.GameLive do
       id="turn-controls"
       class="flex flex-col gap-[var(--space-2)] sm:flex-row"
     >
-      <Button.button :if={!my_player(@view).done} class="w-full sm:w-auto" phx-click="done">
+      <Button.button
+        :if={!my_player(@view).done}
+        id="end-turn-button"
+        class="w-full sm:w-auto"
+        phx-click="done"
+      >
         End Turn
       </Button.button>
       <span :if={my_player(@view).done} class="text-text-muted">Waiting on other players…</span>
       <Button.button
+        id="force-turn-button"
         intent="neutral"
         class="w-full sm:w-auto"
         phx-click="force_turn"
       >
         Force Turn
+      </Button.button>
+      <%!-- Desktop only: below lg the drawer carries Quit instead (the
+      #quit-button in render_game/1's :players slot). --%>
+      <Button.button
+        :if={!my_player(@view).eliminated}
+        id="turn-controls-quit"
+        intent="neutral"
+        class="max-lg:hidden"
+        phx-click="quit"
+      >
+        Quit
       </Button.button>
     </div>
     """
@@ -1347,8 +1453,9 @@ defmodule GlobalCombatWeb.GameLive do
   # The accessible equivalent of the board's replay arrows/counts — every
   # `GameLive.Replay.steps/4` line as ordinary, always-present text next to the
   # board (works with no JS, and is exactly what `prefers-reduced-motion` falls
-  # back to). The `.TurnReplay` hook toggles `aria-current`/`.is-current` on each
-  # `<li>` as the sighted replay steps through them; nothing here depends on it.
+  # back to). The `.TurnResultsList` hook toggles `aria-current`/`.is-current`
+  # on each `<li>` as the sighted replay steps through them (following
+  # `.TurnReplay`'s `gc:replay` broadcast); nothing here depends on it.
   attr :turn, :integer, required: true
   attr :steps, :list, required: true
 
@@ -1358,6 +1465,7 @@ defmodule GlobalCombatWeb.GameLive do
       <:header>Turn {@turn} results</:header>
       <ol
         id="turn-results-list"
+        phx-hook=".TurnResultsList"
         class="flex flex-col gap-[var(--space-1)] text-sm list-decimal pl-[var(--space-4)]"
       >
         <li :for={step <- @steps} data-step={step.index}>{step.text}</li>
@@ -1493,9 +1601,15 @@ defmodule GlobalCombatWeb.GameLive do
     default: nil,
     doc: "the game's map, once known — in play each player's board colour gets a legend dot"
 
+  # Once the game has ended the roster is the final standings, so it reads in
+  # finishing order (legacy `_PlayerList.cshtml` sorts by `Place`) — seat
+  # order otherwise. An eliminated player's totals are always "0 (0)" (the
+  # engine zeroes them), never informative, so they are left off.
   defp player_list(assigns) do
+    assigns = assign(assigns, :players, roster_order(assigns.players, assigns.ended))
+
     ~H"""
-    <ul aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
+    <ul id="player-list" aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
         <span class="flex items-center gap-[var(--space-2)]">
           <span
@@ -1509,7 +1623,7 @@ defmodule GlobalCombatWeb.GameLive do
         <span :if={@ended} class="flex items-center gap-[var(--space-2)]">
           <span :if={p.place == 1} aria-hidden="true">🏆</span>
           <span class="text-text-muted">{ordinal(p.place)}</span>
-          <span class="text-text-muted">{p.armies} ({p.areas})</span>
+          <span :if={has_totals?(p)} class="text-text-muted">{p.armies} ({p.areas})</span>
           <span class="text-text-muted">Score {p.score}</span>
         </span>
         <span :if={!@ended} class="flex items-center gap-[var(--space-2)]">
@@ -1533,6 +1647,12 @@ defmodule GlobalCombatWeb.GameLive do
     </ul>
     """
   end
+
+  # Unplaced seats (place 0) sort last, after every finisher.
+  defp roster_order(players, true), do: Enum.sort_by(players, &{&1.place == 0, &1.place})
+  defp roster_order(players, false), do: players
+
+  defp has_totals?(player), do: (player.armies || 0) > 0 or (player.areas || 0) > 0
 
   attr :messages, :list, required: true
   attr :chat_form, Phoenix.HTML.Form, required: true
