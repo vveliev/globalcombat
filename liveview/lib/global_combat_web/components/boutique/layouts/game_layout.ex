@@ -240,7 +240,16 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
             if (this.el.open) this.el.close()
 
             if (desktop) {
+              // As a static rail it must not take focus: `show()` focuses the
+              // first focusable control inside (the chat box, far down), which
+              // also scrolls the rail to it on page load.
+              const before = document.activeElement
               this.el.show()
+              if (this.el.contains(document.activeElement) && !this.el.contains(before)) {
+                document.activeElement.blur()
+                before?.focus?.({ preventScroll: true })
+              }
+              this.el.scrollTop = 0
             } else if (this.wantOpen) {
               try { this.el.showModal() } catch (e) {}
             }

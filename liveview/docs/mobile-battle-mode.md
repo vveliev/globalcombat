@@ -313,7 +313,14 @@ tap now only selects and the placement bar does the placing.)
 | Tokens | Army counts sit on owner-ringed tokens with a gold `+N` while reinforcements are queued; `.MapViewport` sets `--token-scale` so they keep a readable size at any zoom, and bumps a token when its count changes. Order arrows bow and carry their amount in a badge |
 
 From `lg` up a click still selects and a drag still pans, as before — at any
-zoom, with the board free to be pulled most of the way off its panel.
+zoom, with the board free to be pulled most of the way off its panel. The
+desktop game also sizes to the screen: the board fills the height beside a
+20rem rail that scrolls on its own, the status strip stays one row (the turn
+pill stacked as on a phone, the replay steps as ◀ ▶), and from `lg` to 80rem
+the strip uses the phone's compact lens button and replay label. A narrow,
+upright board column starts zoomed onto the viewer's territories, as an
+upright phone does. The rail, as a non-modal `<dialog>`, no longer takes
+focus when it opens (which had scrolled it to the chat box on load).
 
 The viewBox always takes the stage's aspect ratio, so nothing letterboxes:
 "fit" is the whole board (a phone held sideways shows all of it), and a phone

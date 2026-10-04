@@ -674,14 +674,17 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             return { x, y, w, h }
           },
 
-          // The shape the viewBox takes. On the phone stage the <svg> fills a
-          // box of its own, so the viewBox follows that box. From `lg` up the
-          // <svg>'s height comes *from* its viewBox (`h-auto`), so measuring it
-          // would only feed the last shape back in — there the board keeps
-          // its own proportions.
+          // The shape the viewBox takes. In the game HUD the <svg> fills a box
+          // of its own (the whole screen on a phone, the board column on a
+          // desktop), so the viewBox follows that box. Anywhere else from `lg`
+          // up the <svg>'s height comes *from* its viewBox (`h-auto`), so
+          // measuring it would only feed the last shape back in — there the
+          // board keeps its own proportions.
           aspect() {
             const board = this.base.w / this.base.h
-            if (this.desktop.matches) return board
+            // From `lg` up only the game HUD (`[data-hud]`) gives the board a
+            // height of its own; anywhere else there the <svg> is `h-auto`.
+            if (this.desktop.matches && !this.el.closest("[data-hud]")) return board
             const rect = this.svg?.getBoundingClientRect()
             return rect && rect.width > 0 && rect.height > 0 ? rect.width / rect.height : board
           },
@@ -704,12 +707,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             }
           },
 
-          // Where a fresh visit starts. Upright on a phone the whole board is a
-          // thin strip, so zoom until its height fills the screen, centred on
-          // the viewer's territories; anywhere else the whole board fits.
+          // Where a fresh visit starts. In an upright box (a phone held upright,
+          // or a narrow desktop board column) the whole board is a thin strip,
+          // so zoom until its height fills the box, centred on the viewer's
+          // territories; in a wide box the whole board fits.
           home() {
             const aspect = this.aspect()
-            if (aspect >= 1 || this.desktop.matches) return this.fit()
+            if (aspect >= 1) return this.fit()
 
             const mine = this.largestOwnCluster()
               .map((area) => this.labelOf(area))

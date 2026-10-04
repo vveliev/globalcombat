@@ -1353,7 +1353,7 @@ defmodule GlobalCombatWeb.GameLive do
           class="hud-chip"
           aria-label="Previous step"
         >
-          ◀<span class="hidden lg:inline">&nbsp;Step</span>
+          ◀
         </Button.button>
         <Button.button
           id="turn-replay-forward"
@@ -1363,7 +1363,7 @@ defmodule GlobalCombatWeb.GameLive do
           class="hud-chip"
           aria-label="Next step"
         >
-          <span class="hidden lg:inline">Step&nbsp;</span>▶
+          ▶
         </Button.button>
       </span>
       <span id="turn-replay-announce" class="sr-only"></span>
@@ -2212,14 +2212,14 @@ defmodule GlobalCombatWeb.GameLive do
     ~H"""
     <ul id="player-list" aria-live="polite" class="flex flex-col gap-[var(--space-2)]">
       <li :for={p <- @players} class="flex items-center justify-between gap-[var(--space-2)]">
-        <span class="flex items-center gap-[var(--space-2)]">
+        <span class="flex min-w-0 items-center gap-[var(--space-2)]">
           <span
             :if={@map_name}
             class="world-map-swatch world-map-owner"
             data-owner={WorldMap.owner_slot(p.number)}
             aria-hidden="true"
           />
-          <span class={p.number == @viewer_number && "font-semibold"}>{p.name}</span>
+          <span class={["truncate", p.number == @viewer_number && "font-semibold"]}>{p.name}</span>
         </span>
         <span :if={@ended} class="flex items-center gap-[var(--space-2)]">
           <span :if={p.place == 1} aria-hidden="true">🏆</span>
@@ -2227,8 +2227,8 @@ defmodule GlobalCombatWeb.GameLive do
           <span :if={has_totals?(p)} class="text-text-muted">{p.armies} ({p.areas})</span>
           <span class="text-text-muted">Score {p.score}</span>
         </span>
-        <span :if={!@ended} class="flex items-center gap-[var(--space-2)]">
-          <span :if={!p.eliminated && p.armies} class="text-text-muted">
+        <span :if={!@ended} class="flex shrink-0 items-center gap-[var(--space-2)]">
+          <span :if={!p.eliminated && p.armies} class="whitespace-nowrap tabular-nums text-text-muted">
             {p.armies} ({p.areas})
           </span>
           <span :if={p.eliminated} class="text-text-muted">{ordinal(p.place)}</span>
