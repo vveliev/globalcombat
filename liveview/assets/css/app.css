@@ -1268,11 +1268,15 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The phone's placement bar in the order panel (assign mode). */
-.placement-bar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+/* The phone's placement bar in the order panel (assign mode). Its display
+   lives inside the query: this file is unlayered, so a bare `display` here
+   would beat the markup's `lg:hidden` and show it beside the desktop form. */
+@media (width < 64rem) {
+  .placement-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
 }
 
 .placement-status,

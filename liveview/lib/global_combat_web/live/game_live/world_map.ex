@@ -638,10 +638,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.el.addEventListener("keydown", this.onKeyDown)
             window.addEventListener("gc:map-fit", this.onFitEvent)
 
+            // A saved view that was the whole board (say, saved sideways)
+            // starts over from home instead, so a phone reloaded upright
+            // isn't left with the whole board as a thin strip.
             const saved = this.restore()
             this.lastAspect = this.aspect()
             this.lastWidth = this.svg?.getBoundingClientRect().width
-            this.current = saved ? this.withAspect(saved) : this.home()
+            const restored = saved && this.withAspect(saved)
+            this.current =
+              restored && restored.w < this.fitWidth() - 0.01 ? restored : this.home()
             this.applyViewBox()
 
             this.resizeObserver = new ResizeObserver(this.onResize)
