@@ -16,8 +16,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   reaches Pevek or Brazil reaches Algeria. Here the lanes are derived from the
   same `MapInfo` adjacency the rules use, so they can never disagree with it.
 
-  Layering (paint order, bottom to top): sea → sea lanes → territories (the only
-  interactive layer, alongside the order arrows below) → region borders →
+  Layering (paint order, bottom to top): sea → sea lanes → territories with
+  aligned borders (the only interactive layer, alongside the order arrows below) →
   selected/target highlight → pending-order arrows → last-turn replay arrows →
   army counts. The highlight is a second `<use>` of the same outline drawn
   *above* the neighbours so a selected coastline is never half-covered by the
@@ -31,7 +31,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   Geometry (`world_map/<map>_map_defs.html.heex`, `MapGeometry`) is generated
   by `scripts/trace_maps.py` from the legacy silhouettes. The generator makes
   an exclusive pixel partition so neighboring territory fills share one edge;
-  territory and region border networks are drawn once from that same partition.
+  each territory border follows its fill path, avoiding a second outline layer
+  whose separately smoothed geometry could drift when zoomed.
   Adjacency and the coordinate space remain unchanged from the sprite board. The defs are
   static templates: LiveView ships them once with the page statics and never
   re-sends them on a diff, however often ownership changes.
@@ -257,8 +258,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             interactive={@interactive}
           />
         </g>
-        <use href="#gc-area-borders" class="world-map-borders" />
-        <use href="#gc-region-outlines" class="world-map-outlines" />
         <g
           class="world-map-legend"
           aria-hidden="true"

@@ -309,15 +309,6 @@
   pointer-events: none;
 }
 
-.world-map-outlines {
-  fill: none;
-  stroke: var(--map-ink);
-  stroke-opacity: 0.6;
-  stroke-width: 1.6;
-  stroke-linejoin: round;
-  pointer-events: none;
-}
-
 .world-map-territory {
   outline: none;
 }
@@ -333,22 +324,13 @@
 
 .world-map-area {
   fill: var(--map-owner-fill, var(--map-owner-0));
+  stroke: var(--map-ink);
+  stroke-opacity: 0.38;
+  stroke-width: 0.8;
+  stroke-linejoin: round;
   transition:
     fill 0.3s ease,
     filter 0.15s ease;
-}
-
-/* Territory fills overlap slightly in the source sprites. Their borders are
-   generated once from a shared pixel partition so neighboring outlines cannot
-   drift apart or stack two independently smoothed strokes. */
-.world-map-borders {
-  fill: none;
-  stroke: var(--map-ink);
-  stroke-opacity: 0.55;
-  stroke-width: 0.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: none;
 }
 
 .world-map-territory[data-fog] .world-map-area {
