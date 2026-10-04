@@ -11,8 +11,12 @@ defmodule GlobalCombat.Games.TurnScheduler.SpyResolver do
 
   use Agent
 
+  # Deliberately not linked to the caller: `register/3` starts it lazily from
+  # whichever async test gets there first, and a link would take it down when
+  # that test's process exits — while a concurrent test is mid-`register/3`
+  # ("no process"). Unlinked, it lives for the whole test run.
   def start_link(_opts \\ []) do
-    case Agent.start_link(fn -> %{} end, name: __MODULE__) do
+    case Agent.start(fn -> %{} end, name: __MODULE__) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
     end
