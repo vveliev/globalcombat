@@ -6,6 +6,15 @@ defmodule GlobalCombat.AccountsTest do
 
   import GlobalCombat.AccountsFixtures
 
+  describe "computer_account_id/0" do
+    test "is the account the reserve_computer_account migration creates" do
+      computer = GlobalCombat.Repo.get!(Accounts.Account, Accounts.computer_account_id())
+      assert computer.name == Accounts.computer_name()
+      assert Accounts.computer_account?(computer.id)
+      refute Accounts.computer_account?(computer.id + 1)
+    end
+  end
+
   describe "register_account/1" do
     test "registers an account with a hashed password" do
       attrs = valid_account_attributes()

@@ -161,7 +161,15 @@ defmodule GlobalCombatWeb.GameLive do
 
   # --- user actions --------------------------------------------------------
 
+  # A finished game takes no more turns or orders. The game server already refuses them; this
+  # just keeps a crafted event (the controls are gone from the page) from reaching it at all.
+  @ended_game_events ~w(done force_turn submit_order unassign_order change_amount step_amount max_amount)
+
   @impl true
+  def handle_event(event, _params, %{assigns: %{status: :playing, view: %{ended: true}}} = socket)
+      when event in @ended_game_events,
+      do: {:noreply, socket}
+
   def handle_event("join", _params, socket) do
     case require_account(socket) do
       {:ok, account} ->
@@ -190,13 +198,9 @@ defmodule GlobalCombatWeb.GameLive do
         {:noreply, socket}
 
       {_login, {:ok, account}} ->
-        case Games.invite(socket.assigns.game_id, account.id, login) do
-          {:ok, invitee} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Invited #{invitee.name}.")
-             |> assign(:invite_login, "")
-             |> refresh_view()}
+        case Games.invite_many(socket.assigns.game_id, account.id, login) do
+          results when is_list(results) ->
+            {:noreply, invite_flashes(socket, results)}
 
           {:error, reason} ->
             {:noreply, put_flash(socket, :error, invite_error_message(reason, login))}
@@ -215,6 +219,9 @@ defmodule GlobalCombatWeb.GameLive do
           # navigates home; a mid-play quit just re-renders the board as eliminated.
           :ok ->
             {:noreply, refresh_view(socket)}
+
+          {:error, :tourney_game} ->
+            {:noreply, put_flash(socket, :error, "Unable to quit a tournament game.")}
 
           {:error, _reason} ->
             {:noreply, socket}
@@ -702,6 +709,27 @@ defmodule GlobalCombatWeb.GameLive do
       nil -> :error
       account -> {:ok, account}
     end
+  end
+
+  # The invite box takes a comma/newline separated list (`Games.invite_many/3`): one info flash
+  # naming everyone invited, one error flash with a line per login that failed.
+  defp invite_flashes(socket, results) do
+    invited = for {_login, {:ok, invitee}} <- results, do: invitee.name
+
+    errors =
+      for {login, {:error, reason}} <- results, do: invite_error_message(reason, login)
+
+    socket =
+      if invited == [] do
+        socket
+      else
+        socket
+        |> put_flash(:info, "Invited #{Enum.join(invited, ", ")}.")
+        |> assign(:invite_login, "")
+        |> refresh_view()
+      end
+
+    if errors == [], do: socket, else: put_flash(socket, :error, Enum.join(errors, " "))
   end
 
   defp invite_error_message(:account_not_found, login), do: "No account found for \"#{login}\"."
@@ -1326,7 +1354,7 @@ defmodule GlobalCombatWeb.GameLive do
   # simply had no visible events", including the very next turn that does.
   # Stepping/announcing here is otherwise plain client-side JS (no phx-click):
   # "the hook owns the timing", not the server.
-  attr :turn, :integer, required: true
+  attr :turn, :integer, required: true, doc: "the current turn, `@view.turn`"
   attr :steps, :list, required: true
 
   defp turn_replay_controls(assigns) do
@@ -1343,7 +1371,7 @@ defmodule GlobalCombatWeb.GameLive do
       <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
         <Button.button id="turn-replay-play" type="button" data-replay-play class="hud-chip">
           <span class="lg:hidden">▶ Replay</span>
-          <span class="hidden lg:inline">Turn {@turn} results ▶</span>
+          <span class="hidden lg:inline">Turn {resolved_turn(@turn)} results ▶</span>
         </Button.button>
         <Button.button
           id="turn-replay-back"
@@ -2063,7 +2091,7 @@ defmodule GlobalCombatWeb.GameLive do
   defp turn_results(assigns) do
     ~H"""
     <Card.card id="turn-results" class="min-w-[16rem]">
-      <:header>Turn {@turn} results</:header>
+      <:header>Turn {resolved_turn(@turn)} results</:header>
       <ol
         id="turn-results-list"
         phx-hook=".TurnResultsList"
@@ -2074,6 +2102,11 @@ defmodule GlobalCombatWeb.GameLive do
     </Card.card>
     """
   end
+
+  # The last turn's events are logged against the turn the engine already advanced to
+  # (`Engine.Game.resolve_turn/1`), so the turn they *resolved* is one before `@view.turn` —
+  # legacy's results post reads "Turn {Turn - 1} Results" for the same reason.
+  defp resolved_turn(turn), do: turn - 1
 
   # Player-facing rule info (GIF-103): every region's control bonus, sourced
   # from the same `MapInfo.regions/1` the board's areas/adjacency already

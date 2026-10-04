@@ -1791,6 +1791,25 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
     end
 
+    test "the invite box takes a comma-separated list, inviting the good logins and naming the bad",
+         %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+      carl = account_fixture(%{"name" => "Carl"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      render_submit(view, "invite", %{"login" => "Bob, no-such-account, Carl"})
+
+      assert has_element?(view, "#flash-info", "Invited Bob, Carl.")
+      assert has_element?(view, "#flash-error", "No account found for \"no-such-account\".")
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(carl.id)
+    end
+
     test "inviting an unknown login shows an error instead of crashing", %{conn: conn} do
       alice = account_fixture(%{"name" => "Alice"})
 
@@ -1933,7 +1952,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
       render_click(bob_view, "quit")
 
       wait_for_element(alice_view, "#game-over", "Game Over")
-      assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
+      # Bob leaving ended this two-player game, and a finished game takes no more quits.
+      assert {:error, :game_ended} = Games.quit(game_id, bob.id)
     end
   end
 
@@ -1964,6 +1984,30 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#turn-controls button", "Force Turn")
 
       assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
+    end
+
+    test "crafted turn/order events on an ended game are ignored", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{game_id: game_id, alice: alice, bob: bob, alice_view: alice_view, bob_view: bob_view} =
+        start_two_player_game(conn1, conn2)
+
+      :ok = Games.quit(game_id, bob.id)
+      sync_game(game_id, alice_view)
+      sync_game(game_id, bob_view)
+      {:playing, ended_view} = Games.player_view(game_id, alice.id)
+
+      render_click(alice_view, "change_amount", %{"amount" => "3"})
+      render_click(alice_view, "step_amount", %{"delta" => "1"})
+      render_click(alice_view, "max_amount", %{})
+      render_click(alice_view, "submit_order", %{"amount" => "3"})
+      render_click(alice_view, "unassign_order", %{})
+      render_click(alice_view, "done", %{})
+      render_click(alice_view, "force_turn", %{})
+      sync_game(game_id, alice_view)
+
+      assert Games.player_view(game_id, alice.id) == {:playing, ended_view}
+      assert has_element?(alice_view, "#game-over")
     end
 
     test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
@@ -2033,7 +2077,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(alice_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
       assert has_element?(alice_view, ~s(line.world-map-replay-arrow--transfer[data-step="0"]))
-      assert has_element?(alice_view, "button", "Turn 2 results ▶")
+      # The turn that just resolved is turn 1 (the board now shows turn 2), as legacy labelled it.
+      assert has_element?(alice_view, "button", "Turn 1 results ▶")
+      assert has_element?(alice_view, "#turn-results", "Turn 1 results")
 
       # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name at
       # compile time, same as `.FocusManager` (see the focus-management test above) —
@@ -2049,7 +2095,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       wait_for_element(bob_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
     end
 
-    test "a turn with no orders queued shows neither replay controls nor a results list",
+    test "a turn with no orders queued still lists every player's army bonus, like legacy's results post",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
       %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
@@ -2059,8 +2105,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       wait_for(alice_view, "Turn 2")
 
-      refute has_element?(alice_view, "#turn-results-list")
-      refute has_element?(alice_view, "button", "Turn 2 results ▶")
+      assert has_element?(alice_view, "#turn-results-list li", ~r/^Alice: \d+ new armies/)
+      assert has_element?(alice_view, "#turn-results-list li", ~r/^Bob: \d+ new armies/)
+      refute has_element?(alice_view, ".world-map-replay-arrow")
     end
   end
 

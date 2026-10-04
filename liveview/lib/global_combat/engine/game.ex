@@ -27,6 +27,7 @@ defmodule GlobalCombat.Engine.Game do
   clamped amount).
   """
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.{DotnetRandom, MapInfo}
 
   defmodule Area do
@@ -225,8 +226,15 @@ defmodule GlobalCombat.Engine.Game do
     * `{:assign, area_number, amount}` — reinforcements landing (`assign_armies`)
     * `{:transfer, from_area_number, to_area_number, amount}` — a completed transfer
     * `{:attack, from_area_number, to_area_number, amount, attacker_lost, defender_lost, captured?}`
+    * `{:bonus, player_number, new_armies, region_bonus}` — one per surviving player, in player
+      order, interleaved with `:eliminated` exactly as `RunTurn`'s reinforcement loop visits them:
+      the reinforcement `RunTurn` reports on its "Army Bonuses" line (`new_armies` is already
+      floored to `minimum_armies`; `region_bonus` is the part of it from fully-held regions)
     * `{:eliminated, player_number}`
     * `{:ended, winner_player_number}`
+
+  Zero-amount transfers and attacks resolve exactly as the original does but get no event:
+  nothing moved, so there is nothing to show.
 
   `game.turn` (already incremented by the time this returns, same as `run_turn/1`) is the turn
   number these events belong to. A no-op once the game has ended, matching `run_turn/1`.
@@ -248,10 +256,10 @@ defmodule GlobalCombat.Engine.Game do
     {game, assign_events ++ transfer_events ++ attack_events ++ end_events}
   end
 
-  @doc "Port of `Game.ResetDoneFlags`. AccountId 1 is the reserved \"Computer\" convention — always treated as done, never waited on."
+  @doc "Port of `Game.ResetDoneFlags`. The reserved \"Computer\" account (`GlobalCombat.Accounts.computer_account_id/0`) is always treated as done, never waited on."
   def reset_done_flags(game) do
     Enum.reduce(players_in_order(game), game, fn player, game ->
-      done = player.account_id == 1 or eliminated?(player)
+      done = Accounts.computer_account?(player.account_id) or eliminated?(player)
       update_player(game, player.number, &%{&1 | done: done})
     end)
   end
@@ -282,7 +290,7 @@ defmodule GlobalCombat.Engine.Game do
       Enum.reduce(areas_in_order(game), {game, []}, fn area, {game, events} ->
         if area.command == :transfer do
           {game, event} = do_transfer(game, area.number)
-          {game, [event | events]}
+          {game, if(event, do: [event | events], else: events)}
         else
           {game, events}
         end
@@ -291,7 +299,8 @@ defmodule GlobalCombat.Engine.Game do
     {game, Enum.reverse(events)}
   end
 
-  # Port of `Game.DoTransfer`.
+  # Port of `Game.DoTransfer`. A transfer of 0 moves nothing, so it gets no event (the state
+  # update below is still applied unconditionally, exactly as the original does).
   defp do_transfer(game, area_number) do
     area = area!(game, area_number)
 
@@ -300,7 +309,10 @@ defmodule GlobalCombat.Engine.Game do
       |> update_area(area.target_number, &%{&1 | armies: &1.armies + area.amount})
       |> update_area(area_number, &%{&1 | armies: &1.armies - area.amount})
 
-    {game, {:transfer, area_number, area.target_number, area.amount}}
+    event =
+      if area.amount > 0, do: {:transfer, area_number, area.target_number, area.amount}
+
+    {game, event}
   end
 
   # Stable sort by Amount (descending, or ascending under ReverseAttackOrder),
@@ -340,9 +352,12 @@ defmodule GlobalCombat.Engine.Game do
   end
 
   # Same resolution as `do_attack/2`, plus the `{:attack, ...}` event describing it
-  # — `nil` for the two ways an attack order can resolve to nothing happening at all (already-
-  # same-owner, or clamped down to a non-positive amount), since no event is more useful there
-  # than a misleading "0 losses, no capture" record of an attack that never actually rolled.
+  # — `nil` for every way an attack order can resolve to nothing happening at all: already-
+  # same-owner, clamped down to a non-positive amount, or an Amount-0 order that needed no clamp
+  # (`RandomAi`'s `set_attack(..., 1000)` from a 1-army area produces these routinely). No event
+  # is more useful there than a misleading "0 losses, no capture" record the board would draw as
+  # an arrow. Only the event is dropped: the Amount-0 case still rolls its defend dice below (see
+  # the RNG note), so resolution stays identical to the original.
   defp do_attack_and_event(game, attacker_number) do
     attacker = area!(game, attacker_number)
     defender = area!(game, attacker.target_number)
@@ -405,9 +420,13 @@ defmodule GlobalCombat.Engine.Game do
         # `attack_damage` is capped to `defender.armies` above, and `captured?` requires
         # `attack_damage >= defender.armies` — so on capture, `attack_damage == defender.armies`
         # exactly: the defender's *entire* garrison is lost either way, not just the capped roll.
+        # With `amount == 0` nothing above changed any state (zero attack damage, defend damage
+        # capped to zero, never a capture) — the order only consumed RNG draws.
         event =
-          {:attack, attacker_number, defender.number, amount, defend_damage, attack_damage,
-           captured?}
+          if amount > 0,
+            do:
+              {:attack, attacker_number, defender.number, amount, defend_damage, attack_damage,
+               captured?}
 
         {game, event}
       end
@@ -455,7 +474,8 @@ defmodule GlobalCombat.Engine.Game do
             {game, alive_players, Enum.reverse(new_events, events)}
 
           true ->
-            {reinforce(game, player.number), alive_players + 1, events}
+            {game, bonus_event} = reinforce(game, player.number)
+            {game, alive_players + 1, [bonus_event | events]}
         end
       end)
 
@@ -469,20 +489,26 @@ defmodule GlobalCombat.Engine.Game do
     end
   end
 
+  # Returns the reinforced game plus a `{:bonus, player_number, new_armies, region_bonus}` event —
+  # the same two numbers `RunTurn`'s `armyBonusMessage` line reports per surviving player
+  # ("N new armies (M from Region Bonuses)"), `new_armies` already floored to `minimum_armies`.
   defp reinforce(game, player_number) do
     player = player!(game, player_number)
-    new_armies = div(player.areas, 2) + region_bonus(game, player_number)
-    new_armies = max(new_armies, game.minimum_armies)
+    bonus = region_bonus(game, player_number)
+    new_armies = max(div(player.areas, 2) + bonus, game.minimum_armies)
 
     total_armies =
       areas_in_order(game)
       |> Enum.filter(&owned_by?(&1, player_number))
       |> Enum.reduce(0, &(&2 + &1.armies))
 
-    update_player(game, player_number, fn p ->
-      unassigned = p.unassigned_armies + new_armies
-      %{p | unassigned_armies: unassigned, armies: total_armies + unassigned}
-    end)
+    game =
+      update_player(game, player_number, fn p ->
+        unassigned = p.unassigned_armies + new_armies
+        %{p | unassigned_armies: unassigned, armies: total_armies + unassigned}
+      end)
+
+    {game, {:bonus, player_number, new_armies, bonus}}
   end
 
   defp region_bonus(game, player_number) do

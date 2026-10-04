@@ -16,6 +16,21 @@ defmodule GlobalCombat.Accounts do
 
   @legacy_password_generator_chars ~c"abcdefghijklmnopqrstuvwxyz0123456789"
 
+  # The legacy convention every game relies on: account 1 is the "Computer" — the Training Mode
+  # opponent's seat (always done, never waited on) and the author of system chat lines. The
+  # reserve_computer_account migration claims this id on a fresh database.
+  @computer_account_id 1
+  @computer_name "Computer"
+
+  @doc "The reserved account id of the \"Computer\" (Training Mode opponent, system messages)."
+  def computer_account_id, do: @computer_account_id
+
+  @doc "The display name the \"Computer\" account plays and posts under."
+  def computer_name, do: @computer_name
+
+  @doc "Whether `account_id` is the reserved \"Computer\" account."
+  def computer_account?(account_id), do: account_id == @computer_account_id
+
   @doc "Ports `BaseController.CreateAccount(loginName, password, passwordVerify, email, ...)`."
   def register_account(attrs) do
     %Account{}
