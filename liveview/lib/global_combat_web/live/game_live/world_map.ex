@@ -720,14 +720,15 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             const aspect = this.aspect()
             if (aspect >= 1) return this.fit()
 
+            // Without territories (no seat, or eliminated) it centres on the
+            // board itself rather than showing it as a strip.
             const mine = this.largestOwnCluster()
               .map((area) => this.labelOf(area))
               .filter(Boolean)
-            if (mine.length === 0) return this.fit()
 
             const median = (values) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)]
-            const cx = median(mine.map((p) => p.x))
-            const cy = median(mine.map((p) => p.y))
+            const cx = mine.length ? median(mine.map((p) => p.x)) : this.base.x + this.base.w / 2
+            const cy = mine.length ? median(mine.map((p) => p.y)) : this.base.y + this.base.h / 2
             const h = this.base.h * PORTRAIT_HEIGHT
             const w = h * aspect
             return this.clamped({ x: cx - w / 2, y: cy - h / 2, w, h })

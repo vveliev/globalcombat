@@ -1480,6 +1480,24 @@
     overflow-y: auto;
   }
 
+  /* The base `.game-drawer` reset (unlayered) zeroes the markup's padding
+     utility, which left the roster's status pills against the rail's edge
+     and the cards touching it. Pad the rail and space its sections. */
+  [data-hud] .game-drawer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  [data-hud] .game-drawer > * {
+    flex-shrink: 0;
+  }
+
+  [data-hud] .game-drawer > [class*="mt-"] {
+    margin-top: 0;
+  }
+
   /* One row: turn pill, status pills, Fit and the replay controls, then the
      lens and full screen on the right. */
   [data-hud] .game-status {
