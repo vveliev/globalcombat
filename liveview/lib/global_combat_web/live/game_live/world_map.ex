@@ -42,7 +42,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   (the selected area, else the first) and the arrow keys moving focus to the
   nearest territory in that direction. The army-count text is decorative
   (`aria-hidden`, the label already says it) and gets a dark stroke under a light fill via `paint-order: stroke`
-  so it stays legible on every owner colour. `GameLive.board_table/1`
+  so it stays legible on every owner colour. `GameLive.Board.board_table/1`
   remains the tabular equivalent for screen readers; it and the labels
   here share `owner_text/2` so the two can never word an owner differently.
 
