@@ -136,8 +136,57 @@ defmodule GlobalCombatWeb.GameLive.HudTest do
     view = view([area(1, 1, 0)], %{unassigned_armies: 4})
     [me] = view.players
 
-    assert Hud.coach_line(view, me, :phone) =~ "Tap your territories to place 4 armies"
+    assert Hud.coach_line(view, me, :phone) == "Tap a territory of yours to place 4 armies there"
     assert Hud.coach_line(view, me, :desktop) == "Click your territories to place 4 armies"
+  end
+
+  test "placement/4 places the whole pool for :all" do
+    view = view([area(1, 1, 0)], %{unassigned_armies: 12})
+    [me] = view.players
+    assert Hud.placement(view, me, 1, :all) == {:ok, 12}
+  end
+
+  describe "tap_plan/3" do
+    defp tap_board do
+      view([
+        area(1, 1, 0) |> Map.put(:adjacent, [2, 3]),
+        area(2, 2, 0) |> Map.put(:adjacent, [1]),
+        area(3, 1, 0) |> Map.put(:adjacent, [1]),
+        area(4, 2, 0) |> Map.put(:adjacent, [])
+      ])
+    end
+
+    test "selects your own territory, even a neighbour of the selected one" do
+      assert Hud.tap_plan(tap_board(), nil, 1) == {:select, 1}
+      assert Hud.tap_plan(tap_board(), 1, 3) == {:select, 3}
+    end
+
+    test "targets an enemy neighbour of the selection, and otherwise clears or ignores" do
+      assert Hud.tap_plan(tap_board(), 1, 2) == {:target, 2}
+      assert Hud.tap_plan(tap_board(), 1, 4) == :clear
+      assert Hud.tap_plan(tap_board(), nil, 2) == :none
+    end
+  end
+
+  describe "income/2" do
+    test "is half the territories plus every region held outright" do
+      # Australia is region 6 on the world map: areas 39-42.
+      areas = for n <- 1..42, do: area(n, if(n in [1, 2, 39, 40, 41, 42], do: 1, else: 2), 0)
+      view = %{view(areas, %{armies: 30}) | areas: areas} |> Map.put(:map_name, :original)
+      [me] = view.players
+
+      assert %{territories: 6, base: 3, bonuses: [%{name: "Australia", bonus: 2}], total: 5} =
+               Hud.income(view, Map.put(me, :armies, 30))
+    end
+
+    test "never drops below the game's minimum" do
+      areas = for n <- 1..42, do: area(n, if(n == 1, do: 1, else: 2), 0)
+      view = view(areas) |> Map.put(:map_name, :original) |> Map.put(:minimum_armies, 3)
+      [me] = view.players
+
+      assert %{base: 0, bonuses: [], minimum: 3, total: 3} =
+               Hud.income(view, Map.put(me, :armies, 5))
+    end
   end
 
   test "next_lens/1 steps owner, region, frontier and back" do

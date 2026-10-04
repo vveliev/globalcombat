@@ -13,12 +13,13 @@ defmodule GlobalCombatWeb.GameLive.Hud do
   `GameLive` sends it.
   """
 
+  alias GlobalCombat.Engine.MapInfo
   alias GlobalCombatWeb.GameLive.WorldMap
 
   @lenses [:owner, :region, :frontier]
   @hold_amount 5
 
-  @doc "How many reinforcements a hold places (a tap places one); `.MapViewport` reads it from the board."
+  @doc "The placement bar's bigger step (+5): `quick_assign` never places more at once, except \"All\"."
   def hold_amount, do: @hold_amount
 
   @doc "True when `area` is visible to, and owned by, the seated viewer."
@@ -33,10 +34,45 @@ defmodule GlobalCombatWeb.GameLive.Hud do
     with %{done: false, unassigned_armies: pool} when pool > 0 <- me,
          %{} = area <- find_area(view, area_number),
          true <- own_area?(view, area) do
-      {:ok, requested |> max(1) |> min(@hold_amount) |> min(pool)}
+      case requested do
+        :all -> {:ok, pool}
+        n -> {:ok, n |> max(1) |> min(@hold_amount) |> min(pool)}
+      end
     else
       _ -> :error
     end
+  end
+
+  @doc """
+  What the viewer will be given next turn, worked the way the engine does it
+  (`Engine.Game.reinforce/2`): half their territories, rounded down, plus the
+  bonus of every region they hold outright, never below the game's minimum.
+  `nil` for a viewer without a seat.
+  """
+  def income(_view, nil), do: nil
+
+  def income(view, me) do
+    owned = Enum.filter(view.areas, &own_area?(view, &1))
+    owned_numbers = MapSet.new(owned, & &1.number)
+    areas_by_region = WorldMap.areas_by_region(view.map_name)
+
+    bonuses =
+      for {number, name, _num_areas, bonus} <- MapInfo.regions(view.map_name),
+          Enum.all?(Map.fetch!(areas_by_region, number), &MapSet.member?(owned_numbers, &1)),
+          do: %{name: name, bonus: bonus}
+
+    base = div(length(owned), 2)
+    minimum = Map.get(view, :minimum_armies, 0)
+    subtotal = base + Enum.sum(Enum.map(bonuses, & &1.bonus))
+
+    %{
+      territories: length(owned),
+      base: base,
+      bonuses: bonuses,
+      minimum: minimum,
+      total: max(subtotal, minimum),
+      armies: me.armies
+    }
   end
 
   @doc """
@@ -97,6 +133,30 @@ defmodule GlobalCombatWeb.GameLive.Hud do
     end
   end
 
+  @doc """
+  What a phone tap on `area_number` does, given the area currently selected:
+
+    * `{:select, n}` — one of the viewer's own: select it (the placement bar
+      opens on it). Orders between your own territories are dragged, so a
+      tap on another own territory switches selection rather than target it;
+    * `{:target, n}` — a visible enemy neighbour of the selected territory:
+      target it (the attack panel opens);
+    * `:clear` — anything else while something is selected: close the panel;
+    * `:none` — anything else.
+  """
+  def tap_plan(view, selected, area_number) do
+    area = find_area(view, area_number)
+    source = selected && find_area(view, selected)
+
+    cond do
+      is_nil(area) -> :none
+      own_area?(view, area) -> {:select, area_number}
+      source && area.visible && area_number in source.adjacent -> {:target, area_number}
+      source -> :clear
+      true -> :none
+    end
+  end
+
   @doc "The most a transfer/attack from `area` can send: the engine always leaves one army behind."
   def spare_armies(area), do: max(area.armies - 1, 0)
 
@@ -136,7 +196,7 @@ defmodule GlobalCombatWeb.GameLive.Hud do
         "Orders locked in. The turn runs once everyone has ended theirs."
 
       {{:place, n}, :phone} ->
-        "Tap your territories to place #{armies(n)} · hold for +#{@hold_amount}"
+        "Tap a territory of yours to place #{armies(n)} there"
 
       {{:place, n}, :desktop} ->
         "Click your territories to place #{armies(n)}"

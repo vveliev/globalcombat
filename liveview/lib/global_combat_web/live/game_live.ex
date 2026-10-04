@@ -375,7 +375,7 @@ defmodule GlobalCombatWeb.GameLive do
       ) do
     with {:ok, account} <- require_account(socket),
          {:ok, area} <- parse_int(area_str),
-         {:ok, requested} <- parse_int(Map.get(params, "amount", 1)),
+         {:ok, requested} <- parse_placement(Map.get(params, "amount", 1)),
          {:ok, amount} <- Hud.placement(view, my_player(view), area, requested) do
       Games.assign(socket.assigns.game_id, account.id, area, amount)
 
@@ -390,6 +390,74 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   def handle_event("quick_assign", _params, socket), do: {:noreply, socket}
+
+  # The placement bar's −1: takes one army back off this territory, the same
+  # way Undo takes back a whole placement (`Hud.undo_plan/3`).
+  def handle_event(
+        "unplace_one",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    with {:ok, account} <- require_account(socket),
+         {:ok, area} <- parse_int(area_str),
+         {:ok, plan} <- Hud.undo_plan(view, my_player(view), {area, 1}),
+         true <- plan.undone > 0 do
+      apply_undo(socket, account, plan)
+      {:noreply, assign(socket, :view, Hud.adjust_assigned(view, plan.area, -plan.undone))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("unplace_one", _params, socket), do: {:noreply, socket}
+
+  # A phone tap on the map (`.MapViewport`): selects one of your territories
+  # (the placement bar opens on it) or targets an enemy neighbour of the
+  # selected one, as `Hud.tap_plan/3` decides — a tap never places armies by
+  # itself. From `lg` up, and from the keyboard, `select_area` keeps the
+  # classic click-a-source, click-a-target flow.
+  def handle_event(
+        "tap_area",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    selected = socket.assigns.selected_area
+
+    with {:ok, number} <- parse_int(area_str) do
+      case Hud.tap_plan(view, selected, number) do
+        {:select, ^selected} ->
+          {:noreply, socket}
+
+        {:select, number} ->
+          {:noreply,
+           assign(socket,
+             selected_area: number,
+             target_area: nil,
+             order_amount: to_string(Hud.gesture_pool(view, my_player(view)) || 0)
+           )}
+
+        {:target, number} ->
+          source = find_area(view, socket.assigns.selected_area)
+
+          amount =
+            if order_queued_to?(source, number),
+              do: source.order.amount,
+              else: Hud.spare_armies(source)
+
+          {:noreply, assign(socket, target_area: number, order_amount: to_string(amount))}
+
+        :clear ->
+          {:noreply, clear_selection(socket)}
+
+        :none ->
+          {:noreply, socket}
+      end
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("tap_area", _params, socket), do: {:noreply, socket}
 
   # Takes back the latest placement, as `Hud.undo_plan/3` lays out.
   def handle_event(
@@ -407,12 +475,7 @@ defmodule GlobalCombatWeb.GameLive do
 
     with {:ok, account} <- require_account(socket),
          {:ok, plan} <- Hud.undo_plan(view, my_player(view), latest) do
-      game_id = socket.assigns.game_id
-      Games.unassign(game_id, account.id, plan.area)
-      if plan.keep > 0, do: Games.assign(game_id, account.id, plan.area, plan.keep)
-
-      with {target, amount} <- plan.order,
-           do: submit_order(socket, account, plan.area, target, amount)
+      apply_undo(socket, account, plan)
 
       {:noreply, assign(socket, :view, Hud.adjust_assigned(view, plan.area, -plan.undone))}
     else
@@ -611,6 +674,21 @@ defmodule GlobalCombatWeb.GameLive do
     do: update(socket, :assign_history, &[{source, amount} | &1])
 
   defp remember_assign(socket, _source, _target, _amount), do: socket
+
+  # Carries out a `Hud.undo_plan/3`: the engine can only clear an area's whole
+  # assignment, so clear it, re-queue what stays, and put back the area's
+  # order at what it can still send.
+  defp apply_undo(socket, account, plan) do
+    game_id = socket.assigns.game_id
+    Games.unassign(game_id, account.id, plan.area)
+    if plan.keep > 0, do: Games.assign(game_id, account.id, plan.area, plan.keep)
+
+    with {target, amount} <- plan.order,
+         do: submit_order(socket, account, plan.area, target, amount)
+  end
+
+  defp parse_placement("all"), do: {:ok, :all}
+  defp parse_placement(value), do: parse_int(value)
 
   defp parse_int(value) do
     case Integer.parse(to_string(value)) do
@@ -1148,7 +1226,10 @@ defmodule GlobalCombatWeb.GameLive do
     assigns =
       assign(assigns,
         ended_pill: ended_pill(assigns.view),
-        turn_hint: !assigns.view.ended && Hud.turn_hint(assigns.view, my_player(assigns.view))
+        turn_hint: !assigns.view.ended && Hud.turn_hint(assigns.view, my_player(assigns.view)),
+        income:
+          !assigns.view.ended && Hud.gesture_pool(assigns.view, my_player(assigns.view)) &&
+            Hud.income(assigns.view, my_player(assigns.view))
       )
 
     ~H"""
@@ -1159,6 +1240,11 @@ defmodule GlobalCombatWeb.GameLive do
       <%!-- aria-live="off": this changes on every placement, and the strip
       around it is a live region that would otherwise read each one out. --%>
       <span :if={@turn_hint} id="turn-hint" class="turn-hint" aria-live="off">{@turn_hint}</span>
+      <%!-- Your army at a glance: everything you have on the board and in hand,
+      and what next turn brings (the breakdown is in the Players drawer). --%>
+      <span :if={@income} id="army-summary" class="army-summary" aria-live="off">
+        {@income.armies} armies · +{@income.total} next turn
+      </span>
     </span>
     <StatusPill.status_pill :if={!@view.ended} tone="active" class="hud-desktop-only">
       In progress
@@ -1350,7 +1436,6 @@ defmodule GlobalCombatWeb.GameLive do
         replay_steps={@replay_steps}
         game_id={@game_id}
         unassigned={Hud.gesture_pool(@view, my_player(@view))}
-        hold_amount={Hud.hold_amount()}
       />
       <figcaption
         :if={@view.ended && @winner}
@@ -1474,9 +1559,17 @@ defmodule GlobalCombatWeb.GameLive do
   # `:players` rail between the roster and chat (`docs/mobile-battle-mode.md`
   # §4.3) — only ever called while `@status == :playing` (`render_game/1`).
   defp players_extras(assigns) do
-    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
+    me = assigns.view.viewer_number && my_player(assigns.view)
+
+    assigns =
+      assign(assigns,
+        my_orders: my_orders(assigns.view),
+        income: me && !me.eliminated && Hud.income(assigns.view, me),
+        unplaced: me && me.unassigned_armies
+      )
 
     ~H"""
+    <.income_card :if={!@view.ended && @income} income={@income} unplaced={@unplaced} />
     <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
     <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
     <.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
@@ -1660,12 +1753,81 @@ defmodule GlobalCombatWeb.GameLive do
       class={["order-panel min-w-[16rem]", "order-panel--#{@mode}"]}
       data-anchor={@anchor}
     >
-      <:header>{order_panel_title(@mode, @target)}</:header>
+      <:header>
+        <%= if @mode == :assign && @source do %>
+          <span class="lg:hidden">Place armies on {@source.name}</span>
+          <span class="hidden lg:inline">{order_panel_title(@mode, @target)}</span>
+        <% else %>
+          {order_panel_title(@mode, @target)}
+        <% end %>
+      </:header>
+      <%!-- The phone's placement bar: a tap selected this territory; these
+      buttons place on it, one tap each, and −1 takes one back. Below `lg`
+      it replaces the amount form for placing (the form stays for orders). --%>
+      <div :if={@mode == :assign && @source} id="placement-bar" class="placement-bar lg:hidden">
+        <p id="placement-status" class="placement-status">
+          <b>{@source.armies}</b>
+          armies here<span :if={@source.pending_armies > 0}>
+            (+{@source.pending_armies} placed)
+          </span>
+          · <b>{@limit}</b>
+          left to place
+        </p>
+        <div class="placement-buttons">
+          <Button.button
+            id="place-minus"
+            type="button"
+            intent="neutral"
+            phx-click="unplace_one"
+            phx-value-area={@source.number}
+            disabled={@source.pending_armies == 0}
+            aria-label="Take one army back"
+          >
+            −1
+          </Button.button>
+          <Button.button
+            id="place-one"
+            type="button"
+            phx-click="quick_assign"
+            phx-value-area={@source.number}
+            phx-value-amount="1"
+            disabled={@limit == 0}
+          >
+            +1
+          </Button.button>
+          <Button.button
+            id="place-five"
+            type="button"
+            phx-click="quick_assign"
+            phx-value-area={@source.number}
+            phx-value-amount={Hud.hold_amount()}
+            disabled={@limit == 0}
+          >
+            +{Hud.hold_amount()}
+          </Button.button>
+          <Button.button
+            id="place-all"
+            type="button"
+            phx-click="quick_assign"
+            phx-value-area={@source.number}
+            phx-value-amount="all"
+            disabled={@limit == 0}
+          >
+            All {@limit}
+          </Button.button>
+        </div>
+        <p class="placement-hint">
+          Tap another of your territories to place there, or drag this one's army token onto a neighbour to attack or move.
+        </p>
+        <Button.button id="placement-done" type="button" intent="neutral" phx-click="cancel_order">
+          Done
+        </Button.button>
+      </div>
       <form
         id="order-form"
         phx-change="change_amount"
         phx-submit="submit_order"
-        class="flex flex-col gap-[var(--space-3)]"
+        class={["flex flex-col gap-[var(--space-3)]", @mode == :assign && "max-lg:hidden"]}
       >
         <p :if={@replaces} id="order-replaces" class="order-replaces">
           Replaces {@source.name}'s order to {@replaces.name}: one order per territory each turn.
@@ -1801,6 +1963,51 @@ defmodule GlobalCombatWeb.GameLive do
     for area <- view.areas, WorldMap.queued_order?(area) do
       WorldMap.order_label(area.name, area.order, Map.fetch!(area_names, area.order.target))
     end
+  end
+
+  # Where the viewer's armies stand: on the board, still to place this turn,
+  # and what next turn brings, worked out the way the engine does it
+  # (`Hud.income/2`) so the player can see why — territories, then each region
+  # held outright, then the game's minimum if that is what applies.
+  attr :income, :map, required: true
+  attr :unplaced, :integer, required: true
+
+  defp income_card(assigns) do
+    ~H"""
+    <Card.card id="income-breakdown" class="min-w-[16rem]">
+      <:header>Your armies</:header>
+      <dl class="income-list">
+        <div>
+          <dt>On the board and in hand</dt>
+          <dd class="tabular-nums">{@income.armies}</dd>
+        </div>
+        <div>
+          <dt>Left to place this turn</dt>
+          <dd class="tabular-nums">{@unplaced}</dd>
+        </div>
+        <div class="income-total">
+          <dt>Next turn</dt>
+          <dd class="tabular-nums">+{@income.total}</dd>
+        </div>
+        <div>
+          <dt>{@income.territories} territories ÷ 2</dt>
+          <dd class="tabular-nums">+{@income.base}</dd>
+        </div>
+        <div :for={bonus <- @income.bonuses}>
+          <dt>{bonus.name} held</dt>
+          <dd class="tabular-nums">+{bonus.bonus}</dd>
+        </div>
+        <div :if={@income.bonuses == []}>
+          <dt>Region bonuses</dt>
+          <dd>none held yet</dd>
+        </div>
+        <div :if={@income.total == @income.minimum and @income.minimum > 0}>
+          <dt>Game minimum applies</dt>
+          <dd class="tabular-nums">{@income.minimum}</dd>
+        </div>
+      </dl>
+    </Card.card>
+    """
   end
 
   attr :orders, :list, required: true

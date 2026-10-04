@@ -1116,6 +1116,88 @@ defmodule GlobalCombatWeb.GameLiveTest do
              )
     end
 
+    test "a phone tap selects your territory and opens the placement bar; nothing is placed",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "tap_area", %{"area" => "1"})
+      sync_game(game_id, alice_view)
+
+      assert area(game_id, alice, 1).pending_armies == 0
+      assert has_element?(alice_view, "#placement-bar #placement-status", "25")
+      assert has_element?(alice_view, "#place-all", "All 25")
+      assert has_element?(alice_view, "#place-minus[disabled]")
+    end
+
+    test "the placement bar places +1, +5 and All, and −1 takes one back", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "tap_area", %{"area" => "1"})
+      alice_view |> element("#place-one") |> render_click()
+      alice_view |> element("#place-five") |> render_click()
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).pending_armies == 6
+
+      alice_view |> element("#place-minus") |> render_click()
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).pending_armies == 5
+      assert unassigned(game_id, alice) == 20
+
+      alice_view |> element("#place-all") |> render_click()
+      sync_game(game_id, alice_view)
+      assert area(game_id, alice, 1).pending_armies == 25
+      assert unassigned(game_id, alice) == 0
+      assert has_element?(alice_view, "#place-all[disabled]")
+    end
+
+    test "with your territory selected, a tap on another of yours switches to it and a tap on an enemy neighbour targets it",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      render_hook(alice_view, "tap_area", %{"area" => "1"})
+      render_hook(alice_view, "tap_area", %{"area" => "3"})
+      assert has_element?(alice_view, "#placement-bar")
+      assert has_element?(alice_view, ~s(#place-one[phx-value-area="3"]))
+
+      render_hook(alice_view, "tap_area", %{"area" => "1"})
+      render_hook(alice_view, "tap_area", %{"area" => "2"})
+      refute has_element?(alice_view, "#placement-bar")
+      assert has_element?(alice_view, "#order-submit", "Attack 4")
+    end
+
+    test "the turn pill and the drawer show the army total, what's left to place, and next turn's income",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      me = Enum.find(view.players, &(&1.number == view.viewer_number))
+      income = GlobalCombatWeb.GameLive.Hud.income(view, me)
+
+      assert has_element?(
+               alice_view,
+               "#army-summary",
+               "#{me.armies} armies · +#{income.total} next turn"
+             )
+
+      assert has_element?(alice_view, "#income-breakdown", "Left to place this turn")
+
+      assert has_element?(
+               alice_view,
+               "#income-breakdown",
+               "#{income.territories} territories ÷ 2"
+             )
+    end
+
     test "drag_order ignores a source the viewer doesn't own and a target that isn't adjacent",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()

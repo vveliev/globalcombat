@@ -283,23 +283,29 @@ wording, the Undo history, the optimistic copies of a placement or order).
 
 | Piece | Behaviour |
 |---|---|
-| Tap an own territory | While reinforcements are unplaced, places one (`quick_assign`); hold for five. Keyboard Enter/Space still selects, so the order panel's assign mode stays reachable |
+| Tap a territory | Never places armies by itself (`tap_area`). Your own: selects it and opens the placement bar on it — another of yours switches the selection. With one of yours selected, an enemy neighbour: targets it (the attack panel). Anything else closes the panel |
+| Placement bar | On the selected territory: −1, +1, +5 and All (`quick_assign`, `unplace_one`), with its armies and how many are left to place; Done closes it |
 | Drag an army token | Draws a live arrow over a veiled board with the reachable neighbours redrawn on top; released over one, it opens the order panel on that pair (`drag_order`). With nothing queued from the territory the order is queued straight away with everything it can spare; a drag onto the target already ordered reopens that order untouched; a drag to a different target queues nothing until submitted, and the panel says which order it would replace (a territory carries one order a turn). A drag that starts anywhere but a token pans, own land included |
 | Order panel | For a transfer/attack it floats beside the arrow (`data-anchor`, positioned by `.MapViewport`); assign mode stays in the dock |
-| Undo | Takes back the latest placement (`undo_assign`): clears that area's assignment, re-queues the rest, and puts back as much of an order queued from it as it can still send. The history is reconciled with what is really queued on every reload, so it follows the order panel's Assign/Unassign and survives a reconnect |
+| Undo | Takes back the latest placement, whichever territory it was on (`undo_assign`): clears that area's assignment, re-queues the rest, and puts back as much of an order queued from it as it can still send. The history is reconciled with what is really queued on every reload, so it follows the order panel's Assign/Unassign and survives a reconnect |
 | Lens | One button that steps owner → region → frontier (`cycle_lens`); the segmented control stays at `lg` |
 | End Turn | Round thumb button whose ring fills as reinforcements go out |
 | Fit | From the whole board it returns to the starting view; from anywhere else it fits the whole board |
 | Replay | The status strip's replay controls shrink to chips: "▶ Replay" and ◀ / ▶ for the steps |
 
-A player who has ended their turn gets none of the gestures, and the three
-events refuse them server-side.
+A player who has ended their turn gets none of the gestures, and the
+placement, drag and Undo events refuse them server-side.
+
+(The first cut placed an army on every tap and five on a hold. In play that
+made selecting your own territory impossible while armies were unplaced, so a
+tap now only selects and the placement bar does the placing.)
 
 ### Every size
 
 | Piece | Behaviour |
 |---|---|
-| Turn pill | "Turn 7" plus where the viewer is in the turn: "Place 4 armies", "2 orders ready", "Waiting on others". Kept out of the status strip's live announcements, since it changes on every placement |
+| Turn pill | "Turn 7" plus where the viewer is in the turn: "Place 4 armies", "2 orders ready", "Waiting on others", and the army readout: "140 armies · +14 next turn". Kept out of the status strip's live announcements, since it changes on every placement |
+| Your armies | A card in the Players drawer: armies on the board and in hand, left to place, and next turn's reinforcements worked out the way the engine does (territories ÷ 2, plus each region held outright, never below the game's minimum) |
 | Roster | The drawer opener (below `lg`) shows each seat's colour and initial, with a tick once they have ended their turn |
 | Coach line | One sentence on what to do next, worded for how that size is played: tap/hold/drag below `lg`, click a territory then a neighbour from `lg` up |
 | End Turn confirm | With armies unplaced the first press arms the button ("3 unplaced · tap again") for three seconds and the second ends the turn (`arm_end_turn`) |

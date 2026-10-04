@@ -173,17 +173,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: nil,
     doc: "used only as the `.MapViewport` hook's sessionStorage key; nil disables persistence"
 
-  attr :hold_amount, :integer,
-    default: 5,
-    doc:
-      "how many reinforcements a hold places (`GameLive.Hud.hold_amount/0`, which caps `quick_assign`)"
-
   attr :unassigned, :any,
     default: nil,
     doc:
       "the viewer's unplaced reinforcements, or nil when they can't act (spectating, " <>
-        "eliminated, turn ended) — a number turns on the phone gestures, and while it is " <>
-        "above zero a tap on an own territory places one (`quick_assign`) instead of selecting it"
+        "eliminated, turn ended) — a number turns on the phone gestures (`tap_area`, " <>
+        "`drag_order`)"
 
   def world_map(assigns) do
     lens = effective_lens(assigns.lens, assigns.areas, assigns.viewer_number)
@@ -214,7 +209,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-game-id={@game_id}
       data-zoomed="false"
       data-unassigned={@interactive && @unassigned}
-      data-hold-amount={@hold_amount}
       data-token-radius={@token_radius}
       data-curve={curve_json(@map_name)}
       tabindex="0"
@@ -535,19 +529,20 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         // The map's gesture layer. One finger pans, two pinch-zoom, a double
         // tap on open board zooms in or back out — and, below `lg` (the phone
         // HUD; from `lg` up a click selects and a drag pans, as it always
-        // has), the two game gestures on the viewer's own territories:
+        // has), the two game gestures:
         //
-        //   * tap places one reinforcement while any are unplaced, hold places
-        //     five (`quick_assign`), instead of opening the order panel;
+        //   * a tap on a territory goes to the server as `tap_area`, which
+        //     selects it (your own: the placement bar opens) or, with one of
+        //     yours selected, targets an enemy neighbour — never places armies
+        //     by itself;
         //   * a drag that starts on an own territory's army token draws a live
         //     arrow and, released over a neighbour, opens that order
         //     (`drag_order`). A drag from anywhere else pans, own land included.
         //
-        // A tap only ever gets cancelled when the pointer actually moved, when
-        // it was a hold, or when it completes a double tap. A mouse click goes
-        // straight through; a touch or pen tap that isn't a placement is held
-        // for the double-tap window first, so the first tap of a double tap
-        // never reaches phx-click="select_area".
+        // A tap only ever gets cancelled when the pointer actually moved or
+        // when it completes a double tap. A touch or pen tap is held for the
+        // double-tap window first, so the first tap of a double tap never
+        // reaches the server.
         //
         // The viewBox always takes the stage's own aspect ratio, so the board
         // fills the screen edge to edge instead of letterboxing: "fit" shows
@@ -563,10 +558,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         const DOUBLE_TAP_MS = 300
         const DOUBLE_TAP_PX = 24
         const DRAG_PX = 8
-        const HOLD_MS = 450
         const TOKEN_REACH_PX = 22
         const TOKEN_GRAB_PX = 30
-        const PLACE_COOLDOWN_MS = 500
         const PANEL_GAP_PX = 28
         const PANEL_MARGIN_PX = 8
         const EDGE_SLACK = 0.12
@@ -598,7 +591,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.dragLayer = this.el.querySelector("#world-map-drag")
             this.curveShape = JSON.parse(this.el.dataset.curve)
             this.desktop = window.matchMedia(DESKTOP_QUERY)
-            this.lastPlaceAt = 0
             this.base = this.parseViewBox(this.el.dataset.viewBox)
             this.pointers = new Map()
             this.moved = false
@@ -611,12 +603,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.pointerType = "mouse"
             this.press = null
             this.drag = null
-            this.suppressClick = false
-            this.pendingPlacements = 0
             this.raf = null
             this.counts = this.readCounts()
             this.bumpedAt = {}
-            this.holdAmount = Number(this.el.dataset.holdAmount)
             this.tokenRadius = Number(this.el.dataset.tokenRadius)
             this.onVisualViewport = () => this.positionOrderPanel()
             window.visualViewport?.addEventListener("resize", this.onVisualViewport)
@@ -668,7 +657,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.resizeObserver?.disconnect()
             window.visualViewport?.removeEventListener("resize", this.onVisualViewport)
             window.visualViewport?.removeEventListener("scroll", this.onVisualViewport)
-            this.cancelHold()
             this.clearPanelPosition()
             if (this.raf) cancelAnimationFrame(this.raf)
             if (this.pendingTap) clearTimeout(this.pendingTap.timer)
@@ -988,10 +976,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             return this.el.dataset.unassigned !== undefined && !this.desktop.matches
           },
 
-          unplaced() {
-            return Number(this.el.dataset.unassigned || 0) - this.pendingPlacements
-          },
-
           // --- pointer gestures ----------------------------------------------
 
           onPointerDown(e) {
@@ -1003,13 +987,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               this.moved = false
               this.lastSingle = { x: e.clientX, y: e.clientY }
               this.pinch = null
-              this.suppressClick = false
               this.press = this.pressAt(e.clientX, e.clientY)
-              if (this.press?.canPlace) {
-                this.press.timer = setTimeout(() => this.onHold(), HOLD_MS)
-              }
             } else if (this.pointers.size === 2) {
-              this.cancelHold()
               this.endDrag(false)
               this.lastSingle = null
               this.pinch = this.pinchState()
@@ -1035,23 +1014,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
             return {
               area,
-              canPlace: mine && this.unplaced() > 0,
               canDrag: mine && onToken && Number(territory.dataset.ownArmies || 0) > 1,
-              adjacent: (territory.dataset.adjacent || "").split(",").filter(Boolean),
-              timer: null
+              adjacent: (territory.dataset.adjacent || "").split(",").filter(Boolean)
             }
-          },
-
-          onHold() {
-            if (!this.press || this.moved) return
-            this.press.timer = null
-            this.suppressClick = true
-            this.place(this.press.area, this.holdAmount)
-          },
-
-          cancelHold() {
-            if (this.press?.timer) clearTimeout(this.press.timer)
-            if (this.press) this.press.timer = null
           },
 
           onPointerMove(e) {
@@ -1063,9 +1028,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               const dy = e.clientY - this.gestureStart.y
               if (Math.hypot(dx, dy) > DRAG_PX) {
                 this.moved = true
-                this.cancelHold()
                 this.capturePointers()
-                if (this.pointers.size === 1 && this.press?.canDrag && !this.suppressClick) {
+                if (this.pointers.size === 1 && this.press?.canDrag) {
                   this.startDrag()
                 }
               }
@@ -1120,7 +1084,6 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               this.lastSingle = { ...remaining }
               this.pinch = null
             } else if (this.pointers.size === 0) {
-              this.cancelHold()
               this.pinch = null
               this.lastSingle = null
               this.gestureStart = null
@@ -1277,36 +1240,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             // Our own re-dispatch of a held tap (`deliverPendingTap`).
             if (this.deliveringTap) return
 
-            if (this.moved || this.suppressClick) {
+            if (this.moved) {
               swallow(e)
-              this.suppressClick = false
               return
             }
 
             // Keyboard-synthesised clicks (detail 0) are never part of a tap.
             if (e.detail === 0) return
-
-            // A pointer tap on an own territory while reinforcements are
-            // unplaced places one instead of selecting (keyboard Enter/Space
-            // still selects — `.TerritoryKeyboard` — so the order panel stays
-            // reachable). Never a double-tap zoom: tapping fast is how you
-            // place several.
-            if (this.gestures()) {
-              const territory = this.territoryAt(e.clientX, e.clientY)
-              const mine = territory?.dataset.mine !== undefined
-              // The tap after the last army is placed is still part of the
-              // same burst: swallow it rather than pop the order panel open.
-              const justPlaced = Date.now() - this.lastPlaceAt < PLACE_COOLDOWN_MS
-              if (mine && (this.unplaced() > 0 || justPlaced)) {
-                swallow(e)
-                // A tap still held for the double-tap window was a single tap
-                // after all: let it through rather than drop it.
-                this.deliverPendingTap()
-                this.lastClick = null
-                this.place(territory.dataset.area, 1)
-                return
-              }
-            }
 
             if ((e.pointerType || this.pointerType) === "mouse") {
               this.onMouseClick(e)
@@ -1324,6 +1264,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               swallow(e)
               this.lastClick = null
               this.doubleTapZoom(e.clientX, e.clientY)
+              return
+            }
+
+            // A mouse at phone width plays the phone way too.
+            const area = this.gestures() && this.tappedArea(e.target, e.clientX, e.clientY)
+            if (area) {
+              swallow(e)
+              this.tapArea(area)
             }
           },
 
@@ -1347,6 +1295,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               y: e.clientY,
               target: e.target,
               targetId: e.target.closest?.("[id]")?.id,
+              area: this.gestures() && this.tappedArea(e.target, e.clientX, e.clientY),
               timer: setTimeout(() => this.deliverPendingTap(), DOUBLE_TAP_MS)
             }
           },
@@ -1372,6 +1321,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             if (!tap) return
             this.cancelPendingTap()
 
+            if (tap.area) {
+              this.tapArea(tap.area)
+              return
+            }
+
             const target = tap.target.isConnected
               ? tap.target
               : tap.targetId && document.getElementById(tap.targetId)
@@ -1393,23 +1347,16 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             }
           },
 
-          // Optimistic: placements still on their way to the server count
-          // against the pool locally, so a burst of taps can't overshoot it.
-          // Each one stops counting when its own reply lands — by then the
-          // server-rendered `data-unassigned` already includes it.
-          place(area, amount) {
-            const n = Math.min(amount, this.unplaced())
-            if (n <= 0) return
-            this.pendingPlacements += n
-            this.lastPlaceAt = Date.now()
-            buzz(n > 1 ? [12, 40, 12] : 10)
-            this.bump(area)
-            const settle = () => {
-              this.pendingPlacements = Math.max(0, this.pendingPlacements - n)
-            }
-            // Settles on a failed push too (socket down), or the pool would
-            // stay short by `n` for good.
-            this.pushEvent("quick_assign", { area, amount: n }).then(settle, settle)
+          // The territory a phone tap lands on — or none for an order arrow,
+          // which keeps its own `select_order` click.
+          tappedArea(target, clientX, clientY) {
+            if (target?.closest?.(".world-map-order")) return null
+            return this.territoryAt(clientX, clientY)?.dataset.area || null
+          },
+
+          tapArea(area) {
+            buzz(6)
+            this.pushEvent("tap_area", { area })
           },
 
           doubleTapZoom(clientX, clientY) {
@@ -1869,13 +1816,17 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # inaccessibility `MapGeometry` already computed per area) rather than new
   # generated geometry — close enough for a decorative, aria-hidden bonus
   # readout backed by the accessible `region_bonuses/1` panel.
+  @doc "`%{region_number => [area_number]}` for `map_name`."
+  def areas_by_region(map_name) do
+    MapInfo.areas(map_name)
+    |> Enum.group_by(
+      fn {_number, _name, region, _links} -> region end,
+      fn {number, _name, _region, _links} -> number end
+    )
+  end
+
   defp region_labels(map_name) do
-    areas_by_region =
-      MapInfo.areas(map_name)
-      |> Enum.group_by(
-        fn {_number, _name, region, _links} -> region end,
-        fn {number, _name, _region, _links} -> number end
-      )
+    areas_by_region = areas_by_region(map_name)
 
     for {region_number, _name, _num_areas, bonus} <- MapInfo.regions(map_name) do
       {x, y} = region_centroid(map_name, Map.fetch!(areas_by_region, region_number))

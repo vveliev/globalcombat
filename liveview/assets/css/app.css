@@ -1250,3 +1250,70 @@
     transition: none;
   }
 }
+
+/* The status strip's army readout, under the turn hint. */
+.army-summary {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The phone's placement bar in the order panel (assign mode). */
+.placement-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.placement-status,
+.placement-hint {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.placement-hint {
+  color: var(--color-text-muted);
+}
+
+.placement-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.placement-buttons button {
+  min-height: var(--size-touch-target);
+  font-size: var(--text-md);
+}
+
+/* The drawer's "Your armies" card. */
+.income-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.income-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.income-list dd {
+  margin: 0;
+}
+
+.income-list .income-total {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+  font-weight: 700;
+}
+
+@media (width < 64rem) {
+  [data-hud] .army-summary {
+    font-size: var(--text-xs);
+  }
+}
