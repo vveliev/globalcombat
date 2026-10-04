@@ -8,7 +8,7 @@ defmodule GlobalCombatWeb.GameCreateLive do
   GIF-93: the form now exposes all 9 of the legacy settings — `GlobalCombat.Games.Server`
   already accepted `is_training`/`minimum_armies`/`turn_length_minutes` (this module's
   moduledoc just hadn't caught up to submit them). Training Mode additionally auto-joins
-  the reserved "Computer" account (id 1, see `Engine.Game.reset_done_flags/1`) and forces
+  the reserved "Computer" account (`Accounts.computer_account_id/0`) and forces
   `max_players` to 2, mirroring `GameController.Create`'s `if (model.IsTraining)` branches
   — without a second seat the lobby could never reach `Server.start_game/2`'s `>= 2` guard.
 
@@ -22,6 +22,7 @@ defmodule GlobalCombatWeb.GameCreateLive do
 
   import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1]
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombatWeb.Components.Boutique.Button
 
@@ -67,7 +68,9 @@ defmodule GlobalCombatWeb.GameCreateLive do
       })
 
     {:ok, 1} = Games.join(game_id, account.id, account.name)
-    if is_training, do: {:ok, 2} = Games.join(game_id, 1, "Computer")
+
+    if is_training,
+      do: {:ok, 2} = Games.join(game_id, Accounts.computer_account_id(), Accounts.computer_name())
 
     {:noreply, push_navigate(socket, to: ~p"/Game-#{game_id}")}
   end

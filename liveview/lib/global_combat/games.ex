@@ -189,12 +189,12 @@ defmodule GlobalCombat.Games do
   `list_player_games/2` ("Your Current Games" on Home/PlayerInfo) sees a game the moment an
   account joins it rather than never.
 
-  Always `:ok`: this table is a listing mirror of the roster `GlobalCombat.Games.Server` holds
-  (the authoritative copy, also snapshotted into `games.serialized`), so a row that can't be
-  written is not a reason to refuse the seat. Concretely, a repeat insert hits the
-  `(account_id, game_id)` unique index (already seated), and the Training Mode "Computer" seat
-  (account 1) has no `account` row on a database without the System account — same for the
-  synthetic ids `Games.Server`'s own tests join with.
+  `:ok` when the seat row exists afterwards, or legitimately can't: this table is a listing
+  mirror of the roster `GlobalCombat.Games.Server` holds (the authoritative copy, also
+  snapshotted into `games.serialized`). A repeat insert hitting the `(account_id, game_id)`
+  unique index means the account is already seated, and an account with no `account` row (the
+  synthetic ids `Games.Server`'s own tests join with) has nothing to list. Any other failure is
+  returned as `{:error, changeset}` rather than silently dropped.
   """
   def seat(game_id, account_id) do
     # The existence check is deliberate, not just an optimisation: letting the insert fail its
@@ -205,14 +205,22 @@ defmodule GlobalCombat.Games do
       %GamePlayer{game_id: game_id, account_id: account_id, is_invite: false}
       |> Ecto.Changeset.change()
       |> Ecto.Changeset.unique_constraint([:account_id, :game_id])
+      |> Ecto.Changeset.foreign_key_constraint(:game_id)
       |> Repo.insert()
       |> case do
-        {:ok, _} -> :ok
-        {:error, %Ecto.Changeset{}} -> :ok
+        {:ok, _} ->
+          :ok
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          if already_seated?(changeset), do: :ok, else: {:error, changeset}
       end
     else
       :ok
     end
+  end
+
+  defp already_seated?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_message, opts}} -> opts[:constraint] == :unique end)
   end
 
   @doc "Port of `GameServer.PlayerUnjoined`'s row delete — drops an account's accepted seat in a lobby (quit/kick)."
@@ -278,12 +286,9 @@ defmodule GlobalCombat.Games do
   `list_invited_games/1` (the Home dashboard's "Games Invites" panel) in sync with it.
   """
   def invite(game_id, account_id) do
-    %GamePlayer{}
-    |> Ecto.Changeset.cast(%{game_id: game_id, account_id: account_id, is_invite: true}, [
-      :game_id,
-      :account_id,
-      :is_invite
-    ])
+    # Every field is set by the server, never cast from input.
+    %GamePlayer{game_id: game_id, account_id: account_id, is_invite: true}
+    |> Ecto.Changeset.change()
     |> Ecto.Changeset.unique_constraint([:account_id, :game_id])
     |> Repo.insert()
   end

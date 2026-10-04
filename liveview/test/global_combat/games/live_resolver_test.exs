@@ -1,9 +1,11 @@
 defmodule GlobalCombat.Games.LiveResolverTest do
   use GlobalCombat.DataCase, async: true
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.Game.{Area, Player}
+  alias GlobalCombat.Engine.MapInfo
   alias GlobalCombat.Engine.Wire
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Game
@@ -62,6 +64,23 @@ defmodule GlobalCombat.Games.LiveResolverTest do
       assert Map.fetch!(decoded, :Ended) == true
     end
 
+    test "in a training game, the Computer queues its orders for the next turn and is done" do
+      game = active_game_fixture(computer_opponent: true)
+
+      assert :ok = LiveResolver.resolve_turn(game)
+
+      persisted = GamesDb.get_game!(game.id)
+      wire = GrpcHost.Game.decode(persisted.serialized)
+      %{engine: engine} = Wire.from_wire_snapshot(wire, DotnetRandom.new(1))
+
+      computer = Engine.player!(engine, 2)
+      assert computer.done
+      # The reinforcements it just received went straight onto its only area.
+      assert computer.unassigned_armies == 0
+      assert Engine.area!(engine, 2).assigned_armies > 0
+      refute Engine.player!(engine, 1).done
+    end
+
     test "errors instead of raising when there's no persisted state to rehydrate from" do
       game = %Game{status: :new, private: false, turn_length: 60} |> Repo.insert!()
       {:ok, game} = GamesDb.mark_active(game)
@@ -79,6 +98,22 @@ defmodule GlobalCombat.Games.LiveResolverTest do
   defp active_game_fixture(opts \\ []) do
     down_to_last_player? = Keyword.get(opts, :down_to_last_player, false)
 
+    computer_opponent? = Keyword.get(opts, :computer_opponent, false)
+    bob_account_id = if computer_opponent?, do: Accounts.computer_account_id(), else: 102
+
+    # The Computer's `RandomAi` picks targets from real map neighbours, so that variant needs a
+    # whole board: Bob keeps area 2, Alice holds every other area.
+    alice_areas =
+      if computer_opponent?,
+        do: for(n <- 1..MapInfo.num_areas(:original), n != 2, do: n),
+        else: [1]
+
+    areas =
+      Map.new([{2, 2} | Enum.map(alice_areas, &{&1, 1})], fn {number, owner} ->
+        {number,
+         %Area{number: number, owner_number: owner, armies: 5, assigned_armies: 0, command: :none}}
+      end)
+
     engine = %Engine{
       map_name: :original,
       rng: DotnetRandom.new(7),
@@ -88,15 +123,18 @@ defmodule GlobalCombat.Games.LiveResolverTest do
       minimum_armies: 3,
       is_training: true,
       ended: false,
-      areas: %{
-        1 => %Area{number: 1, owner_number: 1, armies: 5, assigned_armies: 0, command: :none},
-        2 => %Area{number: 2, owner_number: 2, armies: 5, assigned_armies: 0, command: :none}
-      },
+      areas: areas,
       players: %{
-        1 => %Player{number: 1, account_id: 101, name: "Alice", areas: 1, armies: 5},
+        1 => %Player{
+          number: 1,
+          account_id: 101,
+          name: "Alice",
+          areas: length(alice_areas),
+          armies: 5 * length(alice_areas)
+        },
         2 => %Player{
           number: 2,
-          account_id: 102,
+          account_id: bob_account_id,
           name: "Bob",
           areas: if(down_to_last_player?, do: 0, else: 1),
           armies: if(down_to_last_player?, do: 0, else: 5)

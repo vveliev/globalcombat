@@ -53,8 +53,23 @@ defmodule GlobalCombat.Games.PlayerView do
   just captured visibility into. Both instants have to be checked independently —
   `owns_adjacent?/3` depends on a *neighboring* area's owner, which can itself flip mid-turn, so
   "visible before" and "visible after" are genuinely different computations, not the same check
-  run twice. `{:eliminated, _}`/`{:ended, _}` touch no area and are never filtered, matching the
-  player-roll-up rule above (elimination/game-end is public information, not a board detail).
+  run twice. `{:eliminated, _}`/`{:ended, _}`/`{:bonus, _, _, _}` touch no area and are never
+  filtered, matching the player-roll-up rule above: elimination, game end and each player's
+  reinforcement count are public information, not board detail (legacy `RunTurn` posted the "Army
+  Bonuses" lines to the game's forum for every player, fogged game or not, and the bonus is
+  derivable from the public per-player area count plus region control anyway).
+
+  ## Complete area history
+
+  Filtering drops whole events, so an area the viewer *can* see may still have been touched by an
+  event they can't (an attack into it from a fogged neighbour). Each area therefore also carries
+  `last_turn_complete`: true when no event touching it can have been filtered out. In a fogged
+  game that holds when the area itself and every area sharing a border with it were visible to
+  this viewer before or after the turn (the same per-area check as above) — an `:assign` only
+  touches its own area, and every transfer/attack runs between two bordering areas, so no event
+  touching it can then have an endpoint the viewer never saw. It is computed purely from
+  visibility the viewer already has, so it reveals nothing about what the hidden events were.
+  Every area is complete in a non-fogged game.
 
   The "before" ownership snapshot has no equivalent already sitting in `Engine.Game` — the engine
   is pure and only ever hands back the *resolved* state (see its moduledoc's "old state is
@@ -97,6 +112,7 @@ defmodule GlobalCombat.Games.PlayerView do
     is_fogged = Keyword.fetch!(opts, :is_fogged)
     messages = Keyword.get(opts, :messages, [])
     last_turn_log = Keyword.get(opts, :last_turn_log, %TurnLog{})
+    complete = complete_areas(engine, viewer_number, is_fogged, last_turn_log)
 
     %__MODULE__{
       game_id: game_id,
@@ -106,7 +122,10 @@ defmodule GlobalCombat.Games.PlayerView do
       is_fogged: is_fogged,
       viewer_number: viewer_number,
       areas:
-        Enum.map(Engine.areas_in_order(engine), &area_view(engine, &1, viewer_number, is_fogged)),
+        Enum.map(
+          Engine.areas_in_order(engine),
+          &area_view(engine, &1, viewer_number, is_fogged, complete)
+        ),
       players: Enum.map(Engine.players_in_order(engine), &player_summary/1),
       messages: messages,
       last_turn_events: visible_events(engine, viewer_number, is_fogged, last_turn_log)
@@ -126,7 +145,7 @@ defmodule GlobalCombat.Games.PlayerView do
     end
   end
 
-  defp area_view(engine, %Engine.Area{} = area, viewer_number, is_fogged) do
+  defp area_view(engine, %Engine.Area{} = area, viewer_number, is_fogged, complete) do
     owns_it? = area.owner_number == viewer_number
     visible? = not is_fogged or owns_it? or owns_adjacent?(engine, area, viewer_number)
 
@@ -162,8 +181,42 @@ defmodule GlobalCombat.Games.PlayerView do
       # `nil` for the owner's own area when there's nothing queued (`:command ==
       # :none`), so the overlay's `if area.order do` has one clean falsy case to check
       # instead of a sentinel command atom.
-      order: order_view(area, owns_it?)
+      order: order_view(area, owns_it?),
+      # Whether `last_turn_events` holds *every* event of the last turn that touched this area
+      # (see the moduledoc's "Complete area history" section) — what lets the replay rebuild
+      # this area's running army counts without guessing past an event fog filtered out.
+      last_turn_complete: MapSet.member?(complete, area.number)
     }
+  end
+
+  # See the moduledoc's "Complete area history" section.
+  defp complete_areas(engine, _viewer_number, false, _log), do: MapSet.new(Map.keys(engine.areas))
+
+  defp complete_areas(engine, viewer_number, true, %TurnLog{before_owners: before_owners}) do
+    before_owner = before_owners_lookup(before_owners)
+    current_owner = current_owner_lookup(engine)
+
+    observed =
+      engine.areas
+      |> Map.keys()
+      |> Enum.filter(fn number ->
+        area_visible_at?(before_owner, engine, viewer_number, true, number) or
+          area_visible_at?(current_owner, engine, viewer_number, true, number)
+      end)
+      |> MapSet.new()
+
+    observed
+    |> Enum.filter(fn number ->
+      engine.map_name |> bordering(number) |> Enum.all?(&MapSet.member?(observed, &1))
+    end)
+    |> MapSet.new()
+  end
+
+  # Every area sharing a border with `number`, in either direction: its own links plus every
+  # area linking into it (transfers/attacks run along `MapInfo.links_to?/3` from source to target).
+  defp bordering(map_name, number) do
+    {_number, _name, _region, links} = MapInfo.area(map_name, number)
+    Enum.uniq(links ++ MapInfo.inbounds(map_name, number))
   end
 
   defp area_armies(_area, false, _owns_it?), do: nil
@@ -209,6 +262,7 @@ defmodule GlobalCombat.Games.PlayerView do
        ),
        do: [from, to]
 
+  defp event_area_numbers({:bonus, _player, _new_armies, _region_bonus}), do: []
   defp event_area_numbers({:eliminated, _player}), do: []
   defp event_area_numbers({:ended, _winner}), do: []
 

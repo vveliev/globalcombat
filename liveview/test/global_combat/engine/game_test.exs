@@ -211,7 +211,10 @@ defmodule GlobalCombat.Engine.GameTest do
       assert events == [
                {:assign, 1, 4},
                {:transfer, 2, 3, 2},
-               {:attack, 4, 5, 19, 3, 5, true}
+               {:attack, 4, 5, 19, 3, 5, true},
+               # Reinforcements: areas / 2 (3 -> 1, 2 -> 1), no full region, minimum 0.
+               {:bonus, 1, 1, 0},
+               {:bonus, 2, 1, 0}
              ]
 
       assert Game.area!(resolved, 1).armies == 14
@@ -250,12 +253,119 @@ defmodule GlobalCombat.Engine.GameTest do
 
       assert events == [
                {:attack, 1, 2, 19, 3, 5, true},
+               # Player 1 is reinforced before the loop reaches (and eliminates) player 2,
+               # matching RunTurn's single pass over Players.
+               {:bonus, 1, 1, 0},
                {:eliminated, 2},
                {:ended, 1}
              ]
 
       assert resolved.ended
       assert Game.player!(resolved, 1).place == 1
+    end
+
+    test "an Amount-0 attack that needs no clamp emits no event, but still rolls the defender's dice" do
+      # Area 1 (2 armies) attacks with Amount 0: no clamp (0 <= Armies - 1), so Game.cs falls
+      # through and rolls the defender's dice for nothing. The state and RNG must match that
+      # exactly; only the event (which the board would draw as an arrow) is dropped.
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(42),
+        is_non_random: false,
+        minimum_armies: 0,
+        areas: %{
+          1 => %Area{
+            number: 1,
+            owner_number: 1,
+            armies: 2,
+            command: :attack,
+            target_number: 2,
+            amount: 0
+          },
+          2 => %Area{number: 2, owner_number: 2, armies: 7}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 1},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      refute Enum.any?(events, &match?({:attack, _, _, _, _, _, _}, &1))
+      assert Game.area!(resolved, 1).armies == 2
+      assert Game.area!(resolved, 2).armies == 7
+      assert Game.area!(resolved, 2).owner_number == 2
+
+      # The defender's 7 defend-roll draws were still consumed.
+      rng_after_draws =
+        Enum.reduce(1..7, DotnetRandom.new(42), fn _, rng ->
+          {_roll, rng} = DotnetRandom.next(rng, 1, 5)
+          rng
+        end)
+
+      assert resolved.rng == rng_after_draws
+    end
+
+    test "a transfer of 0 armies emits no event" do
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(1),
+        is_non_random: true,
+        minimum_armies: 0,
+        areas: %{
+          2 => %Area{
+            number: 2,
+            owner_number: 1,
+            armies: 6,
+            command: :transfer,
+            target_number: 3,
+            amount: 0
+          },
+          3 => %Area{number: 3, owner_number: 1, armies: 4},
+          4 => %Area{number: 4, owner_number: 2, armies: 4}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 2},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      refute Enum.any?(events, &match?({:transfer, _, _, _}, &1))
+      assert Game.area!(resolved, 2).armies == 6
+      assert Game.area!(resolved, 3).armies == 4
+    end
+
+    test "emits one :bonus per surviving player with RunTurn's Army Bonuses numbers" do
+      # Player 1 holds all of South America (10-13, bonus 3): 4 areas / 2 + 3 = 5 new armies.
+      # Player 2 holds one area: 1 / 2 + 0 = 0, floored to MinimumArmies (3).
+      game = %Game{
+        map_name: :original,
+        rng: DotnetRandom.new(1),
+        is_non_random: true,
+        minimum_armies: 3,
+        areas: %{
+          10 => %Area{number: 10, owner_number: 1, armies: 2},
+          11 => %Area{number: 11, owner_number: 1, armies: 2},
+          12 => %Area{number: 12, owner_number: 1, armies: 2},
+          13 => %Area{number: 13, owner_number: 1, armies: 2},
+          14 => %Area{number: 14, owner_number: 2, armies: 4}
+        },
+        players: %{
+          1 => %Player{number: 1, account_id: 2, name: "A", areas: 4, unassigned_armies: 1},
+          2 => %Player{number: 2, account_id: 3, name: "B", areas: 1}
+        }
+      }
+
+      {resolved, events} = Game.resolve_turn(game)
+
+      assert events == [{:bonus, 1, 5, 3}, {:bonus, 2, 3, 0}]
+      # The event reports exactly what was added to the unassigned pool.
+      assert Game.player!(resolved, 1).unassigned_armies == 1 + 5
+      assert Game.player!(resolved, 2).unassigned_armies == 3
+      assert Game.run_turn(game) == resolved
     end
 
     test "run_turn/1 still returns only the resolved state, unaffected by resolve_turn/1's event log" do
@@ -278,7 +388,7 @@ defmodule GlobalCombat.Engine.GameTest do
       }
 
       {resolve_result, events} = Game.resolve_turn(game)
-      assert events == [{:assign, 1, 4}]
+      assert events == [{:assign, 1, 4}, {:bonus, 1, 0, 0}, {:bonus, 2, 0, 0}]
       assert Game.area!(resolve_result, 1).armies == 14
       assert Game.run_turn(game) == resolve_result
     end

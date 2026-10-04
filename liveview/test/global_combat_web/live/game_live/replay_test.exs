@@ -10,8 +10,16 @@ defmodule GlobalCombatWeb.GameLive.ReplayTest do
   @ural 31
   @ukraine 26
 
-  defp area(number, name, armies) do
-    %{number: number, name: name, armies: armies}
+  # The `PlayerView` area fields `Replay` reads. `pending_armies` / `last_turn_complete`
+  # default to "nothing queued since" / "no event touching it was fog-filtered".
+  defp area(number, name, armies, opts \\ []) do
+    %{
+      number: number,
+      name: name,
+      armies: armies,
+      pending_armies: Keyword.get(opts, :pending, 0),
+      last_turn_complete: Keyword.get(opts, :complete, true)
+    }
   end
 
   defp areas(overrides \\ %{}) do
@@ -90,6 +98,16 @@ defmodule GlobalCombatWeb.GameLive.ReplayTest do
 
       assert step.text ==
                "Ural attacked Ukraine with 12 armies: 4 lost, 6 defenders lost, Ukraine captured"
+    end
+
+    test "bonus narrates legacy's per-player Army Bonuses line, with no from/to" do
+      [step] = Replay.steps([{:bonus, 1, 7, 3}], areas(), @players, :original)
+
+      assert step.kind == :bonus
+      assert step.text == "Alice: 7 new armies (3 from Region Bonuses)"
+      assert step.from == nil
+      assert step.to == nil
+      assert step.counts == []
     end
 
     test "eliminated and ended have no from/to but are still narrated" do
@@ -171,6 +189,29 @@ defmodule GlobalCombatWeb.GameLive.ReplayTest do
         Replay.steps([{:assign, @ural, 5}], areas_without_final, @players, :original)
 
       assert step.counts == []
+    end
+
+    test "reinforcements queued since the turn resolved don't inflate the replayed counts" do
+      # The viewer's own Ural shows 10 = 3 resolved + 7 queued for next turn.
+      areas = [area(@ural, "Ural", 10, pending: 7), area(@ukraine, "Ukraine", 6)]
+      events = [{:assign, @ural, 5}, {:transfer, @ural, @ukraine, 2}]
+
+      steps = Replay.steps(events, areas, @players, :original)
+
+      ural_counts = for %{counts: counts} <- steps, %{area: @ural, value: v} <- counts, do: v
+      assert ural_counts == [5, 3]
+    end
+
+    test "an area whose history fog may have cut (not last_turn_complete) gets no counts at all" do
+      # Ukraine is visible, but a bordering area wasn't — an unseen attack from it could have
+      # changed Ukraine's count between the visible steps, so nothing is inferred.
+      areas = [area(@ural, "Ural", 3), area(@ukraine, "Ukraine", 6, complete: false)]
+      events = [{:transfer, @ural, @ukraine, 2}, {:attack, @ural, @ukraine, 12, 4, 6, true}]
+
+      steps = Replay.steps(events, areas, @players, :original)
+
+      refute Enum.any?(steps, fn step -> Enum.any?(step.counts, &(&1.area == @ukraine)) end)
+      assert Enum.any?(hd(steps).counts, &(&1.area == @ural))
     end
   end
 end

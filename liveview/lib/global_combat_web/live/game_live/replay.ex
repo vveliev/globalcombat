@@ -2,7 +2,7 @@ defmodule GlobalCombatWeb.GameLive.Replay do
   @moduledoc """
   Builds the "last turn" replay steps from `PlayerView.last_turn_events` —
   already fog-filtered by `PlayerView.build/3`, so every event handed to `steps/4` is
-  safe to narrate, draw, and count in full for this viewer.
+  safe to narrate and draw for this viewer (running counts need more than that — see below).
 
   Each step is a plain, JSON-ready map (`Jason.encode!/1`) consumed three ways: the
   board's `world-map-replay` SVG layer (`GameLive.WorldMap`) draws an arrow between
@@ -11,15 +11,21 @@ defmodule GlobalCombatWeb.GameLive.Replay do
   `.TurnReplay` hook (`GameLive`) reads the same JSON to drive stepwise reveal,
   the live-region announcement, and the running army-count overlay from `counts`.
 
-  `counts` is a best-effort *running* army count for the areas a step touches,
-  back-computed from each area's currently-known (fog-filtered) final count and the
-  deltas every later event in the same turn applied to it. This is exact whenever
-  every event touching that area this turn is itself visible to this viewer; if fog
-  hid an earlier event on an area that only became visible later in the turn, the
-  running count for its earlier steps is left off entirely (never guessed) — see
-  `resolve_running/2`. A capture resets the chain: the pre-capture defender's count
-  belonged to a different owner's pool entirely, not a delta of the post-capture
-  survivor count, so nothing before a capture step is ever backfilled past it.
+  `counts` is a *running* army count for the areas a step touches, back-computed from each
+  area's post-resolution count and the deltas every later event in the same turn applied to it
+  (and carried forward from a capture, whose surviving count is known exactly). The base of that
+  backward pass is the area's `armies` *minus* its `pending_armies`: for the viewer's own areas
+  `PlayerView` folds reinforcements queued since the turn resolved into `armies`, and those took
+  no part in the replayed turn.
+
+  Those counts are only sound when every event that touched the area is in the list, and the list
+  is fog-filtered: an event is dropped when either of its areas was hidden from this viewer. So an
+  area's counts are left off entirely (never guessed) unless `PlayerView` marks it
+  `last_turn_complete` (see its moduledoc's "Complete area history" section: in a fogged game,
+  the area and every area bordering it were visible to this viewer before or after the turn). A
+  capture also resets the chain: the pre-capture defender's count belonged to a different
+  owner's pool entirely, not a delta of the post-capture survivor count, so nothing before a
+  capture step is ever backfilled past it.
   """
 
   alias GlobalCombatWeb.GameLive.MapGeometry, as: Geometry
@@ -52,6 +58,7 @@ defmodule GlobalCombatWeb.GameLive.Replay do
   defp kind({:assign, _, _}), do: :assign
   defp kind({:transfer, _, _, _}), do: :transfer
   defp kind({:attack, _, _, _, _, _, _}), do: :attack
+  defp kind({:bonus, _, _, _}), do: :bonus
   defp kind({:eliminated, _}), do: :eliminated
   defp kind({:ended, _}), do: :ended
 
@@ -92,6 +99,7 @@ defmodule GlobalCombatWeb.GameLive.Replay do
   defp event_area_numbers({:assign, area, _amount}), do: [area]
   defp event_area_numbers({:transfer, from, to, _amount}), do: [from, to]
   defp event_area_numbers({:attack, from, to, _amount, _al, _dl, _c}), do: [from, to]
+  defp event_area_numbers({:bonus, _player, _new_armies, _region_bonus}), do: []
   defp event_area_numbers({:eliminated, _player}), do: []
   defp event_area_numbers({:ended, _winner}), do: []
 
@@ -115,6 +123,12 @@ defmodule GlobalCombatWeb.GameLive.Replay do
 
     "#{area_name(from, areas_by_number)} attacked #{area_name(to, areas_by_number)} " <>
       "with #{armies_text(amount)}: #{attacker_lost} lost, #{defender_lost} defenders lost#{outcome}"
+  end
+
+  # Legacy `RunTurn`'s per-player "Army Bonuses" line, word for word.
+  defp describe({:bonus, player, new_armies, region_bonus}, _areas_by_number, player_names) do
+    "#{player_name(player, player_names)}: #{new_armies} new armies " <>
+      "(#{region_bonus} from Region Bonuses)"
   end
 
   defp describe({:eliminated, player}, _areas_by_number, player_names) do
@@ -141,10 +155,16 @@ defmodule GlobalCombatWeb.GameLive.Replay do
     end)
     |> Enum.group_by(fn {area, _index, _op} -> area end, fn {_area, index, op} -> {index, op} end)
     |> Map.new(fn {area, touches} ->
-      final = areas_by_number[area] && areas_by_number[area].armies
-      {area, resolve_running(touches, final)}
+      case Map.get(areas_by_number, area) do
+        %{last_turn_complete: true} = known -> {area, resolve_running(touches, resolved(known))}
+        _incomplete -> {area, %{}}
+      end
     end)
   end
+
+  # The count the turn actually resolved to: `armies` minus anything queued since.
+  defp resolved(%{armies: nil}), do: nil
+  defp resolved(%{armies: armies, pending_armies: pending}), do: armies - pending
 
   defp deltas({:assign, area, amount}), do: [{area, {:delta, amount}}]
 

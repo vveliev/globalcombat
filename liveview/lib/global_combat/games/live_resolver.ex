@@ -50,8 +50,10 @@ defmodule GlobalCombat.Games.LiveResolver do
     rng = DotnetRandom.new(:erlang.unique_integer())
     %{engine: old_engine} = Wire.from_wire_snapshot(wire, rng)
 
-    {engine, events} = Engine.resolve_turn(old_engine)
-    turn_log = TurnLog.snapshot(old_engine, engine, events)
+    {resolved_engine, events} = Engine.resolve_turn(old_engine)
+    turn_log = TurnLog.snapshot(old_engine, resolved_engine, events)
+    # Same as `Server`'s own `run_turn`: the Computer seat plays the turn that just started.
+    engine = Server.run_ai_turns(resolved_engine)
 
     resolved_wire =
       Wire.to_wire_game(engine,
