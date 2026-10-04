@@ -3,6 +3,7 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
 
   import Phoenix.Component
   import Phoenix.LiveViewTest
+  import GlobalCombatWeb.HTMLAssertions
 
   alias GlobalCombatWeb.Components.Boutique.Button
 
@@ -17,9 +18,9 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
     button = html |> LazyHTML.from_fragment() |> LazyHTML.query("button")
 
     assert button |> LazyHTML.filter(~s([type="button"])) |> Enum.any?()
-    assert html =~ "Save"
-    assert html =~ "bg-primary"
-    assert html =~ "text-primary-contrast"
+    assert LazyHTML.text(button) =~ "Save"
+    assert "bg-primary" in classes(button)
+    assert "text-primary-contrast" in classes(button)
   end
 
   test "maps intent to distinct token-driven classes" do
@@ -35,9 +36,12 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
       <Button.button intent="danger">Delete</Button.button>
       """)
 
-    assert neutral =~ "bg-surface"
-    assert neutral =~ "border-border"
-    assert danger =~ "bg-red-600"
+    neutral_classes = neutral |> LazyHTML.from_fragment() |> LazyHTML.query("button") |> classes()
+    danger_classes = danger |> LazyHTML.from_fragment() |> LazyHTML.query("button") |> classes()
+
+    assert "bg-surface" in neutral_classes
+    assert "border-border" in neutral_classes
+    assert "bg-red-600" in danger_classes
   end
 
   test "supports submit type and disabled state" do
@@ -64,8 +68,10 @@ defmodule GlobalCombatWeb.Components.Boutique.ButtonTest do
 
     parsed = LazyHTML.from_fragment(html)
 
-    assert parsed |> LazyHTML.filter(~s(a[href="/Create-Game"])) |> Enum.any?()
-    assert html =~ "bg-primary"
+    link = LazyHTML.filter(parsed, ~s(a[href="/Create-Game"]))
+
+    assert Enum.any?(link)
+    assert "bg-primary" in classes(link)
     assert parsed |> LazyHTML.filter("button") |> Enum.empty?()
   end
 

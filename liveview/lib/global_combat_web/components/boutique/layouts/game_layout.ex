@@ -49,10 +49,12 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   `stage` (boolean attr, default `false`) turns the shell into a full-height
   map stage with a bottom-sheet `:dock` below `lg:` — the mobile battle mode
   spec (`docs/mobile-battle-mode.md` §4.1). Below `lg:` the grid becomes
-  `status/board/dock` (`h-[100dvh]`, `overflow-hidden`, a safe-area top inset
+  `status/board/dock` (`--size-stage` tall, `overflow-hidden`, a safe-area top inset
   on `:status`), `:board` drops its padding and its own scroll (the board
-  itself owns panning), and `:dock` is a `max-h-[45dvh]` internal-scroll sheet
-  with a safe-area bottom inset, `aria-label="Actions"`. `:players` needs no
+  itself owns panning), and `:dock` is a `--size-dock-max` internal-scroll sheet
+  with a safe-area bottom inset, `aria-label="Actions"`. The status strip and
+  dock carry `game-status`/`game-dock` classes as their styling hooks, so
+  app CSS never keys on their accessible names. `:players` needs no
   special handling from `stage` at all here — the `<dialog>` drawer above is
   already closed by default below `lg:` (native `dialog:not([open])`
   behavior; the `.Drawer` hook only opens it on a genuine user action), so it
@@ -72,10 +74,12 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   wrapper carries `data-hud`, and `assets/css/app.css` lays `:board` full-bleed
   under the whole viewport with `:status` floating over its top edge and
   `:dock` over its bottom edge, both see-through except for their own
-  controls. The two carry `data-slot="status"`/`data-slot="dock"` for that
-  stylesheet to select on, so it never depends on their accessible names. The grid classes above still describe the shape at `lg:` and up.
+  controls (it selects on their `game-status`/`game-dock` classes, never on
+  their accessible names). The grid classes above still describe the shape at `lg:` and up.
   """
   use Phoenix.Component
+
+  alias Phoenix.LiveView.JS
 
   attr :id, :any, default: nil
   attr :class, :any, default: nil
@@ -105,7 +109,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         "grid-cols-1",
         if(@stage,
           do:
-            "h-[100dvh] grid-rows-[auto_minmax(0,1fr)_auto] [grid-template-areas:'status'_'board'_'dock'] overflow-hidden pt-[env(safe-area-inset-top)]",
+            "h-[var(--size-stage)] grid-rows-[auto_minmax(0,1fr)_auto] [grid-template-areas:'status'_'board'_'dock'] overflow-hidden pt-[env(safe-area-inset-top)]",
           else: [
             "grid-rows-[auto_minmax(0,1fr)_auto]",
             if(@players_first,
@@ -129,12 +133,11 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         :if={@status != []}
         aria-label="Game status"
         aria-live="polite"
-        data-slot="status"
         tabindex="-1"
         data-focus-landmark
         class={[
-          "[grid-area:status] flex flex-wrap items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring",
-          if(@stage, do: "bg-surface/90 backdrop-blur-[6px]", else: "bg-surface")
+          "game-status [grid-area:status] flex flex-wrap items-center gap-[var(--space-4)] px-[var(--space-4)] py-[var(--space-2)] border-b border-border text-[length:var(--text-sm)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring",
+          if(@stage, do: "bg-surface/90 backdrop-blur-[var(--blur-strip)]", else: "bg-surface")
         ]}
       >
         {render_slot(@status)}
@@ -154,8 +157,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
       <section
         :if={@stage and @dock != []}
         aria-label="Actions"
-        data-slot="dock"
-        class="[grid-area:dock] max-h-[45dvh] overflow-y-auto bg-surface border-t border-border p-[var(--space-3)] pb-[max(var(--space-3),env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:border-t-0 lg:border-l lg:p-[var(--space-4)] lg:pb-0"
+        class="game-dock [grid-area:dock] max-h-[var(--size-dock-max)] overflow-y-auto bg-surface border-t border-border p-[var(--space-3)] pb-[max(var(--space-3),env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:border-t-0 lg:border-l lg:p-[var(--space-4)] lg:pb-0"
       >
         {render_slot(@dock)}
       </section>
@@ -164,13 +166,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         id="game-drawer"
         aria-label="Players and chat"
         phx-hook=".Drawer"
+        phx-mounted={JS.ignore_attributes(["open"])}
         class="game-drawer [grid-area:players] bg-surface p-[var(--space-4)] overflow-y-auto border-t border-border lg:border-t-0 lg:border-l"
       >
         <div class="mb-[var(--space-3)] flex justify-end lg:hidden">
           <button
             type="button"
             data-drawer-close
-            class="rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-sm font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            class="rounded-[var(--radius-sm)] px-[var(--space-3)] py-[var(--space-1)] text-[length:var(--text-sm)] font-semibold bg-surface-muted hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           >
             Close
           </button>
@@ -186,22 +189,22 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         // CSS forces `display:block` there regardless of the `open` attribute,
         // so the rail renders even before this hook mounts.
         //
-        // Every LiveView patch walks the whole page, and neither `open` nor the
-        // opener's `aria-expanded` are ever part of the server-rendered HTML —
-        // so a patch strips them back to their absent/false defaults on every
-        // single re-render while the drawer is open, exactly like `.MapViewport`
-        // resetting `viewBox` (world_map.ex's moduledoc). `updated()` restores
-        // the bare attribute directly rather than re-calling showModal()/show(),
-        // which would steal focus from whatever's focused inside the drawer
-        // (e.g. mid-keystroke in the chat input) on every unrelated broadcast.
+        // `open` is never part of the server-rendered HTML, so the dialog
+        // tells LiveView to leave it alone (`JS.ignore_attributes(["open"])`
+        // on mount): a patch then can't strip it while the drawer is open,
+        // and a modal opened with showModal() stays modal (backdrop, Escape,
+        // inert page). The opener does the same for its `aria-expanded`.
+        import {DESKTOP_QUERY} from "@/js/breakpoints"
+
         export default {
           mounted() {
-            this.mq = window.matchMedia("(min-width: 64rem)")
+            this.mq = window.matchMedia(DESKTOP_QUERY)
             this.opener = document.querySelector(`[aria-controls="${this.el.id}"]`)
             this.wantOpen = false
             this.chatCount = this.chatMessageCount()
 
             this.onModeChange = () => this.applyMode()
+            this.onOpenerClick = () => this.openDrawer()
             this.mq.addEventListener("change", this.onModeChange)
 
             this.el.addEventListener("close", () => this.onNativeClose())
@@ -210,13 +213,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
                 this.el.close()
               }
             })
-            this.opener?.addEventListener("click", () => this.openDrawer())
+            this.opener?.addEventListener("click", this.onOpenerClick)
 
             this.applyMode()
           },
 
           destroyed() {
             this.mq.removeEventListener("change", this.onModeChange)
+            this.opener?.removeEventListener("click", this.onOpenerClick)
           },
 
           chatMessageCount() {
@@ -271,16 +275,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
             this.opener?.querySelector("[data-unread-dot]")?.classList.remove("hidden")
           },
 
+          // Only the unread dot needs work after a patch: `open` and the
+          // opener's `aria-expanded` are ignored by LiveView's patching (see
+          // above), so they already survive it.
           updated() {
-            const shouldBeOpen = this.mq.matches || this.wantOpen
-
-            if (shouldBeOpen !== this.el.hasAttribute("open")) {
-              if (shouldBeOpen) this.el.setAttribute("open", "")
-              else this.el.removeAttribute("open")
-            }
-
-            if (!this.mq.matches) this.syncExpanded(this.wantOpen)
-
             const count = this.chatMessageCount()
             if (count > this.chatCount && !this.mq.matches && !this.wantOpen) {
               this.showUnread()

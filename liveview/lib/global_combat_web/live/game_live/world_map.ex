@@ -38,11 +38,21 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   carrying name, owner and army count (or "hidden by fog of war") and
   `aria-pressed` for the selected/target state; Enter and Space activate it
   through the colocated `.TerritoryKeyboard` hook since SVG has no native
-  button. The army-count text is decorative (`aria-hidden`, the label already
-  says it) and gets a dark stroke under a light fill via `paint-order: stroke`
+  button. The territories form one roving-tabindex group: a single Tab stop
+  (the selected area, else the first) and the arrow keys moving focus to the
+  nearest territory in that direction. The army-count text is decorative
+  (`aria-hidden`, the label already says it) and gets a dark stroke under a light fill via `paint-order: stroke`
   so it stays legible on every owner colour (GIF-83). `GameLive.board_table/1`
   remains the tabular equivalent for screen readers (GIF-81); it and the labels
   here share `owner_text/2` so the two can never word an owner differently.
+
+  Last-turn replay: the board renders every replay arrow, capture pulse and
+  army count statically (no-JS and reduced-motion fallback); the `<svg>`'s
+  colocated `.MapReplay` hook is the only code that animates them. It takes
+  its state from a `gc:replay` window event (`%{current, animate, counts}`)
+  that `GameLive`'s `.TurnReplay` controls broadcast, and finds counts by
+  their own ids (`territory-count-N`, original value in `data-armies`), so
+  no caller reaches into this component's markup.
 
   Owner colours are the app-level `--map-owner-N` tokens (see ADR-0003); the
   same `owner_slot/1` drives the territory fill and the player-list legend dot,
@@ -68,7 +78,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       to the count. A spectator (`viewer_number: nil`) has no "own"
       territory to draw a frontier from, so this lens falls back to
       `:owner` for them, same as `PlayerView`'s fog treats a spectator as a
-      fogged non-owner.
+      fogged non-owner. A seated player with no frontier at all (eliminated,
+      or a winner holding the whole board) gets the same fallback rather
+      than a board of nothing but dimmed areas.
   """
   use Phoenix.Component
 
@@ -165,7 +177,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         "above zero a tap on an own territory places one (`quick_assign`) instead of selecting it"
 
   def world_map(assigns) do
-    lens = effective_lens(assigns.lens, assigns.viewer_number)
+    lens = effective_lens(assigns.lens, assigns.areas, assigns.viewer_number)
 
     assigns =
       assigns
@@ -181,6 +193,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       |> assign(:legend, legend(assigns.map_name))
       |> assign(:replay_arrows, Enum.filter(assigns.replay_steps, &(&1.from && &1.to)))
       |> assign(:replay_captures, Enum.filter(assigns.replay_steps, & &1.captured))
+      |> assign(:tab_stop, tab_stop(assigns.selected_area, assigns.areas))
 
     ~H"""
     <div
@@ -196,6 +209,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       phx-hook=".MapViewport"
     >
       <svg
+        id="world-map-board"
+        phx-hook=".MapReplay"
         viewBox={@view_box}
         role="group"
         aria-label={board_label(@map_name)}
@@ -263,6 +278,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             fill={Map.fetch!(@fills, area.number)}
             interactive={@interactive}
             mine={mine?(area, @viewer_number)}
+            tab_stop={area.number == @tab_stop}
           />
         </g>
         <use href="#gc-region-outlines" class="world-map-outlines" />
@@ -364,23 +380,142 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         // SVG has no <button>, so a territory (or order arrow) is a focusable
         // role="button" <g>; this gives it the keyboard activation a real button
         // has for free. Clicks go through phx-click on the same element — this
-        // hook only covers Enter/Space (Space must be swallowed or the page
-        // scrolls). `data-select-event` lets an order arrow reuse this hook
-        // while pushing `select_order` instead of a territory's `select_area`
-        // (defaulting to `select_area` so territories need no extra attribute).
-        // `phx-hook` must stay a static string so LiveView's colocated-hook
-        // rewrite can match it to the manifest — `@interactive` instead gates
-        // `data-interactive`, checked on every keydown so a live toggle of
-        // interactivity (no remount) still takes effect.
+        // hook covers Enter/Space (Space must be swallowed or the page
+        // scrolls) and, for territories, arrow-key navigation. `data-select-event`
+        // lets an order arrow reuse this hook while pushing `select_order`
+        // instead of a territory's `select_area` (defaulting to `select_area`
+        // so territories need no extra attribute). `phx-hook` must stay a
+        // static string so LiveView's colocated-hook rewrite can match it to
+        // the manifest — `@interactive` instead gates `data-interactive`,
+        // checked on every keydown so a live toggle of interactivity (no
+        // remount) still takes effect.
+        //
+        // Arrow keys move focus to the nearest territory in that direction,
+        // measured between label anchors (`data-cx`/`data-cy`), so the board
+        // is one roving-tabindex group: only one territory is in the Tab
+        // order (`world_map/1`'s tab stop) and the arrows move within it.
+        // The event stops here so `.MapViewport` doesn't also pan the map.
+        const DIRECTIONS = {
+          ArrowUp: [0, -1],
+          ArrowDown: [0, 1],
+          ArrowLeft: [-1, 0],
+          ArrowRight: [1, 0]
+        }
+
+        const anchor = (el) => ({ x: Number(el.dataset.cx), y: Number(el.dataset.cy) })
+
         export default {
           mounted() {
             this.el.addEventListener("keydown", (e) => {
               if (this.el.dataset.interactive === undefined) return
+
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()
                 this.pushEvent(this.el.dataset.selectEvent || "select_area", {area: this.el.dataset.area})
+                return
+              }
+
+              const direction = DIRECTIONS[e.key]
+              if (direction && this.el.dataset.cx !== undefined) {
+                e.preventDefault()
+                e.stopPropagation()
+                this.nearest(direction)?.focus()
               }
             })
+          },
+
+          // Distance along the arrow plus double the sideways offset: a
+          // territory straight ahead beats a closer one off to the side.
+          nearest([dx, dy]) {
+            const from = anchor(this.el)
+            let best = null
+            let bestScore = Infinity
+
+            for (const el of this.el.parentNode.querySelectorAll("[data-cx][data-interactive]")) {
+              if (el === this.el) continue
+              const to = anchor(el)
+              const along = (to.x - from.x) * dx + (to.y - from.y) * dy
+              if (along <= 0) continue
+              const across = Math.abs((to.x - from.x) * dy - (to.y - from.y) * dx)
+              const score = along + 2 * across
+              if (score < bestScore) {
+                best = el
+                bestScore = score
+              }
+            }
+
+            return best
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MapReplay">
+        // The board side of the last-turn replay. `GameLive`'s `.TurnReplay`
+        // hook owns the timing and broadcasts where the replay is as a
+        // `gc:replay` window event (`{current, animate, counts}`, counts
+        // keyed by area number); this hook owns the board markup that state
+        // touches — arrow reveal, the capture pulse, and the running army
+        // counts (`#territory-count-N`, restored from `data-armies` when no
+        // step overrides them). LiveView resets anything the server didn't
+        // render (`is-revealed`, a count's text) whenever it patches this
+        // subtree, and any such patch also visits this <svg>, so `updated()`
+        // re-applies the last state and an unrelated patch (a chat message)
+        // can no longer wipe a replay in progress.
+        export default {
+          mounted() {
+            this.state = { current: -1, animate: false, counts: {} }
+            this.shownCurrent = null
+            this.onReplay = (e) => {
+              this.state = e.detail
+              this.apply()
+            }
+            window.addEventListener("gc:replay", this.onReplay)
+            // `.TurnReplay` may have mounted, and broadcast, before this did.
+            window.dispatchEvent(new CustomEvent("gc:replay-sync"))
+          },
+
+          updated() {
+            this.apply()
+          },
+
+          destroyed() {
+            window.removeEventListener("gc:replay", this.onReplay)
+          },
+
+          apply() {
+            const { current, animate, counts } = this.state
+            const stepChanged = current !== this.shownCurrent
+            this.shownCurrent = current
+
+            const layer = this.el.querySelector(".world-map-replay")
+            if (layer) {
+              layer.classList.toggle("world-map-replay--js", animate)
+              layer.querySelectorAll("[data-step]").forEach((el) => {
+                const step = Number(el.dataset.step)
+                el.classList.toggle("is-revealed", step <= current)
+                if (el.classList.contains("world-map-replay-pulse")) this.pulse(el, step === current, stepChanged)
+              })
+            }
+
+            this.el.querySelectorAll(".world-map-count[data-armies]").forEach((el) => {
+              const value = String(counts[el.dataset.area] ?? el.dataset.armies)
+              const text = el.firstChild
+              if (text && text.textContent.trim() !== value) text.textContent = value
+            })
+          },
+
+          // Landing on the capture step always shows *some* indicator —
+          // reduced motion (media query, `app.css`) drops the animating
+          // keyframe but keeps a static ring. Removing and re-adding the class
+          // (with a forced reflow) replays the animation when the step is
+          // revisited; a patch that merely stripped it just puts it back.
+          pulse(el, active, restart) {
+            if (!active) {
+              el.classList.remove("is-active")
+            } else if (restart || !el.classList.contains("is-active")) {
+              el.classList.remove("is-active")
+              void el.getBoundingClientRect()
+              el.classList.add("is-active")
+            }
           }
         }
       </script>
@@ -397,15 +532,20 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         //     (`drag_order`). A drag from anywhere else pans, own land included.
         //
         // A tap only ever gets cancelled when the pointer actually moved, when
-        // it was a hold, or when it completes a double tap.
+        // it was a hold, or when it completes a double tap. A mouse click goes
+        // straight through; a touch or pen tap that isn't a placement is held
+        // for the double-tap window first, so the first tap of a double tap
+        // never reaches phx-click="select_area".
         //
         // The viewBox always takes the stage's own aspect ratio, so the board
         // fills the screen edge to edge instead of letterboxing: "fit" shows
         // the whole board, and a phone held upright starts zoomed to fill its
         // height around the viewer's territories. LiveView owns the viewBox
         // attribute and resets it on every patch, so `updated()` re-applies
-        // whatever pan/zoom this hook holds — same as `.TurnReplay` re-applying
-        // its step counts.
+        // whatever pan/zoom this hook holds — same as `.MapReplay` re-applying
+        // the replay state.
+        import {DESKTOP_QUERY} from "@/js/breakpoints"
+
         const MAX_SCALE = 6
         const DOUBLE_TAP_ZOOM = 2.5
         const DOUBLE_TAP_MS = 300
@@ -423,7 +563,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         const ANIMATE_MS = 200
         const TOKEN_PX = 12
         const TOKEN_UNITS = 9
-        const DESKTOP_QUERY = "(min-width: 64rem)"
+
+        const swallow = (e) => {
+          e.stopPropagation()
+          e.preventDefault()
+        }
 
         const buzz = (pattern) => {
           try {
@@ -447,7 +591,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.gestureStart = null
             this.lastSingle = null
             this.pinch = null
-            this.lastTap = null
+            this.lastClick = null
+            this.pendingTap = null
+            this.deliveringTap = false
+            this.pointerType = "mouse"
             this.press = null
             this.drag = null
             this.suppressClick = false
@@ -501,6 +648,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.cancelHold()
             this.clearPanelPosition()
             if (this.raf) cancelAnimationFrame(this.raf)
+            if (this.pendingTap) clearTimeout(this.pendingTap.timer)
           },
 
           // --- viewBox state -----------------------------------------------
@@ -786,6 +934,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           // --- pointer gestures ----------------------------------------------
 
           onPointerDown(e) {
+            this.pointerType = e.pointerType || "mouse"
             this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
             if (this.pointers.size === 1) {
@@ -833,7 +982,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             return {
               area,
               canPlace: mine && this.unplaced() > 0,
-              canDrag: mine && onToken && Number(territory.dataset.armies || 0) > 1,
+              canDrag: mine && onToken && Number(territory.dataset.ownArmies || 0) > 1,
               adjacent: (territory.dataset.adjacent || "").split(",").filter(Boolean),
               timer: null
             }
@@ -1072,48 +1221,121 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           // --- taps: place, territory click, double-tap zoom -----------------
 
           onClick(e) {
+            // Our own re-dispatch of a held tap (`deliverPendingTap`).
+            if (this.deliveringTap) return
+
             if (this.moved || this.suppressClick) {
-              e.stopPropagation()
-              e.preventDefault()
+              swallow(e)
               this.suppressClick = false
               return
             }
+
+            // Keyboard-synthesised clicks (detail 0) are never part of a tap.
+            if (e.detail === 0) return
 
             // A pointer tap on an own territory while reinforcements are
             // unplaced places one instead of selecting (keyboard Enter/Space
             // still selects — `.TerritoryKeyboard` — so the order panel stays
             // reachable). Never a double-tap zoom: tapping fast is how you
             // place several.
-            if (e.detail > 0 && this.gestures()) {
+            if (this.gestures()) {
               const territory = this.territoryAt(e.clientX, e.clientY)
               const mine = territory?.dataset.mine !== undefined
               // The tap after the last army is placed is still part of the
               // same burst: swallow it rather than pop the order panel open.
               const justPlaced = Date.now() - this.lastPlaceAt < PLACE_COOLDOWN_MS
               if (mine && (this.unplaced() > 0 || justPlaced)) {
-                e.stopPropagation()
-                e.preventDefault()
-                this.lastTap = null
+                swallow(e)
+                this.cancelPendingTap()
+                this.lastClick = null
                 this.place(territory.dataset.area, 1)
                 return
               }
             }
 
-            const now = Date.now()
-            const isDoubleTap =
-              this.lastTap &&
-              now - this.lastTap.time < DOUBLE_TAP_MS &&
-              Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < DOUBLE_TAP_PX
+            if ((e.pointerType || this.pointerType) === "mouse") {
+              this.onMouseClick(e)
+            } else {
+              this.onTap(e)
+            }
+          },
 
-            if (isDoubleTap) {
-              e.stopPropagation()
-              e.preventDefault()
-              this.lastTap = null
+          onMouseClick(e) {
+            const now = Date.now()
+            const last = this.lastClick
+            this.lastClick = { time: now, x: e.clientX, y: e.clientY }
+
+            if (last && this.isDoubleTap(last, now, e)) {
+              swallow(e)
+              this.lastClick = null
+              this.doubleTapZoom(e.clientX, e.clientY)
+            }
+          },
+
+          onTap(e) {
+            swallow(e)
+            const now = Date.now()
+            const pending = this.pendingTap
+
+            if (pending && this.isDoubleTap(pending, now, e)) {
+              this.cancelPendingTap()
               this.doubleTapZoom(e.clientX, e.clientY)
               return
             }
 
-            this.lastTap = { time: now, x: e.clientX, y: e.clientY }
+            // A second tap somewhere else: the first was a single tap after all.
+            this.deliverPendingTap()
+
+            this.pendingTap = {
+              time: now,
+              x: e.clientX,
+              y: e.clientY,
+              target: e.target,
+              targetId: e.target.closest?.("[id]")?.id,
+              timer: setTimeout(() => this.deliverPendingTap(), DOUBLE_TAP_MS)
+            }
+          },
+
+          isDoubleTap(previous, now, e) {
+            return (
+              now - previous.time < DOUBLE_TAP_MS &&
+              Math.hypot(e.clientX - previous.x, e.clientY - previous.y) < DOUBLE_TAP_PX
+            )
+          },
+
+          cancelPendingTap() {
+            if (this.pendingTap) clearTimeout(this.pendingTap.timer)
+            this.pendingTap = null
+          },
+
+          // Re-dispatches the held tap as a click on what was tapped, which
+          // LiveView then handles like any other click (select_area,
+          // select_order, …). A patch may have replaced the tapped node in the
+          // meantime, so it is looked up again by id if it has gone.
+          deliverPendingTap() {
+            const tap = this.pendingTap
+            if (!tap) return
+            this.cancelPendingTap()
+
+            const target = tap.target.isConnected
+              ? tap.target
+              : tap.targetId && document.getElementById(tap.targetId)
+            if (!target) return
+
+            this.deliveringTap = true
+            try {
+              target.dispatchEvent(
+                new MouseEvent("click", {
+                  bubbles: true,
+                  cancelable: true,
+                  clientX: tap.x,
+                  clientY: tap.y,
+                  view: window
+                })
+              )
+            } finally {
+              this.deliveringTap = false
+            }
           },
 
           // Optimistic: placements still on their way to the server count
@@ -1182,6 +1404,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.zoomTo(this.current.w * factor, vb, e.clientX, e.clientY)
           },
 
+          // +/- zoom from anywhere inside the map; the arrow keys pan only
+          // while the map wrapper itself has focus — on a focused territory
+          // they move between territories (`.TerritoryKeyboard`).
           onKeyDown(e) {
             const rect = this.svg.getBoundingClientRect()
             const cx = rect.left + rect.width / 2
@@ -1199,26 +1424,28 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
                 e.preventDefault()
                 this.zoomTo(this.current.w * 1.2, this.clientToViewBox(cx, cy), cx, cy, { animate: true })
                 return
+            }
+
+            if (e.target !== this.el) return
+
+            switch (e.key) {
               case "ArrowUp":
-                e.preventDefault()
                 this.current = this.clamped({ ...this.current, y: this.current.y - panStep })
                 break
               case "ArrowDown":
-                e.preventDefault()
                 this.current = this.clamped({ ...this.current, y: this.current.y + panStep })
                 break
               case "ArrowLeft":
-                e.preventDefault()
                 this.current = this.clamped({ ...this.current, x: this.current.x - panStep })
                 break
               case "ArrowRight":
-                e.preventDefault()
                 this.current = this.clamped({ ...this.current, x: this.current.x + panStep })
                 break
               default:
                 return
             }
 
+            e.preventDefault()
             this.applyViewBox()
             this.save()
           },
@@ -1252,6 +1479,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     """
   end
 
+  # Roving tabindex: the board's territories are one Tab stop, with the
+  # arrow keys (`.TerritoryKeyboard`) moving between them. The stop is the
+  # selected area when there is one, so Tab returns to where the player was;
+  # otherwise the first area.
+  defp tab_stop(selected_area, _areas) when is_integer(selected_area), do: selected_area
+  defp tab_stop(_selected_area, [first | _]), do: first.number
+  defp tab_stop(_selected_area, []), do: nil
+
   # The ground rects cover the viewBox rather than `100%` of it because the
   # elements map is cropped to its art (its viewBox does not start at 0 0).
   attr :view_box, :string, required: true
@@ -1278,11 +1513,19 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: false,
     doc: "the viewer owns this (visible) area — a drag from it can become an order"
 
+  attr :tab_stop, :boolean,
+    default: false,
+    doc:
+      "the one territory in the Tab order (roving tabindex; the arrow keys move between the rest)"
+
   defp territory(assigns) do
+    {cx, cy} = Geometry.label(assigns.map_name, assigns.area.number)
+
     assigns =
       assigns
       |> assign(:label, territory_label(assigns.area, assigns.owner_names))
       |> assign(:element, Geometry.element(assigns.map_name, assigns.area.number))
+      |> assign(cx: cx, cy: cy)
 
     ~H"""
     <g
@@ -1292,17 +1535,19 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         @interactive && "world-map-territory--interactive"
       ]}
       role={@interactive && "button"}
-      tabindex={@interactive && "0"}
+      tabindex={@interactive && if(@tab_stop, do: "0", else: "-1")}
       aria-label={@label}
       aria-pressed={@interactive && to_string(@selected or @target)}
       data-area={@area.number}
+      data-cx={@cx}
+      data-cy={@cy}
       data-owner={@fill.owner}
       data-fog={!@area.visible}
       data-frontier={@fill.dim && "dim"}
       data-element={@element}
       data-interactive={@interactive}
       data-mine={@interactive && @mine}
-      data-armies={@interactive && @mine && @area.armies}
+      data-own-armies={@interactive && @mine && @area.armies}
       data-adjacent={@interactive && Enum.join(@area.adjacent, ",")}
       phx-hook=".TerritoryKeyboard"
       phx-click={@interactive && "select_area"}
@@ -1349,10 +1594,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       <g class="world-map-token-inner" style={"transform-origin: #{@x}px #{@y}px"}>
         <circle cx={@x} cy={@y} r="9" class="world-map-token-ring" />
         <text
+          id={"territory-count-#{@area.number}"}
           x={@x}
           y={@y}
           class="world-map-count"
           data-area={@area.number}
+          data-armies={@area.armies}
           text-anchor="middle"
           dominant-baseline="central"
           paint-order="stroke"
@@ -1408,9 +1655,16 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # A spectator has no "own" territory for :frontier to draw a border from —
   # same treatment `PlayerView` gives a spectator elsewhere (it "sees exactly
   # what a fogged non-owner sees"), so this falls back to :owner rather than
-  # rendering every area dimmed.
-  defp effective_lens(:frontier, nil), do: :owner
-  defp effective_lens(lens, _viewer_number), do: lens
+  # rendering every area dimmed. So does a seated player whose frontier is
+  # empty: eliminated (owns nothing), or the winner owning the whole board.
+  @doc false
+  def effective_lens(:frontier, _areas, nil), do: :owner
+
+  def effective_lens(:frontier, areas, viewer_number) do
+    if Enum.empty?(frontier_info(areas, viewer_number)), do: :owner, else: :frontier
+  end
+
+  def effective_lens(lens, _areas, _viewer_number), do: lens
 
   @doc false
   def fills(:owner, areas, _map_name, _viewer_number) do
@@ -1483,11 +1737,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     end
   end
 
-  # Every area bordering one of the viewer's own areas is already visible
-  # regardless of fog (`PlayerView.owns_adjacent?/3`), so this needs no
-  # separate fog check: an owned area with a differently-owned neighbour is a
-  # border area, and every enemy area adjacent to one is, by that same rule,
-  # already revealed.
+  # An owned area with a differently-owned neighbour is a border area; an
+  # enemy area is on the frontier when one of its own links reaches a border
+  # area. Fog still has to be checked here: `PlayerView.owns_adjacent?/3`
+  # reveals the areas the viewer's *own* links reach, but some links are
+  # one-way (on the elements map 7->8, 9->23, 31->32, 33->15), so an enemy
+  # area can link into the viewer's border while staying fogged, with no
+  # owner or army count to draw a frontier delta from.
   defp frontier_info(areas, viewer_number) do
     areas_by_number = Map.new(areas, &{&1.number, &1})
 
@@ -1506,7 +1762,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
     enemy_borders =
       areas
-      |> Enum.filter(&(&1.owner_number != viewer_number))
+      |> Enum.filter(&(&1.visible and &1.owner_number != viewer_number))
       |> Enum.filter(&Enum.any?(&1.adjacent, fn n -> MapSet.member?(my_borders, n) end))
       |> MapSet.new(& &1.number)
 
@@ -1516,7 +1772,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # The army delta shown next to a frontier tile's count: this area's armies
   # minus the strongest visible, differently-owned neighbour — from either
   # side of the line, a positive delta favours whoever holds the tile it's
-  # printed on.
+  # printed on. No count of its own (fogged), no delta.
+  defp frontier_delta(%{armies: armies}, _areas_by_number) when not is_integer(armies), do: nil
+
   defp frontier_delta(area, areas_by_number) do
     opposing =
       area.adjacent

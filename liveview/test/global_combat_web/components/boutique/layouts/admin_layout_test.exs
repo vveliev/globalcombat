@@ -3,6 +3,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayoutTest do
 
   import Phoenix.Component
   import Phoenix.LiveViewTest
+  import GlobalCombatWeb.HTMLAssertions
 
   alias GlobalCombatWeb.Components.Boutique.Layouts.AdminLayout
 
@@ -19,15 +20,15 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayoutTest do
       </AdminLayout.admin_layout>
       """)
 
-    skip_link_index = :binary.match(html, ~s(href="#main-content")) |> elem(0)
-    nav_index = :binary.match(html, "<nav") |> elem(0)
-    main_index = :binary.match(html, ~s(id="main-content")) |> elem(0)
+    doc = LazyHTML.from_fragment(html)
+    skip_link = LazyHTML.query(doc, ~s(a[href="#main-content"]))
 
-    assert html =~ "Skip to main content"
-    assert skip_link_index < nav_index
-    assert main_index > skip_link_index
-    assert html =~ ~s(id="main-content")
-    assert html =~ ~s(tabindex="-1")
+    assert LazyHTML.text(skip_link) =~ "Skip to main content"
+    # `query/2` returns matches in document order: skip link, then nav, then main.
+    assert doc |> LazyHTML.query(~s(a[href="#main-content"], nav, main)) |> LazyHTML.tag() ==
+             ["a", "nav", "main"]
+
+    assert doc |> LazyHTML.query(~s(main#main-content[tabindex="-1"])) |> Enum.count() == 1
   end
 
   test "the skip link is visually hidden until focused" do
@@ -40,8 +41,10 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayoutTest do
       </AdminLayout.admin_layout>
       """)
 
-    assert html =~ "sr-only"
-    assert html =~ "focus:not-sr-only"
+    skip_link = html |> LazyHTML.from_fragment() |> LazyHTML.query(~s(a[href="#main-content"]))
+
+    assert "sr-only" in classes(skip_link)
+    assert "focus:not-sr-only" in classes(skip_link)
   end
 
   describe "immersive (SiteChrome's stage-mode passthrough, mobile battle mode WP3)" do
@@ -57,12 +60,18 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayoutTest do
         </AdminLayout.admin_layout>
         """)
 
-      assert html =~ "[grid-template-areas:&#39;content&#39;]"
-      assert html =~ ~r/<nav[^>]*class="[^"]*\bhidden\b[^"]*\blg:block\b[^"]*"/
-      assert html =~ ~r/<header[^>]*class="[^"]*\bhidden\b[^"]*\blg:flex\b[^"]*"/
-      assert html =~ ~r/<main[^>]*class="[^"]*\bp-0\b[^"]*lg:p-\[var\(--space-6\)\][^"]*"/
+      doc = LazyHTML.from_fragment(html)
+      grid = doc |> LazyHTML.filter("div") |> classes()
+      nav = doc |> LazyHTML.query("nav") |> classes()
+      header = doc |> LazyHTML.query("header") |> classes()
+      main = doc |> LazyHTML.query("main") |> classes()
+
+      assert "[grid-template-areas:'content']" in grid
+      assert "hidden" in nav and "lg:block" in nav
+      assert "hidden" in header and "lg:flex" in header
+      assert "p-0" in main and "lg:p-[var(--space-6)]" in main
       # The lg: side-by-side order is untouched by immersive.
-      assert html =~ "lg:[grid-template-areas:&#39;sidebar_topbar&#39;_&#39;sidebar_content&#39;]"
+      assert "lg:[grid-template-areas:'sidebar_topbar'_'sidebar_content']" in grid
     end
 
     test "without immersive, output matches today's shape" do
@@ -77,9 +86,14 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.AdminLayoutTest do
         </AdminLayout.admin_layout>
         """)
 
-      refute html =~ "hidden lg:block"
-      refute html =~ "hidden lg:flex"
-      assert html =~ "[grid-template-areas:&#39;topbar&#39;_&#39;sidebar&#39;_&#39;content&#39;]"
+      doc = LazyHTML.from_fragment(html)
+      grid = doc |> LazyHTML.filter("div") |> classes()
+      nav = doc |> LazyHTML.query("nav") |> classes()
+      header = doc |> LazyHTML.query("header") |> classes()
+
+      refute "hidden" in nav or "lg:block" in nav
+      refute "hidden" in header or "lg:flex" in header
+      assert "[grid-template-areas:'topbar'_'sidebar'_'content']" in grid
     end
   end
 end

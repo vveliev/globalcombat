@@ -35,6 +35,20 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
+  # Same polling as `wait_for/3`, but waits for `selector` to match an element whose
+  # text contains `text`, so the follow-up assertion is on an element, not raw HTML.
+  defp wait_for_element(view, selector, text, attempts \\ 100)
+
+  defp wait_for_element(_view, selector, text, 0),
+    do: flunk("gave up waiting for #{inspect(selector)} with #{inspect(text)} to render")
+
+  defp wait_for_element(view, selector, text, attempts) do
+    unless has_element?(view, selector, text) do
+      Process.sleep(10)
+      wait_for_element(view, selector, text, attempts - 1)
+    end
+  end
+
   defp start_two_player_game(conn1, conn2) do
     alice = account_fixture(%{"name" => "Alice"})
     bob = account_fixture(%{"name" => "Bob"})
@@ -136,21 +150,26 @@ defmodule GlobalCombatWeb.GameLiveTest do
       :ok = Games.quit(game_id, bob.id)
       sync_game(game_id, alice_view)
 
-      html = render(alice_view)
+      roster = "#game-drawer li"
 
       # The winner is named through the roster's ordinal rank, not "place 1" — the
       # elimination-branch label that used to hide the winner's own totals.
-      assert html =~ "1st"
-      assert html =~ "2nd"
-      refute html =~ "place 1"
-      refute html =~ "place 2"
+      assert has_element?(alice_view, roster, "1st")
+      assert has_element?(alice_view, roster, "2nd")
+      refute has_element?(alice_view, roster, "place 1")
+      refute has_element?(alice_view, roster, "place 2")
 
       # Totals stay visible for every player once the game ends, including the winner
       # (previously hidden behind the eliminated-player branch), and the final score
       # (`Engine.Game.end_game/1`'s `gen_score`) now reaches the UI.
-      assert html =~ "Score"
-      refute html =~ "Thinking"
+      assert has_element?(alice_view, "#{roster} span", "Score")
+      refute has_element?(alice_view, roster, "Thinking")
       refute has_element?(alice_view, "li span", "Done")
+      # Final standings read in finishing order, and Bob's always-zero totals
+      # (elimination zeroes them) are left off rather than shown as "0 (0)".
+      assert has_element?(alice_view, "#player-list li:nth-child(1)", "Alice")
+      assert has_element?(alice_view, "#player-list li:nth-child(2)", "Bob")
+      refute has_element?(alice_view, "#player-list li:nth-child(2)", "0 (0)")
     end
 
     test "a spectator sees the winner named in the headline and no personal outcome line",
@@ -408,20 +427,28 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # ColocatedHook rewrites ".Fullscreen" to the fully-qualified manifest key
     # at compile time (see the FocusManager test above for why the literal
     # ".Fullscreen" name would never match rendered output).
-    assert render(alice_view) =~
-             ~r/id="fullscreen-toggle"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.Fullscreen"/
+    assert has_element?(
+             alice_view,
+             ~s(#fullscreen-toggle[phx-hook="GlobalCombatWeb.GameLive.Fullscreen"])
+           )
   end
 
-  test "the board surface carries the keyboard-inset hook (mobile-battle-mode.md WP5)", %{
-    conn: conn1
-  } do
+  test "the keyboard-inset hook wraps the whole stage shell, dock included (mobile-battle-mode.md WP5)",
+       %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
 
-    html = render(alice_view)
+    # The amount field lives in the dock, a sibling of the board's <main>, so
+    # the hook has to sit above the whole shell to see it take focus.
+    assert has_element?(
+             alice_view,
+             "#game-viewport[data-stage] > #game-board .game-dock #turn-controls"
+           )
 
-    assert html =~
-             ~r/id="game-board-surface"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.StageViewport"/
+    assert has_element?(
+             alice_view,
+             ~s(#game-viewport[phx-hook="GlobalCombatWeb.GameLive.StageViewport"])
+           )
   end
 
   test "the board has a visually-hidden table equivalent listing territory, owner, armies, and adjacency (WCAG 1.3.1, GIF-81)",
@@ -787,7 +814,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(
                alice_view,
-               ~s(#territory-1[data-mine][data-armies="5"][data-adjacent="2,3,37"])
+               ~s(#territory-1[data-mine][data-own-armies="5"][data-adjacent="2,3,37"])
              )
 
       refute has_element?(alice_view, ~s(#territory-2[data-mine]))
@@ -1082,7 +1109,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert has_element?(
                alice_view,
-               ~s([data-slot="status"][aria-live="polite"] #turn-hint[aria-live="off"])
+               ~s(section.game-status[aria-live="polite"] #turn-hint[aria-live="off"])
              )
     end
 
@@ -1183,12 +1210,18 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "main[data-stage]")
     end
 
-    test "Quit lives in the players rail, not the dock", %{conn: conn1} do
+    test "below lg Quit lives in the drawer; above lg it stays in the dock's turn controls",
+         %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
       %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
 
-      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
       refute has_element?(alice_view, ~s([aria-label="Actions"] #quit-button))
+
+      assert has_element?(
+               alice_view,
+               ~s([aria-label="Actions"] #turn-controls-quit.max-lg\\:hidden)
+             )
     end
 
     test "a spectator viewing a live game does not crash the dock (no seated player, nothing selected)",
@@ -1200,6 +1233,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       refute has_element?(spectator, "#turn-controls")
       refute has_element?(spectator, ~s([aria-label="Actions"] button), "End Turn")
+      # No empty, bordered "Actions" sheet for someone with nothing to do.
+      refute has_element?(spectator, ~s([aria-label="Actions"]))
+      assert has_element?(spectator, "main[data-stage]")
     end
 
     test "an ended game does not use stage: no dock, no data-stage shell, and Quit is gone",
@@ -1490,7 +1526,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # only as the territory's `data-owner` slot (the CSS fill hangs off it), so a
       # fogged territory must carry no `data-owner` at all.
       territory = "g#territory-#{hidden_area_number}"
-      refute html =~ ~r/id="territory-#{hidden_area_number}"[^>]*data-owner=/
+
+      refute html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("#{territory}[data-owner]")
+             |> Enum.any?()
+
       refute has_element?(alice_view, "#{territory}[data-owner]")
       assert has_element?(alice_view, "#{territory}[data-fog]")
 
@@ -1523,11 +1564,11 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # from the same fog-filtered PlayerView data as the sprite/alt text, so it
       # must fail the exact same way if someone ever wires it to raw engine state
       # instead.
-      refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>#{true_owner_name}<\/td>/
-      refute html =~ ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>unclaimed<\/td>/
+      [owner_cell | _] = board_table_cells(html, hidden_area.name)
 
-      assert html =~
-               ~r/<th scope="row">#{hidden_area.name}<\/th>\s*<td>hidden by fog of war<\/td>/
+      refute owner_cell == true_owner_name
+      refute owner_cell == "unclaimed"
+      assert owner_cell == "hidden by fog of war"
     end
 
     test "a fogged area's tile is visually distinct from a genuinely-unclaimed one (GIF-121)",
@@ -1587,11 +1628,34 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(g#territory-38[data-element="earth"]))
 
       # No sprite <img> survives for either map.
-      refute html =~ ~r/<img[^>]*src="\/maps\//
+      refute html
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query(~s(img[src^="/maps/"]))
+             |> Enum.any?()
     end
   end
 
   describe "Invite/Quit/Kick (GIF-114)" do
+    test "the lobby's actions and invite form carry stable ids", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      assert has_element?(view, "#lobby-start", "Start Game")
+      assert has_element?(view, "#lobby-quit", "Quit")
+      assert has_element?(view, "#invite-form #invite-submit", "Invite")
+
+      view |> form("#invite-form", %{login: bob.name}) |> render_submit()
+      assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
+
+      {:ok, spectator, _html} = Phoenix.ConnTest.build_conn() |> live(~p"/Game-#{game_id}")
+      assert has_element?(spectator, "#lobby-join", "Join")
+    end
+
     test "a seated player inviting an existing account by name lands it on the invitee's pending invites",
          %{conn: conn} do
       alice = account_fixture(%{"name" => "Alice"})
@@ -1602,9 +1666,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
 
-      html = render_submit(view, "invite", %{"login" => bob.name})
+      render_submit(view, "invite", %{"login" => bob.name})
 
-      assert html =~ "Invited Bob."
+      assert has_element?(view, "#flash-info", "Invited Bob.")
       assert [%{id: ^game_id}] = GlobalCombat.Games.list_invited_games(bob.id)
     end
 
@@ -1616,9 +1680,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
 
-      html = render_submit(view, "invite", %{"login" => "no-such-account"})
+      render_submit(view, "invite", %{"login" => "no-such-account"})
 
-      assert html =~ "No account found for &quot;no-such-account&quot;."
+      assert has_element?(view, "#flash-error", ~s(No account found for "no-such-account".))
     end
 
     test "an invited account can join a private game; a stranger is refused (GIF-93 gap this closes)" do
@@ -1635,12 +1699,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
       render_click(bob_view, "join")
-      assert wait_for(bob_view, "Bob") =~ "Bob"
+      wait_for_element(bob_view, "#lobby-players li", "Player 2: Bob")
 
       {:ok, carl_view, _html} = conn3 |> log_in_account(carl) |> live(~p"/Game-#{game_id}")
-      html = render_click(carl_view, "join")
-      refute html =~ "Carl"
-      assert html =~ ~r/phx-click="join"/
+      render_click(carl_view, "join")
+      refute has_element?(carl_view, "li", "Carl")
+      assert has_element?(carl_view, ~s(button[phx-click="join"]))
     end
 
     test "the host can kick a player from the lobby, and it's reflected live for everyone", %{
@@ -1655,15 +1719,16 @@ defmodule GlobalCombatWeb.GameLiveTest do
       {:ok, 1} = Games.join(game_id, alice.id, alice.name)
       {:ok, 2} = Games.join(game_id, bob.id, bob.name)
 
-      {:ok, alice_view, html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+      {:ok, alice_view, _html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
       {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
 
-      assert html =~ "Kick"
+      assert has_element?(alice_view, ~s(button[phx-click="kick"]), "Kick")
 
       render_click(alice_view, "kick", %{"player_number" => "2"})
 
-      refute wait_for(alice_view, "Waiting for players") =~ "Bob"
-      refute render(bob_view) =~ ~r/Kick/
+      wait_for(alice_view, "Waiting for players")
+      refute has_element?(alice_view, "li", "Bob")
+      refute has_element?(bob_view, "button", "Kick")
     end
 
     test "a non-host player has no Kick control and a direct kick attempt is refused", %{
@@ -1679,12 +1744,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
       {:ok, 2} = Games.join(game_id, bob.id, bob.name)
 
       {:ok, _alice_view, _html} = conn1 |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
-      {:ok, bob_view, html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
+      {:ok, bob_view, _html} = conn2 |> log_in_account(bob) |> live(~p"/Game-#{game_id}")
 
-      refute html =~ "Kick"
+      refute has_element?(bob_view, "button", "Kick")
 
       assert {:error, :not_host} = Games.kick(game_id, bob.id, 1)
-      assert render(bob_view) =~ "Alice"
+      assert has_element?(bob_view, "#lobby-players li", "Player 1: Alice")
     end
 
     test "a player quitting the lobby leaves and can rejoin as a fresh Join click", %{conn: conn} do
@@ -1697,10 +1762,10 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
 
-      html = render_click(view, "quit")
+      render_click(view, "quit")
 
-      assert html =~ ~r/phx-click="join"/
-      refute html =~ ~r/phx-click="quit"/
+      assert has_element?(view, ~s(button[phx-click="join"]))
+      refute has_element?(view, ~s([phx-click="quit"]))
       assert {:lobby, lobby_view} = Games.player_view(game_id, bob.id)
       assert Enum.map(lobby_view.players, & &1.name) == ["Bob"]
     end
@@ -1748,7 +1813,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       render_click(bob_view, "quit")
 
-      assert wait_for(alice_view, "Game Over") =~ "Game Over"
+      wait_for_element(alice_view, "#game-over", "Game Over")
       assert {:error, :already_eliminated} = Games.quit(game_id, bob.id)
     end
   end
@@ -1767,16 +1832,19 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#game-drawer a[href="/"]), "Home")
       assert has_element?(alice_view, ~s(#game-drawer a[href="/Game-Manual"]), "Game Manual")
 
-      # The drawer renders once (GameLayout's moduledoc) and is the mobile
-      # sheet *and* the lg: rail alike, so its one Quit button is already
-      # exactly one on both breakpoints — stage mode's :dock emptied
-      # #turn-controls down to End Turn/Force Turn only, so there's no
-      # separate desktop Quit left for the drawer's copy to duplicate.
-      refute has_element?(alice_view, "#turn-controls button", "Quit")
+      # Above lg nothing changes (mobile-battle-mode.md §2): Quit stays in
+      # #turn-controls there and is hidden below lg, while the drawer's copy
+      # is the below-lg one only — exactly one visible per breakpoint.
+      assert has_element?(
+               alice_view,
+               "#turn-controls #turn-controls-quit.max-lg\\:hidden",
+               "Quit"
+             )
+
       assert has_element?(alice_view, "#turn-controls button", "End Turn")
       assert has_element?(alice_view, "#turn-controls button", "Force Turn")
 
-      assert has_element?(alice_view, ~s(#game-drawer #quit-button), "Quit")
+      assert has_element?(alice_view, ~s(#game-drawer #quit-button.lg\\:hidden), "Quit")
     end
 
     test "an ended game drops the Quit button from the drawer", %{conn: conn1} do
@@ -1803,6 +1871,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
              )
 
       assert has_element?(alice_view, "#drawer-open [data-unread-dot].hidden")
+
+      # The drawer's `open`, the opener's `aria-expanded` and the dot's class
+      # are client-side state LiveView must not patch away (a reopened dialog
+      # would otherwise lose its modality): each is marked ignored on mount.
+      assert has_element?(
+               alice_view,
+               ~s(dialog#game-drawer[phx-mounted*="ignore_attrs"][phx-mounted*="open"])
+             )
+
+      assert has_element?(alice_view, ~s(#drawer-open[phx-mounted*="aria-expanded"]))
+
+      assert has_element?(
+               alice_view,
+               ~s(#drawer-open [data-unread-dot][phx-mounted*="ignore_attrs"])
+             )
     end
   end
 
@@ -1827,9 +1910,8 @@ defmodule GlobalCombatWeb.GameLiveTest do
       render_click(alice_view, "done")
       render_click(bob_view, "done")
 
-      html = wait_for(alice_view, "Turn 2")
+      wait_for(alice_view, "Turn 2")
 
-      assert html =~ "Alaska sent 4 armies to Alberta."
       assert has_element?(alice_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
       assert has_element?(alice_view, ~s(line.world-map-replay-arrow--transfer[data-step="0"]))
       assert has_element?(alice_view, "button", "Turn 2 results ▶")
@@ -1837,14 +1919,15 @@ defmodule GlobalCombatWeb.GameLiveTest do
       # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name at
       # compile time, same as `.FocusManager` (see the focus-management test above) —
       # asserting the literal dot-name here would never match the real output.
-      assert html =~
-               ~r/id="turn-replay-controls"[^>]*phx-hook="GlobalCombatWeb\.GameLive\.TurnReplay"/
+      assert has_element?(
+               alice_view,
+               ~s(#turn-replay-controls[phx-hook="GlobalCombatWeb.GameLive.TurnReplay"])
+             )
 
       # This game isn't fogged (`is_fogged: false` default) — Bob's own results
       # list, independently rendered from his own `PlayerView`, carries the same
       # line rather than being empty or diverging.
-      assert wait_for(bob_view, "Alaska sent 4 armies to Alberta.") =~
-               "Alaska sent 4 armies to Alberta."
+      wait_for_element(bob_view, ~s(li[data-step="0"]), "Alaska sent 4 armies to Alberta.")
     end
 
     test "a turn with no orders queued shows neither replay controls nor a results list",
@@ -1860,5 +1943,17 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "#turn-results-list")
       refute has_element?(alice_view, "button", "Turn 2 results ▶")
     end
+  end
+
+  # The <td> texts of the sr-only board table row whose `<th scope="row">` is `area_name`.
+  defp board_table_cells(html, area_name) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("tr")
+    |> Enum.find_value(fn row ->
+      if row |> LazyHTML.query(~s(th[scope="row"])) |> LazyHTML.text() == area_name do
+        row |> LazyHTML.query("td") |> Enum.map(&LazyHTML.text/1)
+      end
+    end) || flunk("no board table row for #{inspect(area_name)}")
   end
 end

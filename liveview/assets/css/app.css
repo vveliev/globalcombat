@@ -208,9 +208,8 @@
   --map-token-plate: var(--black);
   --map-token-ink: var(--white);
   --map-pending: var(--yellow-3);
-  /* Game HUD sizes: the smallest comfortable touch target (WCAG 2.5.8 asks
-     for 24px; thumbs want 44), a roster avatar, and the End Turn button. */
-  --hud-target: 2.75rem;
+  /* Game HUD sizes: a roster avatar and the End Turn button (touch targets
+     use --size-touch-target, below). */
   --hud-avatar: 1.625rem;
   --hud-end-turn: 5.25rem;
   --map-sea: var(--gray-1);
@@ -280,12 +279,6 @@
 .world-map:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
-}
-
-@media (min-width: 64rem) {
-  .world-map {
-    min-width: 40rem;
-  }
 }
 
 @media (min-width: 64rem) {
@@ -588,12 +581,14 @@
   }
 }
 
-/* Stage mode's dock (`GameLayout`'s `:dock` slot, `aria-label="Actions"`) is
-   a bottom sheet on a touch device — every button inside gets the WCAG
-   2.5.8 minimum target size regardless of the design system's default
-   padding-driven button height. */
-[aria-label="Actions"] button {
-  min-height: 2.75rem;
+/* Stage mode's dock (`GameLayout`'s `:dock` slot, `.game-dock`) is a bottom
+   sheet on a touch device — there every button inside gets the 44px touch
+   target (WCAG 2.5.5) regardless of the design system's default
+   padding-driven button height. A fine pointer keeps the default height. */
+@media (pointer: coarse) {
+  .game-dock button {
+    min-height: var(--size-touch-target);
+  }
 }
 
 /* The last-turn replay layer. Arrows are visible by default (opacity
@@ -688,6 +683,19 @@
    twice or borrowing a rail size that means something narrower). */
 :root {
   --size-drawer: min(22rem, 92vw);
+  /* Stage mode (GameLayout `stage`, docs/mobile-battle-mode.md §4.1/§4.7):
+     the shell fills the dynamic viewport height, the dock sheet tops out
+     under half of it, and the translucent status strip blurs the map
+     scrolling under it. Same app-level reasoning as --size-drawer: the
+     vendored design-boutique scales have no viewport-relative sizes. */
+  --size-stage: 100dvh;
+  --size-dock-max: 45dvh;
+  --size-touch-target: 2.75rem;
+  --blur-strip: 6px;
+  /* The modal drawer's ::backdrop scrim — ink-black at half strength in
+     every theme (a scrim dims whatever is under it, so it does not flip
+     with the colour scheme). */
+  --color-scrim: color-mix(in srgb, var(--black) 50%, transparent);
 }
 
 .game-drawer {
@@ -700,7 +708,7 @@
 }
 
 .game-drawer::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: var(--color-scrim);
 }
 
 @media (width < 64rem) {
@@ -949,7 +957,7 @@
   position: relative;
   display: inline-grid;
   place-items: center;
-  min-height: var(--hud-target);
+  min-height: var(--size-touch-target);
   padding: 0 var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-primary);
@@ -987,7 +995,7 @@
 .order-amount-range {
   flex: 1;
   min-width: 0;
-  height: var(--hud-target);
+  height: var(--size-touch-target);
   accent-color: var(--color-primary);
 }
 
@@ -1028,7 +1036,7 @@
   }
 
   /* Top: the status strip floats over the map; only its controls catch taps. */
-  [data-hud] > [data-slot="status"] {
+  [data-hud] > .game-status {
     position: absolute;
     inset: 0 0 auto;
     z-index: 10;
@@ -1041,9 +1049,9 @@
     pointer-events: none;
   }
 
-  [data-hud] > [data-slot="status"] button,
-  [data-hud] > [data-slot="status"] .turn-pill,
-  [data-hud] > [data-slot="status"] [data-status-pill] {
+  [data-hud] > .game-status button,
+  [data-hud] > .game-status .turn-pill,
+  [data-hud] > .game-status [data-status-pill] {
     pointer-events: auto;
   }
 
@@ -1089,15 +1097,15 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: var(--hud-target);
-    min-height: var(--hud-target);
+    min-width: var(--size-touch-target);
+    min-height: var(--size-touch-target);
     padding: 0 var(--space-2);
     color: var(--color-text);
   }
 
   /* Bottom: the dock floats over the map — the coach line and End Turn when
      idle, the order panel once a territory is picked. */
-  [data-hud] > [data-slot="dock"] {
+  [data-hud] > .game-dock {
     position: absolute;
     inset: auto 0 0;
     z-index: 10;
@@ -1107,7 +1115,7 @@
     pointer-events: none;
   }
 
-  [data-hud] > [data-slot="dock"] > * {
+  [data-hud] > .game-dock > * {
     pointer-events: auto;
   }
 
