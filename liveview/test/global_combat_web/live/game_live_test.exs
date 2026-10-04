@@ -759,7 +759,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, ~s(#order-amount[value="8"]))
     end
 
-    test "max_amount fills the unassigned pool in assign mode and the source's armies otherwise, without touching the game",
+    test "max_amount fills the unassigned pool in assign mode and what the source can send otherwise, without touching the game",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
 
@@ -773,18 +773,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
       render_click(alice_view, "max_amount", %{})
       assert has_element?(alice_view, ~s(#order-amount[value="25"]))
 
-      # Transfer: the prefill is armies - 1, Max is the whole stack.
+      # Transfer: the prefill and Max are both armies - 1 — what the engine
+      # will actually send (it always leaves one army behind).
       render_click(alice_view, "select_area", %{"area" => "3"})
-      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
+      render_click(alice_view, "step_amount", %{"delta" => "-3"})
+      assert has_element?(alice_view, ~s(#order-amount[value="1"]))
       render_click(alice_view, "max_amount", %{})
-      assert has_element?(alice_view, ~s(#order-amount[value="5"]))
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
+      assert has_element?(alice_view, ~s(#order-amount-range[max="4"]))
 
       render_click(alice_view, "cancel_order", %{})
       render_click(alice_view, "select_area", %{"area" => "1"})
       render_click(alice_view, "select_area", %{"area" => "2"})
       render_click(alice_view, "max_amount", %{})
       assert has_element?(alice_view, "#order-panel", "Attack")
-      assert has_element?(alice_view, ~s(#order-amount[value="5"]))
+      assert has_element?(alice_view, ~s(#order-amount[value="4"]))
 
       assert Games.player_view(game_id, alice.id) == {:playing, before}
     end
@@ -895,7 +898,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       sync_game(game_id, alice_view)
 
       assert area(game_id, alice, 1).order == %{command: :attack, target: 2, amount: 4}
-      assert has_element?(alice_view, ~s([aria-label="Actions"] #order-panel), "Attack")
+      assert has_element?(alice_view, ~s(.game-dock #order-panel), "Attack")
       assert has_element?(alice_view, ~s(#order-amount[value="4"]))
       assert has_element?(alice_view, "#remove-order")
       assert has_element?(alice_view, "g.world-map-order[data-area=\"1\"]")

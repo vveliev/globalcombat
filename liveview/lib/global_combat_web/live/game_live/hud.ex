@@ -2,22 +2,103 @@ defmodule GlobalCombatWeb.GameLive.Hud do
   @moduledoc """
   The game HUD's own logic, kept out of `GameLive` (`docs/mobile-battle-mode.md`
   §8): where the viewer is in the turn and how that is worded, End Turn's
-  progress ring, the lens button, and the bookkeeping behind tap-to-place —
-  the optimistic local copy of a placement and the Undo history.
+  progress ring, the lens button, what a tap, hold, drag or Undo should do,
+  and the bookkeeping behind them — the optimistic local copies and the Undo
+  history.
 
   Everything here is a pure function of a `GlobalCombat.Games.PlayerView` (and,
   where it matters, the viewer's own entry in `view.players`, which `GameLive`
-  already looks up once per render). Nothing talks to the game server.
+  already looks up once per render). Nothing talks to the game server:
+  `placement/4`, `undo_plan/3` and `drag_plan/4` say what to send, and
+  `GameLive` sends it.
   """
 
   alias GlobalCombatWeb.GameLive.WorldMap
 
   @lenses [:owner, :region, :frontier]
+  @hold_amount 5
+
+  @doc "How many reinforcements a hold places (a tap places one); `.MapViewport` reads it from the board."
+  def hold_amount, do: @hold_amount
 
   @doc "True when `area` is visible to, and owned by, the seated viewer."
-  def own_area?(view, area),
-    do:
-      area.visible and not is_nil(view.viewer_number) and area.owner_number == view.viewer_number
+  def own_area?(view, area), do: WorldMap.viewer_owns?(area, view.viewer_number)
+
+  @doc """
+  What a tap/hold placement of `requested` armies on `area_number` should
+  queue: `{:ok, amount}` (clamped to 1..`hold_amount/0` and to the pool) or
+  `:error` when the viewer can't place there.
+  """
+  def placement(view, me, area_number, requested) do
+    with %{done: false, unassigned_armies: pool} when pool > 0 <- me,
+         %{} = area <- find_area(view, area_number),
+         true <- own_area?(view, area) do
+      {:ok, requested |> max(1) |> min(@hold_amount) |> min(pool)}
+    else
+      _ -> :error
+    end
+  end
+
+  @doc """
+  How to undo the placement `{area_number, amount}`. The engine can only clear
+  an area's whole assignment, so: clear it, re-queue `keep` (what came before),
+  and — since clearing also trims a transfer/attack queued from that area to
+  what its standing armies alone allow — put that order back at as much of
+  its amount as the area can still send. Returns `{:ok, plan}` or `:error`.
+  """
+  def undo_plan(view, me, {area_number, amount}) do
+    with %{done: false} <- me,
+         %{} = area <- find_area(view, area_number),
+         true <- own_area?(view, area) do
+      undone = min(amount, area.pending_armies)
+
+      order =
+        if WorldMap.queued_order?(area),
+          do: {area.order.target, min(area.order.amount, max(area.armies - undone - 1, 0))}
+
+      {:ok,
+       %{area: area_number, undone: undone, keep: area.pending_armies - undone, order: order}}
+    else
+      _ -> :error
+    end
+  end
+
+  @doc """
+  What releasing a drag from `from` over `to` should do. A territory carries
+  one order a turn, so it depends on what is already queued from it:
+
+    * `{:queue, order}` — nothing queued: queue `order` now, with everything
+      the territory can spare;
+    * `{:reopen, amount}` — this same order is queued: reopen it untouched;
+    * `{:draft, amount}` — an order to somewhere else is queued: queue nothing
+      yet, and let the panel say which order submitting would replace;
+    * `:error` — not a legal drag.
+  """
+  def drag_plan(view, me, from, to) do
+    with %{done: false} <- me,
+         %{} = source <- find_area(view, from),
+         true <- own_area?(view, source),
+         %{visible: true} = target <- find_area(view, to),
+         true <- to in source.adjacent,
+         spare when spare > 0 <- spare_armies(source) do
+      cond do
+        not WorldMap.queued_order?(source) ->
+          command = if own_area?(view, target), do: :transfer, else: :attack
+          {:queue, %{command: command, target: to, amount: spare}}
+
+        source.order.target == to ->
+          {:reopen, source.order.amount}
+
+        true ->
+          {:draft, spare}
+      end
+    else
+      _ -> :error
+    end
+  end
+
+  @doc "The most a transfer/attack from `area` can send: the engine always leaves one army behind."
+  def spare_armies(area), do: max(area.armies - 1, 0)
 
   @doc """
   Where the viewer is in the turn, in the order a turn is played: `:watching`
@@ -41,14 +122,36 @@ defmodule GlobalCombatWeb.GameLive.Hud do
     end
   end
 
-  @doc "The dock's one sentence on what to do next."
-  def coach_line(view, me) do
-    case turn_phase(view, me) do
-      :watching -> nil
-      :done -> "Orders locked in. The turn runs once everyone has ended theirs."
-      {:place, n} -> "Tap your territories to place #{armies(n)} · hold for +5"
-      {:orders, 0} -> "Drag an army token onto a neighbour to attack or move"
-      {:orders, n} -> "#{orders(n)} ready · tap an arrow to change it"
+  @doc """
+  The dock's one sentence on what to do next, worded for how the board is
+  played at that size: `:phone` (below `lg`, the tap/hold/drag gestures) or
+  `:desktop` (click a territory, then a neighbour).
+  """
+  def coach_line(view, me, size) do
+    case {turn_phase(view, me), size} do
+      {:watching, _} ->
+        nil
+
+      {:done, _} ->
+        "Orders locked in. The turn runs once everyone has ended theirs."
+
+      {{:place, n}, :phone} ->
+        "Tap your territories to place #{armies(n)} · hold for +#{@hold_amount}"
+
+      {{:place, n}, :desktop} ->
+        "Click your territories to place #{armies(n)}"
+
+      {{:orders, 0}, :phone} ->
+        "Drag an army token onto a neighbour to attack or move"
+
+      {{:orders, 0}, :desktop} ->
+        "Click your territory, then a neighbour, to attack or move"
+
+      {{:orders, n}, :phone} ->
+        "#{orders(n)} ready · tap an arrow to change it"
+
+      {{:orders, n}, :desktop} ->
+        "#{orders(n)} ready · click an arrow to change it"
     end
   end
 
@@ -150,6 +253,8 @@ defmodule GlobalCombatWeb.GameLive.Hud do
 
     Enum.reverse(kept) ++ for({area, n} <- Enum.sort(unaccounted), n > 0, do: {area, n})
   end
+
+  defp find_area(view, number), do: Enum.find(view.areas, &(&1.number == number))
 
   defp armies(1), do: "1 army"
   defp armies(n), do: "#{n} armies"

@@ -57,6 +57,89 @@ defmodule GlobalCombatWeb.GameLive.HudTest do
     end
   end
 
+  describe "placement/4" do
+    test "clamps a request to 1..hold_amount and to the pool" do
+      view = view([area(1, 1, 0)], %{unassigned_armies: 3})
+      [me] = view.players
+
+      assert Hud.placement(view, me, 1, 1) == {:ok, 1}
+      assert Hud.placement(view, me, 1, 50) == {:ok, 3}
+      assert Hud.placement(view, %{me | unassigned_armies: 9}, 1, 50) == {:ok, Hud.hold_amount()}
+      assert Hud.placement(view, me, 1, 0) == {:ok, 1}
+    end
+
+    test "refuses someone else's land, an empty pool and a player who is done" do
+      view = view([area(1, 1, 0), area(2, 2, 0)], %{unassigned_armies: 3})
+      [me] = view.players
+
+      assert Hud.placement(view, me, 2, 1) == :error
+      assert Hud.placement(view, %{me | unassigned_armies: 0}, 1, 1) == :error
+      assert Hud.placement(view, %{me | done: true}, 1, 1) == :error
+    end
+  end
+
+  describe "undo_plan/3" do
+    test "keeps what came before and restores as much of the order as can still go" do
+      order = %{command: :attack, target: 2, amount: 6}
+      # 5 standing + 2 queued = 7 armies, order 6; undoing 1 leaves 6, so 5 can go.
+      view = view([area(1, 1, 2, order)])
+      [me] = view.players
+
+      assert {:ok, %{area: 1, undone: 1, keep: 1, order: {2, 5}}} =
+               Hud.undo_plan(view, me, {1, 1})
+    end
+
+    test "never undoes more than is queued, and has no order to restore when none is queued" do
+      view = view([area(1, 1, 2)])
+      [me] = view.players
+
+      assert {:ok, %{undone: 2, keep: 0, order: nil}} = Hud.undo_plan(view, me, {1, 5})
+    end
+  end
+
+  describe "drag_plan/4" do
+    defp board(order \\ nil) do
+      view([
+        %{area(1, 1, 0, order) | armies: 5} |> Map.put(:adjacent, [2, 3]),
+        area(2, 2, 0) |> Map.put(:adjacent, [1]),
+        area(3, 1, 0) |> Map.put(:adjacent, [1]),
+        area(4, 2, 0) |> Map.put(:adjacent, [])
+      ])
+    end
+
+    test "queues an attack or transfer at everything the source can spare when nothing is queued" do
+      view = board()
+      [me] = view.players
+      assert Hud.drag_plan(view, me, 1, 2) == {:queue, %{command: :attack, target: 2, amount: 4}}
+
+      assert Hud.drag_plan(view, me, 1, 3) ==
+               {:queue, %{command: :transfer, target: 3, amount: 4}}
+    end
+
+    test "reopens the same order untouched, and only drafts a different one" do
+      view = board(%{command: :attack, target: 2, amount: 2})
+      [me] = view.players
+      assert Hud.drag_plan(view, me, 1, 2) == {:reopen, 2}
+      assert Hud.drag_plan(view, me, 1, 3) == {:draft, 4}
+    end
+
+    test "refuses a non-neighbour, a foreign source and a player who is done" do
+      view = board()
+      [me] = view.players
+      assert Hud.drag_plan(view, me, 1, 4) == :error
+      assert Hud.drag_plan(view, me, 2, 1) == :error
+      assert Hud.drag_plan(view, %{me | done: true}, 1, 2) == :error
+    end
+  end
+
+  test "coach_line/3 words the same step for each size" do
+    view = view([area(1, 1, 0)], %{unassigned_armies: 4})
+    [me] = view.players
+
+    assert Hud.coach_line(view, me, :phone) =~ "Tap your territories to place 4 armies"
+    assert Hud.coach_line(view, me, :desktop) == "Click your territories to place 4 armies"
+  end
+
   test "next_lens/1 steps owner, region, frontier and back" do
     assert Enum.map([:owner, :region, :frontier], &Hud.next_lens/1) == [
              :region,

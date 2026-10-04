@@ -364,30 +364,26 @@ defmodule GlobalCombatWeb.GameLive do
   def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
 
   # Tap-to-place from the map (`.MapViewport`): a tap on an own territory while
-  # reinforcements are unplaced queues one there, a hold queues five — the
-  # mobile-game shortcut for the order panel's assign mode. Each placement is
-  # remembered so the dock's Undo can take back the latest one. The local view
-  # is adjusted straight away so the coach line and End Turn ring respond
-  # before the server's `:reload` lands (which then replaces it with the truth).
-  # A player who has ended their turn can't place any more.
+  # reinforcements are unplaced queues one there, a hold queues five
+  # (`Hud.placement/4` decides). Each placement is remembered so the dock's
+  # Undo can take back the latest one, and the local view is adjusted straight
+  # away so the HUD responds before the server's `:reload` replaces it.
   def handle_event(
         "quick_assign",
         %{"area" => area_str} = params,
         %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
       ) do
     with {:ok, account} <- require_account(socket),
-         {area_number, ""} <- Integer.parse(to_string(area_str)),
-         %{} = area <- find_area(view, area_number),
-         true <- Hud.own_area?(view, area),
-         %{done: false, unassigned_armies: pool} when pool > 0 <- my_player(view) do
-      amount = params |> Map.get("amount", 1) |> quick_amount() |> min(pool)
-      Games.assign(socket.assigns.game_id, account.id, area_number, amount)
+         {:ok, area} <- parse_int(area_str),
+         {:ok, requested} <- parse_int(Map.get(params, "amount", 1)),
+         {:ok, amount} <- Hud.placement(view, my_player(view), area, requested) do
+      Games.assign(socket.assigns.game_id, account.id, area, amount)
 
       {:noreply,
        socket
        |> disarm_end_turn()
-       |> update(:assign_history, &[{area_number, amount} | &1])
-       |> assign(:view, Hud.adjust_assigned(view, area_number, amount))}
+       |> update(:assign_history, &[{area, amount} | &1])
+       |> assign(:view, Hud.adjust_assigned(view, area, amount))}
     else
       _ -> {:noreply, socket}
     end
@@ -395,11 +391,7 @@ defmodule GlobalCombatWeb.GameLive do
 
   def handle_event("quick_assign", _params, socket), do: {:noreply, socket}
 
-  # The engine can only clear an area's whole assignment (`Games.unassign/3`),
-  # so undoing the latest placement clears it and re-queues whatever came
-  # before. Clearing also trims a transfer/attack queued from that area to
-  # what its standing armies alone allow, so that order is put back too, at
-  # as much of its amount as the area can still send.
+  # Takes back the latest placement, as `Hud.undo_plan/3` lays out.
   def handle_event(
         "undo_assign",
         _params,
@@ -407,34 +399,22 @@ defmodule GlobalCombatWeb.GameLive do
           assigns: %{
             status: :playing,
             view: %{ended: false} = view,
-            assign_history: [{area_number, amount} | rest]
+            assign_history: [latest | rest]
           }
         } = socket
       ) do
     socket = assign(socket, :assign_history, rest)
 
     with {:ok, account} <- require_account(socket),
-         %{} = area <- find_area(view, area_number),
-         true <- Hud.own_area?(view, area),
-         %{done: false} <- my_player(view) do
-      undone = min(amount, area.pending_armies)
-      keep = area.pending_armies - undone
-      Games.unassign(socket.assigns.game_id, account.id, area_number)
-      if keep > 0, do: Games.assign(socket.assigns.game_id, account.id, area_number, keep)
+         {:ok, plan} <- Hud.undo_plan(view, my_player(view), latest) do
+      game_id = socket.assigns.game_id
+      Games.unassign(game_id, account.id, plan.area)
+      if plan.keep > 0, do: Games.assign(game_id, account.id, plan.area, plan.keep)
 
-      if WorldMap.queued_order?(area) do
-        spare = max(area.armies - undone - 1, 0)
+      with {target, amount} <- plan.order,
+           do: submit_order(socket, account, plan.area, target, amount)
 
-        submit_order(
-          socket,
-          account,
-          area_number,
-          area.order.target,
-          min(area.order.amount, spare)
-        )
-      end
-
-      {:noreply, assign(socket, :view, Hud.adjust_assigned(view, area_number, -undone))}
+      {:noreply, assign(socket, :view, Hud.adjust_assigned(view, plan.area, -plan.undone))}
     else
       _ -> {:noreply, socket}
     end
@@ -444,47 +424,31 @@ defmodule GlobalCombatWeb.GameLive do
 
   # Drag-to-order from the map (`.MapViewport`): releasing a drag from an own
   # territory's army token over a neighbour opens the order panel on that
-  # pair. A territory carries one order a turn, so what the drag does depends
-  # on what is already queued from it:
-  #
-  #   * nothing — the order is queued straight away with everything the
-  #     territory can spare, and the panel trims it from there;
-  #   * the same order — the panel reopens on it, amount untouched;
-  #   * an order to somewhere else — nothing is queued yet; the panel says
-  #     which order submitting would replace.
+  # pair, having queued, reopened or only drafted the order as
+  # `Hud.drag_plan/4` decides.
   def handle_event(
         "drag_order",
         %{"from" => from_str, "to" => to_str},
         %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
       ) do
     with {:ok, account} <- require_account(socket),
-         {from, ""} <- Integer.parse(to_string(from_str)),
-         {to, ""} <- Integer.parse(to_string(to_str)),
-         %{} = source <- find_area(view, from),
-         true <- Hud.own_area?(view, source),
-         %{done: false} <- my_player(view),
-         %{visible: true} = target <- find_area(view, to),
-         true <- to in source.adjacent,
-         spare when spare > 0 <- source.armies - 1 do
+         {:ok, from} <- parse_int(from_str),
+         {:ok, to} <- parse_int(to_str),
+         plan when plan != :error <- Hud.drag_plan(view, my_player(view), from, to) do
       socket = assign(socket, selected_area: from, target_area: to)
 
-      cond do
-        not WorldMap.queued_order?(source) ->
-          submit_order(socket, account, from, to, spare)
-          command = if Hud.own_area?(view, target), do: :transfer, else: :attack
-          order = %{command: command, target: to, amount: spare}
+      case plan do
+        {:queue, order} ->
+          submit_order(socket, account, from, to, order.amount)
 
           {:noreply,
            assign(socket,
-             order_amount: to_string(spare),
+             order_amount: to_string(order.amount),
              view: Hud.put_order(view, from, order)
            )}
 
-        source.order.target == to ->
-          {:noreply, assign(socket, :order_amount, to_string(source.order.amount))}
-
-        true ->
-          {:noreply, assign(socket, :order_amount, to_string(spare))}
+        {_reopen_or_draft, amount} ->
+          {:noreply, assign(socket, :order_amount, to_string(amount))}
       end
     else
       _ -> {:noreply, socket}
@@ -608,20 +572,21 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp max_order_amount(_assigns), do: nil
 
-  # Assign mode tops out at the viewer's unassigned pool; transfer and attack at
-  # the source's whole stack (the engine clamps to armies - 1 when it resolves).
+  # Assign mode tops out at the viewer's unassigned pool; transfer and attack
+  # at what the source can actually send — the engine always leaves one army
+  # behind, so Max and a full slider never promise more than will go.
   defp order_limit(view, selected, target) do
     case {find_area(view, selected), target, my_player(view)} do
       {nil, _target, _me} -> nil
       {_source, nil, nil} -> nil
       {_source, nil, me} -> me.unassigned_armies
-      {source, _target, _me} -> source.armies
+      {source, _target, _me} -> Hud.spare_armies(source)
     end
   end
 
   # True when `area` has a live order queued to exactly `target`.
   defp order_queued_to?(area, target),
-    do: WorldMap.queued_order?(area) and area.order.target == target
+    do: WorldMap.queued_order?(area) and area.order.target == target and not is_nil(target)
 
   defp find_area(view, number), do: Enum.find(view.areas, &(&1.number == number))
 
@@ -647,12 +612,10 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp remember_assign(socket, _source, _target, _amount), do: socket
 
-  # A tap places one, a hold five; anything else a client sends is clamped
-  # into that range (the engine clamps to the pool on top of this).
-  defp quick_amount(amount) do
-    case Integer.parse(to_string(amount)) do
-      {n, ""} -> n |> max(1) |> min(5)
-      _ -> 1
+  defp parse_int(value) do
+    case Integer.parse(to_string(value)) do
+      {n, ""} -> {:ok, n}
+      _ -> :error
     end
   end
 
@@ -1387,6 +1350,7 @@ defmodule GlobalCombatWeb.GameLive do
         replay_steps={@replay_steps}
         game_id={@game_id}
         unassigned={Hud.gesture_pool(@view, my_player(@view))}
+        hold_amount={Hud.hold_amount()}
       />
       <figcaption
         :if={@view.ended && @winner}
@@ -1422,7 +1386,8 @@ defmodule GlobalCombatWeb.GameLive do
       assign(assigns,
         me: me,
         progress: me && Hud.placement_progress(assigns.view, me),
-        coach: me && Hud.coach_line(assigns.view, me)
+        coach: me && Hud.coach_line(assigns.view, me, :phone),
+        desktop_coach: me && Hud.coach_line(assigns.view, me, :desktop)
       )
 
     ~H"""
@@ -1440,31 +1405,15 @@ defmodule GlobalCombatWeb.GameLive do
         id="undo-assign"
         phx-click="undo_assign"
         aria-label="Undo last placement"
-        class="hud-chip turn-controls-undo"
+        class="hud-chip turn-controls-undo lg:hidden"
       >
         <.icon name="hero-arrow-uturn-left" class="size-5" />
       </button>
-      <p :if={@coach} id="turn-coach" class="turn-coach">{@coach}</p>
+      <p :if={@coach} id="turn-coach" class="turn-coach">
+        <span class="lg:hidden">{@coach}</span>
+        <span class="hidden lg:inline">{@desktop_coach}</span>
+      </p>
       <div class="turn-controls-actions">
-        <Button.button
-          id="force-turn"
-          intent="neutral"
-          class="turn-controls-force"
-          phx-click="force_turn"
-        >
-          Force Turn
-        </Button.button>
-        <%!-- Desktop only: below lg the drawer carries Quit instead (the
-        #quit-button in render_game/1's :players slot). --%>
-        <Button.button
-          :if={!@me.eliminated}
-          id="turn-controls-quit"
-          intent="neutral"
-          class="max-lg:hidden"
-          phx-click="quit"
-        >
-          Quit
-        </Button.button>
         <button
           :if={!@me.done}
           type="button"
@@ -1496,6 +1445,25 @@ defmodule GlobalCombatWeb.GameLive do
               else: "End Turn"}
           </span>
         </button>
+        <Button.button
+          id="force-turn"
+          intent="neutral"
+          class="turn-controls-force"
+          phx-click="force_turn"
+        >
+          Force Turn
+        </Button.button>
+        <%!-- Desktop only: below lg the drawer carries Quit instead (the
+        #quit-button in render_game/1's :players slot). --%>
+        <Button.button
+          :if={!@me.eliminated}
+          id="turn-controls-quit"
+          intent="neutral"
+          class="max-lg:hidden"
+          phx-click="quit"
+        >
+          Quit
+        </Button.button>
         <span :if={@me.done} class="turn-waiting">Waiting on other players…</span>
       </div>
     </div>
@@ -1667,7 +1635,7 @@ defmodule GlobalCombatWeb.GameLive do
     mode = order_mode(view, target)
     limit = order_limit(view, assigns.selected_area, assigns.target_area) || 0
     queued? = WorldMap.queued_order?(source)
-    editing? = queued? and source.order.target == assigns.target_area
+    editing? = order_queued_to?(source, assigns.target_area)
 
     replaces =
       if mode != :assign and queued? and not editing?,
@@ -1795,7 +1763,7 @@ defmodule GlobalCombatWeb.GameLive do
           >
             Remove
           </Button.button>
-          <Button.button type="button" intent="neutral" phx-click="cancel_order">
+          <Button.button id="order-cancel" type="button" intent="neutral" phx-click="cancel_order">
             {if @editing, do: "Keep", else: "Cancel"}
           </Button.button>
         </div>

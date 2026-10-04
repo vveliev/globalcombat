@@ -89,6 +89,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
   embed_templates "world_map/*"
 
+  # An army token's radius in board units; `.MapViewport` reads it from
+  # `data-token-radius` to keep tokens a steady size on screen.
+  @token_radius 9
+
   @doc """
   The colour slot (0..8) for an owner number — the sprite board's
   `owner_number % 9` (`Player.GetColor()` in the original), with `nil` (no
@@ -169,6 +173,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     default: nil,
     doc: "used only as the `.MapViewport` hook's sessionStorage key; nil disables persistence"
 
+  attr :hold_amount, :integer,
+    default: 5,
+    doc:
+      "how many reinforcements a hold places (`GameLive.Hud.hold_amount/0`, which caps `quick_assign`)"
+
   attr :unassigned, :any,
     default: nil,
     doc:
@@ -181,6 +190,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
     assigns =
       assigns
+      |> assign(:token_radius, @token_radius)
       |> assign(:view_box, view_box(assigns.map_name))
       |> assign(:owner_names, owner_names(assigns.players))
       |> assign(:area_names, area_names(assigns.areas))
@@ -204,6 +214,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-game-id={@game_id}
       data-zoomed="false"
       data-unassigned={@interactive && @unassigned}
+      data-hold-amount={@hold_amount}
+      data-token-radius={@token_radius}
       data-curve={curve_json(@map_name)}
       tabindex="0"
       phx-hook=".MapViewport"
@@ -277,7 +289,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             target={area.number == @target_area}
             fill={Map.fetch!(@fills, area.number)}
             interactive={@interactive}
-            mine={mine?(area, @viewer_number)}
+            mine={viewer_owns?(area, @viewer_number)}
             tab_stop={area.number == @tab_stop}
           />
         </g>
@@ -552,17 +564,19 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         const DOUBLE_TAP_PX = 24
         const DRAG_PX = 8
         const HOLD_MS = 450
-        const HOLD_AMOUNT = 5
         const TOKEN_REACH_PX = 22
         const TOKEN_GRAB_PX = 30
         const PLACE_COOLDOWN_MS = 500
         const PANEL_GAP_PX = 28
         const PANEL_MARGIN_PX = 8
         const EDGE_SLACK = 0.12
+        // From `lg` up the board isn't a full-screen stage: as before, a drag
+        // may pull it most of the way off its panel.
+        const DESKTOP_VISIBLE_MARGIN = 0.2
         const PORTRAIT_HEIGHT = 1.15
         const ANIMATE_MS = 200
         const TOKEN_PX = 12
-        const TOKEN_UNITS = 9
+        const BUMP_MS = 380
 
         const swallow = (e) => {
           e.stopPropagation()
@@ -601,6 +615,12 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.pendingPlacements = 0
             this.raf = null
             this.counts = this.readCounts()
+            this.bumpedAt = {}
+            this.holdAmount = Number(this.el.dataset.holdAmount)
+            this.tokenRadius = Number(this.el.dataset.tokenRadius)
+            this.onVisualViewport = () => this.positionOrderPanel()
+            window.visualViewport?.addEventListener("resize", this.onVisualViewport)
+            window.visualViewport?.addEventListener("scroll", this.onVisualViewport)
             this.reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
             this.onPointerDown = this.onPointerDown.bind(this)
@@ -627,6 +647,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
             const saved = this.restore()
             this.lastAspect = this.aspect()
+            this.lastWidth = this.svg?.getBoundingClientRect().width
             this.current = saved ? this.withAspect(saved) : this.home()
             this.applyViewBox()
 
@@ -645,6 +666,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           destroyed() {
             window.removeEventListener("gc:map-fit", this.onFitEvent)
             this.resizeObserver?.disconnect()
+            window.visualViewport?.removeEventListener("resize", this.onVisualViewport)
+            window.visualViewport?.removeEventListener("scroll", this.onVisualViewport)
             this.cancelHold()
             this.clearPanelPosition()
             if (this.raf) cancelAnimationFrame(this.raf)
@@ -658,11 +681,16 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             return { x, y, w, h }
           },
 
+          // The shape the viewBox takes. On the phone stage the <svg> fills a
+          // box of its own, so the viewBox follows that box. From `lg` up the
+          // <svg>'s height comes *from* its viewBox (`h-auto`), so measuring it
+          // would only feed the last shape back in — there the board keeps
+          // its own proportions.
           aspect() {
+            const board = this.base.w / this.base.h
+            if (this.desktop.matches) return board
             const rect = this.svg?.getBoundingClientRect()
-            return rect && rect.width > 0 && rect.height > 0
-              ? rect.width / rect.height
-              : this.base.w / this.base.h
+            return rect && rect.width > 0 && rect.height > 0 ? rect.width / rect.height : board
           },
 
           // Widest view: the whole board, plus open sea on whichever axis the
@@ -750,13 +778,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             if (!this.svg) return
             const { x, y, w, h } = this.current
             this.svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`)
-            this.el.dataset.zoomed = w < this.fitWidth() - 0.01 ? "true" : "false"
+            this.el.dataset.zoomed = this.zoomedIn() ? "true" : "false"
 
             // Army tokens keep a thumb-readable size instead of shrinking and
             // growing with the board (`.world-map-token` in app.css).
-            const width = this.svg.getBoundingClientRect().width
-            const unitsPerPx = width > 0 ? w / width : 1
-            const scale = Math.min(Math.max((TOKEN_PX * unitsPerPx) / TOKEN_UNITS, 0.7), 1.6)
+            const scale = Math.min(
+              Math.max(TOKEN_PX / (this.pixelsPerUnit() * this.tokenRadius), 0.7),
+              1.6
+            )
             this.el.style.setProperty("--token-scale", scale.toFixed(3))
             this.positionOrderPanel()
           },
@@ -777,13 +806,19 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
             const [x, y] = panel.dataset.anchor.split(",").map(Number)
             const rect = this.svg.getBoundingClientRect()
-            const pxPerUnit = rect.width / this.current.w
-            const cx = rect.left + (x - this.current.x) * pxPerUnit
-            const cy = rect.top + (y - this.current.y) * pxPerUnit
+            const ppu = this.pixelsPerUnit()
+            const cx = rect.left + (x - this.current.x) * ppu
+            const cy = rect.top + (y - this.current.y) * ppu
             const w = panel.offsetWidth
             const h = panel.offsetHeight
+            // The visual viewport, not the window: iOS doesn't shrink the
+            // window for the soft keyboard, and the panel's amount field must
+            // stay above it (spec §2 rule 6).
+            const vv = window.visualViewport
+            const viewTop = vv ? vv.offsetTop : 0
+            const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight
             const maxLeft = window.innerWidth - w - PANEL_MARGIN_PX
-            const maxTop = window.innerHeight - h - PANEL_MARGIN_PX
+            const maxTop = viewBottom - h - PANEL_MARGIN_PX
             const left = Math.max(PANEL_MARGIN_PX, Math.min(cx - w / 2, maxLeft))
             const below = cy + PANEL_GAP_PX
             const top = below <= maxTop ? below : cy - PANEL_GAP_PX - h
@@ -791,7 +826,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             root.setProperty("--order-panel-left", `${Math.round(left)}px`)
             root.setProperty(
               "--order-panel-top",
-              `${Math.round(Math.max(PANEL_MARGIN_PX, Math.min(top, maxTop)))}px`
+              `${Math.round(Math.max(viewTop + PANEL_MARGIN_PX, Math.min(top, maxTop)))}px`
             )
           },
 
@@ -801,24 +836,45 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             root.removeProperty("--order-panel-top")
           },
 
-          // A view smaller than the board stays over it (with a little sea at
-          // the edges); a view larger than the board on an axis stays centred.
+          // Phone stage: a view smaller than the board stays over it (with a
+          // little sea at the edges), a view larger than the board on an axis
+          // stays centred. From `lg` up the board may be dragged most of the
+          // way off its panel, at any zoom, as it always could.
           clamped(next) {
             const b = this.base
-            const axis = (pos, size, start, length) => {
-              if (size >= length) return start + length / 2 - size / 2
-              const slack = size * EDGE_SLACK
-              return Math.min(Math.max(pos, start - slack), start + length - size + slack)
-            }
+            const axis = this.desktop.matches
+              ? (pos, size, start, length) =>
+                  Math.min(
+                    Math.max(pos, start - (1 - DESKTOP_VISIBLE_MARGIN) * size),
+                    start + length - DESKTOP_VISIBLE_MARGIN * size
+                  )
+              : (pos, size, start, length) => {
+                  if (size >= length) return start + length / 2 - size / 2
+                  const slack = size * EDGE_SLACK
+                  return Math.min(Math.max(pos, start - slack), start + length - size + slack)
+                }
             return { ...next, x: axis(next.x, next.w, b.x, b.w), y: axis(next.y, next.h, b.y, b.h) }
+          },
+
+          // True unless the whole board is showing.
+          zoomedIn() {
+            return this.current.w < this.fitWidth() - 0.01
+          },
+
+          // Client pixels per board unit at the current zoom. The viewBox
+          // always takes the <svg>'s own aspect ratio, so this is the same on
+          // both axes and nothing is letterboxed.
+          pixelsPerUnit() {
+            const width = this.svg?.getBoundingClientRect().width
+            return width > 0 ? width / this.current.w : 1
           },
 
           clientToViewBox(clientX, clientY) {
             const rect = this.svg.getBoundingClientRect()
-            const upp = this.current.w / rect.width
+            const ppu = this.pixelsPerUnit()
             return {
-              x: this.current.x + (clientX - rect.left) * upp,
-              y: this.current.y + (clientY - rect.top) * upp
+              x: this.current.x + (clientX - rect.left) / ppu,
+              y: this.current.y + (clientY - rect.top) / ppu
             }
           },
 
@@ -829,13 +885,13 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             const rect = this.svg.getBoundingClientRect()
             const aspect = this.aspect()
             const w = Math.min(Math.max(newW, this.base.w / MAX_SCALE), this.fitWidth(aspect))
-            const upp = w / rect.width
+            const ppu = this.pixelsPerUnit() * (this.current.w / w)
 
             return this.clamped({
               w,
               h: w / aspect,
-              x: vbPoint.x - (clientX - rect.left) * upp,
-              y: vbPoint.y - (clientY - rect.top) * upp
+              x: vbPoint.x - (clientX - rect.left) / ppu,
+              y: vbPoint.y - (clientY - rect.top) / ppu
             })
           },
 
@@ -910,14 +966,19 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             let best = null
             let bestDistance = TOKEN_REACH_PX
             this.el.querySelectorAll(".world-map-count[data-area]").forEach((count) => {
-              const r = count.getBoundingClientRect()
-              const d = Math.hypot(r.left + r.width / 2 - clientX, r.top + r.height / 2 - clientY)
+              const d = this.distanceToToken(count, clientX, clientY)
               if (d < bestDistance) {
                 bestDistance = d
                 best = count.dataset.area
               }
             })
             return best ? this.el.querySelector(`#territory-${best}`) : null
+          },
+
+          // Screen distance from a point to the centre of an army count.
+          distanceToToken(count, clientX, clientY) {
+            const r = count.getBoundingClientRect()
+            return Math.hypot(r.left + r.width / 2 - clientX, r.top + r.height / 2 - clientY)
           },
 
           // The game gestures are on only where the phone HUD is (below `lg`),
@@ -969,15 +1030,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
             // An order is dragged from the army token, not from anywhere on the
             // land: a big territory (or a screen full of your own) still pans.
-            const token = this.el
-              .querySelector(`.world-map-count[data-area="${area}"]`)
-              ?.getBoundingClientRect()
-            const onToken =
-              !!token &&
-              Math.hypot(
-                token.left + token.width / 2 - clientX,
-                token.top + token.height / 2 - clientY
-              ) <= TOKEN_GRAB_PX
+            const count = this.el.querySelector(`.world-map-count[data-area="${area}"]`)
+            const onToken = !!count && this.distanceToToken(count, clientX, clientY) <= TOKEN_GRAB_PX
 
             return {
               area,
@@ -992,7 +1046,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             if (!this.press || this.moved) return
             this.press.timer = null
             this.suppressClick = true
-            this.place(this.press.area, HOLD_AMOUNT)
+            this.place(this.press.area, this.holdAmount)
           },
 
           cancelHold() {
@@ -1029,12 +1083,11 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               // Below the drag threshold a press on a draggable territory might
               // still become an order — don't nudge the map under it yet.
               if (!this.moved && this.press?.canDrag) return
-              const rect = this.svg.getBoundingClientRect()
-              const upp = this.current.w / rect.width
+              const ppu = this.pixelsPerUnit()
               this.current = this.clamped({
                 ...this.current,
-                x: this.current.x - dx * upp,
-                y: this.current.y - dy * upp
+                x: this.current.x - dx / ppu,
+                y: this.current.y - dy / ppu
               })
               this.applyViewBox()
             } else if (this.pointers.size === 2 && this.pinch) {
@@ -1246,7 +1299,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
               const justPlaced = Date.now() - this.lastPlaceAt < PLACE_COOLDOWN_MS
               if (mine && (this.unplaced() > 0 || justPlaced)) {
                 swallow(e)
-                this.cancelPendingTap()
+                // A tap still held for the double-tap window was a single tap
+                // after all: let it through rather than drop it.
+                this.deliverPendingTap()
                 this.lastClick = null
                 this.place(territory.dataset.area, 1)
                 return
@@ -1358,7 +1413,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           },
 
           doubleTapZoom(clientX, clientY) {
-            if (this.current.w < this.fitWidth() - 0.01) {
+            if (this.zoomedIn()) {
               this.resetToFit()
               return
             }
@@ -1368,28 +1423,41 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
           // --- count feedback ------------------------------------------------
 
+          // The server's counts (`data-armies`), never the text: `.MapReplay`
+          // rewrites the text while it steps through last turn, and that is
+          // not a change worth a bump.
           readCounts() {
             const counts = {}
             this.el.querySelectorAll(".world-map-count[data-area]").forEach((c) => {
-              counts[c.dataset.area] = c.firstChild?.textContent?.trim()
+              counts[c.dataset.area] = c.dataset.armies
             })
             return counts
           },
 
+          // A short pop on the token, as a Web Animation so nothing touches
+          // markup LiveView patches. Skipped under reduced motion.
           bump(area) {
+            if (this.reduceMotion) return
             const inner = this.el.querySelector(
               `.world-map-token[data-area="${area}"] .world-map-token-inner`
             )
-            if (!inner) return
-            inner.classList.remove("is-bumped")
-            void inner.getBBox?.()
-            inner.classList.add("is-bumped")
+            this.bumpedAt[area] = Date.now()
+            inner?.animate?.(
+              [{ transform: "scale(1)" }, { transform: "scale(1.4)", offset: 0.4 }, { transform: "scale(1)" }],
+              { duration: BUMP_MS, easing: "cubic-bezier(0.3, 1.6, 0.5, 1)" }
+            )
           },
 
+          // Bumps tokens whose count changed in this patch — except one this
+          // hook bumped itself a moment ago (a tap's own placement arriving
+          // back from the server), which would otherwise pop twice.
           bumpChangedCounts() {
             const counts = this.readCounts()
+            const now = Date.now()
             Object.entries(counts).forEach(([area, value]) => {
-              if (this.counts[area] !== undefined && this.counts[area] !== value) this.bump(area)
+              const changed = this.counts[area] !== undefined && this.counts[area] !== value
+              const justBumped = now - (this.bumpedAt[area] || 0) < BUMP_MS * 2
+              if (changed && !justBumped) this.bump(area)
             })
             this.counts = counts
           },
@@ -1455,22 +1523,24 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           // board it goes back to the starting view (on a phone held upright,
           // the zoom around your own territories); from anywhere else it fits.
           onFitEvent() {
-            if (this.current.w >= this.fitWidth() - 0.01) this.showView(this.home())
+            if (!this.zoomedIn()) this.showView(this.home())
             else this.resetToFit()
           },
 
           // The stage changed shape (rotation, address bar, keyboard, a
           // devtools panel): keep the centre and zoom and take the new shape —
           // except that turning a phone between upright and sideways starts
-          // over from its home view (sideways shows the whole board).
+          // over from its home view (sideways shows the whole board). Only a
+          // width change counts as turning it: the soft keyboard changes just
+          // the height, and on a tablet that can cross square while typing.
           onResize() {
             const aspect = this.aspect()
-            const flipped = aspect >= 1 !== this.lastAspect >= 1
+            const width = this.svg?.getBoundingClientRect().width
+            const turned = aspect >= 1 !== this.lastAspect >= 1 && width !== this.lastWidth
             this.lastAspect = aspect
+            this.lastWidth = width
             this.current =
-              flipped && !this.desktop.matches
-                ? this.home()
-                : this.withAspect(this.current)
+              turned && !this.desktop.matches ? this.home() : this.withAspect(this.current)
             this.applyViewBox()
           }
         }
@@ -1579,7 +1649,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # the board; the inner one is what `.MapViewport` bumps when the count changes.
   defp army_count(assigns) do
     {x, y} = Geometry.label(assigns.map_name, assigns.area.number)
-    assigns = assign(assigns, x: x, y: y, pending: Map.get(assigns.area, :pending_armies, 0))
+
+    assigns =
+      assign(assigns,
+        x: x,
+        y: y,
+        pending: Map.get(assigns.area, :pending_armies, 0),
+        token_radius: @token_radius
+      )
 
     # `paint-order`/`stroke-linejoin` are presentation attributes here (they need
     # no theme token) so the outline-under-glyphs contract is visible in the
@@ -1592,7 +1669,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       style={"transform-origin: #{@x}px #{@y}px"}
     >
       <g class="world-map-token-inner" style={"transform-origin: #{@x}px #{@y}px"}>
-        <circle cx={@x} cy={@y} r="9" class="world-map-token-ring" />
+        <circle cx={@x} cy={@y} r={@token_radius} class="world-map-token-ring" />
         <text
           id={"territory-count-#{@area.number}"}
           x={@x}
@@ -1985,8 +2062,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   def queued_order?(%{order: %{amount: amount}}) when amount > 0, do: true
   def queued_order?(_area), do: false
 
-  defp mine?(_area, nil), do: false
-  defp mine?(area, viewer_number), do: area.visible and area.owner_number == viewer_number
+  @doc "True when `area` (a `PlayerView` area) is visible to, and owned by, seat `viewer_number`."
+  def viewer_owns?(_area, nil), do: false
+  def viewer_owns?(area, viewer_number), do: area.visible and area.owner_number == viewer_number
 
   # Fog-hidden areas get no owner slot at all (`data-owner` is omitted) — the fog
   # hatch is styled off `data-fog`, never off a neutral "0" that would be

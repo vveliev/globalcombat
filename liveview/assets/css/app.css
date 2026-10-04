@@ -204,14 +204,21 @@
 :root {
   /* Army tokens and the queued-reinforcements tab (see "Game HUD" below):
      a dark plate and light ink that hold on every owner colour, and the gold
-     of a pending "+N". */
+     of a pending "+N" — board pieces, under the same rule as the owner
+     palette (docs/adr/0003, 2026-10-04 amendment). */
   --map-token-plate: var(--black);
   --map-token-ink: var(--white);
   --map-pending: var(--yellow-3);
-  /* Game HUD sizes: a roster avatar and the End Turn button (touch targets
-     use --size-touch-target, below). */
+  /* Game HUD sizes (touch targets use --size-touch-target, below): a roster
+     avatar, the End Turn button, the floating order panel, the order panel's
+     exact-number field, and the narrowest the coach line gets before the
+     dock row wraps. Same app-level reasoning as --size-drawer: the vendored
+     scales have nothing for these game pieces. */
   --hud-avatar: 1.625rem;
   --hud-end-turn: 5.25rem;
+  --hud-order-panel: 19rem;
+  --hud-amount-field: 5.5rem;
+  --hud-coach-min: 12rem;
   --map-sea: var(--gray-1);
   --map-fog-a: var(--stone-3);
   --map-fog-b: var(--stone-5);
@@ -789,16 +796,6 @@
   transform-box: view-box;
 }
 
-.world-map-token-inner.is-bumped {
-  animation: world-map-bump 380ms cubic-bezier(0.3, 1.6, 0.5, 1);
-}
-
-@keyframes world-map-bump {
-  40% {
-    transform: scale(1.4);
-  }
-}
-
 /* Reinforcements queued on a territory this turn: a gold "+N" tab. */
 .world-map-pending rect {
   fill: var(--map-pending);
@@ -806,6 +803,7 @@
   stroke-width: 0.8px;
 }
 
+/* Board units, like `.world-map-count`'s 12px: sized against the token. */
 .world-map-pending text {
   font-size: 7.5px;
   font-weight: 800;
@@ -934,7 +932,7 @@
 }
 
 .turn-coach {
-  flex: 1 1 12rem;
+  flex: 1 1 var(--hud-coach-min);
   min-width: 0;
   margin: 0;
   font-size: var(--text-sm);
@@ -975,9 +973,11 @@
   display: none;
 }
 
+/* Armed: the next press really ends the turn with armies unplaced. */
 .end-turn.is-armed {
-  background: var(--color-warning);
-  color: var(--map-token-plate);
+  background: var(--color-surface);
+  color: var(--color-danger);
+  box-shadow: inset 0 0 0 3px var(--color-danger);
 }
 
 /* The order panel: the exact number beside a slider, then quick picks. */
@@ -988,7 +988,7 @@
 }
 
 .order-amount-input {
-  width: 5.5rem;
+  width: var(--hud-amount-field);
   flex: none;
 }
 
@@ -1072,8 +1072,8 @@
     border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
     border-radius: var(--radius-md);
     background: color-mix(in oklab, var(--color-surface) 86%, transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(var(--blur-strip));
+    -webkit-backdrop-filter: blur(var(--blur-strip));
     box-shadow: var(--shadow-md);
   }
 
@@ -1085,7 +1085,7 @@
   }
 
   [data-hud] .turn-pill .heading-3 {
-    font-size: 1.15rem;
+    font-size: var(--text-lg);
     line-height: 1.15;
   }
 
@@ -1109,7 +1109,7 @@
     position: absolute;
     inset: auto 0 0;
     z-index: 10;
-    max-height: 70dvh;
+    max-height: var(--size-dock-max);
     border: 0;
     background: transparent;
     pointer-events: none;
@@ -1131,7 +1131,7 @@
     position: fixed;
     left: var(--order-panel-left);
     top: var(--order-panel-top);
-    width: min(19rem, calc(100vw - var(--space-4)));
+    width: min(var(--hud-order-panel), calc(100vw - var(--space-4)));
     min-width: 0;
   }
 
@@ -1151,8 +1151,14 @@
   }
 
   [data-hud] .turn-controls-actions {
-    flex-direction: column-reverse;
+    flex-direction: column;
     align-items: flex-end;
+  }
+
+  /* End Turn comes first in the markup (and on desktop); on a phone it sits
+     at the bottom of the column, under Force Turn, nearest the thumb. */
+  [data-hud] .turn-controls-actions .end-turn {
+    order: 1;
   }
 
   [data-hud] .turn-controls-force {
@@ -1203,7 +1209,7 @@
   }
 
   [data-hud] .end-turn-ring-fill {
-    stroke: var(--map-pending);
+    stroke: var(--color-warning);
     stroke-dasharray: 100;
     stroke-linecap: round;
     transition: stroke-dashoffset 0.35s ease;
@@ -1235,7 +1241,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .world-map-token-inner.is-bumped,
   [data-hud] #order-panel,
   [data-hud] .end-turn--ready {
     animation: none;

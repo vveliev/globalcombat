@@ -122,7 +122,7 @@ Dock contents by state (`@selected_area`):
 Order panel changes:
 
 - Amount input: add `inputmode="numeric"`, `pattern="[0-9]*"`, `autocomplete="off"`, `enterkeyhint="done"`.
-- Stepper: `−` and `+` buttons (`phx-click="step_amount"` with `phx-value-delta`) and `Max` (`phx-click="max_amount"`). New handlers set `order_amount` only; `submit_order` validation is unchanged. `Max` uses the source area's `armies` for transfer and attack, and the viewer's unassigned reinforcements for assign if `PlayerView` exposes that number (otherwise `Max` is omitted in assign mode; note it in the PR).
+- Stepper: `−` and `+` buttons (`phx-click="step_amount"` with `phx-value-delta`) and `Max` (`phx-click="max_amount"`). New handlers set `order_amount` only; `submit_order` validation is unchanged. `Max` uses what the source area can actually send for transfer and attack (its `armies` less the one the engine always leaves behind), and the viewer's unassigned reinforcements for assign if `PlayerView` exposes that number (otherwise `Max` is omitted in assign mode; note it in the PR).
 - Buttons stay `Assign`/`Transfer`/`Attack`, `Unassign`, `Cancel`; on phones they wrap to full-width rows.
 
 ### 4.4 `.MapViewport` hook (`lib/global_combat_web/live/game_live/world_map.ex`)
@@ -290,6 +290,7 @@ wording, the Undo history, the optimistic copies of a placement or order).
 | Lens | One button that steps owner → region → frontier (`cycle_lens`); the segmented control stays at `lg` |
 | End Turn | Round thumb button whose ring fills as reinforcements go out |
 | Fit | From the whole board it returns to the starting view; from anywhere else it fits the whole board |
+| Replay | The status strip's replay controls shrink to chips: "▶ Replay" and ◀ / ▶ for the steps |
 
 A player who has ended their turn gets none of the gestures, and the three
 events refuse them server-side.
@@ -300,12 +301,13 @@ events refuse them server-side.
 |---|---|
 | Turn pill | "Turn 7" plus where the viewer is in the turn: "Place 4 armies", "2 orders ready", "Waiting on others". Kept out of the status strip's live announcements, since it changes on every placement |
 | Roster | The drawer opener (below `lg`) shows each seat's colour and initial, with a tick once they have ended their turn |
-| Coach line | One sentence on what to do next |
+| Coach line | One sentence on what to do next, worded for how that size is played: tap/hold/drag below `lg`, click a territory then a neighbour from `lg` up |
 | End Turn confirm | With armies unplaced the first press arms the button ("3 unplaced · tap again") for three seconds and the second ends the turn (`arm_end_turn`) |
-| Order panel | A slider and 1 / half / Max picks beside the exact number. On a queued order the primary button updates it and Remove takes it off the board: the engine has no cancel, so Remove resubmits zero, and a zero order draws no arrow, is left out of Your orders and is not counted as ready (`WorldMap.queued_order?/1`) |
+| Order panel | A slider and 1 / half / Max picks beside the exact number, all capped at what the order can really send (a transfer/attack leaves one army behind). On a queued order the primary button updates it and Remove takes it off the board: the engine has no cancel, so Remove resubmits zero, and a zero order draws no arrow, is left out of Your orders and is not counted as ready (`WorldMap.queued_order?/1`) |
 | Tokens | Army counts sit on owner-ringed tokens with a gold `+N` while reinforcements are queued; `.MapViewport` sets `--token-scale` so they keep a readable size at any zoom, and bumps a token when its count changes. Order arrows bow and carry their amount in a badge |
 
-From `lg` up a click still selects and a drag still pans, as before.
+From `lg` up a click still selects and a drag still pans, as before — at any
+zoom, with the board free to be pulled most of the way off its panel.
 
 The viewBox always takes the stage's aspect ratio, so nothing letterboxes:
 "fit" is the whole board (a phone held sideways shows all of it), and a phone
