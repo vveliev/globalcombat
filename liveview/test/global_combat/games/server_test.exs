@@ -336,13 +336,12 @@ defmodule GlobalCombat.Games.ServerTest do
       game_id = System.unique_integer([:positive])
       serialized = serialized_engine(turn: 5)
 
-      {:ok, _pid} =
-        Server.start_link(
-          game_id: game_id,
-          rehydrate_from: serialized,
-          turn_length_minutes: 30,
-          last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
-        )
+      start_server!(
+        game_id: game_id,
+        rehydrate_from: serialized,
+        turn_length_minutes: 30,
+        last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
+      )
 
       assert {:playing, view} = Server.player_view(game_id, 101)
       assert view.turn == 5
@@ -358,14 +357,13 @@ defmodule GlobalCombat.Games.ServerTest do
 
       {:ok, game} = GamesDb.mark_active(game)
 
-      {:ok, _pid} =
-        Server.start_link(
-          game_id: game.id,
-          rehydrate_from: game.serialized,
-          turn_length_minutes: 30,
-          last_turn_time: game.last_turn_time,
-          callers: [self() | Process.get(:"$callers", [])]
-        )
+      start_server!(
+        game_id: game.id,
+        rehydrate_from: game.serialized,
+        turn_length_minutes: 30,
+        last_turn_time: game.last_turn_time,
+        callers: [self() | Process.get(:"$callers", [])]
+      )
 
       assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
 
@@ -443,14 +441,13 @@ defmodule GlobalCombat.Games.ServerTest do
 
       {:ok, game} = GamesDb.mark_active(game)
 
-      {:ok, _pid} =
-        Server.start_link(
-          game_id: game.id,
-          rehydrate_from: game.serialized,
-          turn_length_minutes: 30,
-          last_turn_time: game.last_turn_time,
-          callers: [self() | Process.get(:"$callers", [])]
-        )
+      start_server!(
+        game_id: game.id,
+        rehydrate_from: game.serialized,
+        turn_length_minutes: 30,
+        last_turn_time: game.last_turn_time,
+        callers: [self() | Process.get(:"$callers", [])]
+      )
 
       # Player 2 already owns no areas going into this turn, so `resolve_reinforcements_and_
       # eliminations/1` eliminates them and — since only one player then remains alive — ends
@@ -490,14 +487,13 @@ defmodule GlobalCombat.Games.ServerTest do
 
       {:ok, game} = GamesDb.mark_active(game)
 
-      {:ok, _pid} =
-        Server.start_link(
-          game_id: game.id,
-          rehydrate_from: game.serialized,
-          turn_length_minutes: 30,
-          last_turn_time: game.last_turn_time,
-          callers: [self() | Process.get(:"$callers", [])]
-        )
+      start_server!(
+        game_id: game.id,
+        rehydrate_from: game.serialized,
+        turn_length_minutes: 30,
+        last_turn_time: game.last_turn_time,
+        callers: [self() | Process.get(:"$callers", [])]
+      )
 
       assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
 
@@ -526,14 +522,13 @@ defmodule GlobalCombat.Games.ServerTest do
 
       {:ok, game} = GamesDb.mark_active(game)
 
-      {:ok, _pid} =
-        Server.start_link(
-          game_id: game.id,
-          rehydrate_from: game.serialized,
-          turn_length_minutes: 30,
-          last_turn_time: game.last_turn_time,
-          callers: [self() | Process.get(:"$callers", [])]
-        )
+      start_server!(
+        game_id: game.id,
+        rehydrate_from: game.serialized,
+        turn_length_minutes: 30,
+        last_turn_time: game.last_turn_time,
+        callers: [self() | Process.get(:"$callers", [])]
+      )
 
       # Resolving this turn eliminates player 2 and, with only one player then left alive,
       # ends the game in the same turn — same fixture the GIF-120 tests above use.
@@ -555,16 +550,19 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
+  # Starts a Server under the test supervisor rather than GamesSupervisor, to exercise
+  # rehydrate_from: below the DynamicSupervisor layer. `:temporary` so kill_server!/1's deliberate
+  # kill isn't undone by the test supervisor restarting the (normally :transient) child.
+  defp start_server!(opts) do
+    start_supervised!(Supervisor.child_spec({Server, opts}, restart: :temporary))
+  end
+
   # Unlike GlobalCombat.Games.LiveTest's same-named helper, this file's Server processes are
-  # started directly via Server.start_link/1 (to exercise rehydrate_from: below the DynamicSupervisor
-  # layer), not as GamesSupervisor children — so there's no supervised child to terminate_child/2,
-  # just the bare pid to kill.
+  # start_server!/1 children of the test supervisor, not GamesSupervisor's — so there's no
+  # GamesSupervisor child to terminate_child/2, just the pid to kill.
   defp kill_server!(game_id) do
     [{pid, _}] = Registry.lookup(GlobalCombat.Games.Registry, game_id)
     ref = Process.monitor(pid)
-    # start_link/1 above links the Server to this test process, so an unlinked kill is needed
-    # here — a plain Process.exit(pid, :kill) would otherwise take the test process down with it.
-    Process.unlink(pid)
     Process.exit(pid, :kill)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
     wait_until_deregistered(game_id)
