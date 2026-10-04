@@ -29,8 +29,10 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   replayed one both need to stay clear of the counts painted last.
 
   Geometry (`world_map/<map>_map_defs.html.heex`, `MapGeometry`) is generated
-  by `scripts/trace_maps.py` from the legacy silhouettes, so shapes, adjacency
-  and the coordinate space are unchanged from the sprite board. The defs are
+  by `scripts/trace_maps.py` from the legacy silhouettes. The generator makes
+  an exclusive pixel partition so neighboring territory fills share one edge;
+  territory and region border networks are drawn once from that same partition.
+  Adjacency and the coordinate space remain unchanged from the sprite board. The defs are
   static templates: LiveView ships them once with the page statics and never
   re-sends them on a diff, however often ownership changes.
 
@@ -255,6 +257,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             interactive={@interactive}
           />
         </g>
+        <use href="#gc-area-borders" class="world-map-borders" />
         <use href="#gc-region-outlines" class="world-map-outlines" />
         <g
           class="world-map-legend"

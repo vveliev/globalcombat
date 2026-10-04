@@ -6,12 +6,13 @@ transparency) for every area from the legacy ASP.NET project's `Web/wwwroot/maps
 places it on the legacy 800x480 board at the coordinates from `MapInfo.render_info/2`, and
 emits:
 
-  - one SVG path per area (all islands, holes preserved, smoothed)
+  - one SVG path per area from a shared, exclusive territory partition (all islands and
+    holes preserved, smoothed)
+  - territory and region border networks traced once from that same partition
   - a label anchor per area (approximate pole of inaccessibility)
   - links: for every adjacency whose silhouettes do not touch, a line between the two
     closest boundary points (sea lanes on the world map, the arrow routes on elements;
     Alaska <-> Pevek wraps off the board edges)
-  - region outlines: union of each region's masks, traced
   - a viewBox per map (the world map fills the legacy board; elements is cropped to its art)
 
 Outputs `lib/global_combat_web/live/game_live/map_geometry.ex` (labels, elements, viewBoxes)
@@ -144,6 +145,94 @@ def trace(m, min_area=3.0, eps=0.8, smooth=2):
         if p: parts.append(p)
     return "".join(parts)
 
+def rdp_open(pts, eps=0.65):
+    """Ramer-Douglas-Peucker for an open polyline."""
+    if len(pts) < 3:
+        return pts
+    a, b = np.array(pts[0]), np.array(pts[-1])
+    ab = b - a
+    L = np.hypot(*ab) or 1e-9
+    d = [abs((p[0]-a[0])*ab[1] - (p[1]-a[1])*ab[0]) / L for p in pts[1:-1]]
+    i = int(np.argmax(d)) + 1
+    if d[i-1] > eps:
+        return rdp_open(pts[:i+1], eps)[:-1] + rdp_open(pts[i:], eps)
+    return [pts[0], pts[-1]]
+
+def shared_borders(masks, labels, region_of):
+    """Build exclusive territory masks and shared border paths from one partition.
+
+    The legacy GIF silhouettes overlap slightly. Assign each covered pixel to the
+    territory whose label anchor is nearest, then extract all boundaries from that
+    single label raster. Unlike strokes on independently smoothed territory paths,
+    this makes every shared edge one continuous line.
+    """
+    owner = np.full((H, W), -1, np.int16)
+    best = np.full((H, W), np.inf)
+    for n, mask in masks.items():
+        y, x = np.nonzero(mask)
+        lx, ly = labels[n]
+        d2 = (x - lx) ** 2 + (y - ly) ** 2
+        better = d2 < best[y, x]
+        owner[y[better], x[better]] = n
+        best[y[better], x[better]] = d2[better]
+
+    # Undirected pixel-edge segments: adjacent territory IDs, region seams, coast.
+    segments, region_segments = set(), set()
+    for y in range(H):
+        for x in range(W):
+            n = owner[y, x]
+            if n < 0:
+                continue
+            for dx, dy, edge in ((1, 0, ((x+1,y),(x+1,y+1))),
+                                 (0, 1, ((x,y+1),(x+1,y+1)))):
+                nx, ny = x + dx, y + dy
+                other = owner[ny, nx] if nx < W and ny < H else -1
+                if other != n:
+                    segments.add(tuple(sorted(edge)))
+                    if other >= 0 and region_of[n] != region_of[other]:
+                        region_segments.add(tuple(sorted(edge)))
+            if x == 0 or owner[y, x-1] < 0:
+                segments.add(tuple(sorted(((x,y),(x,y+1)))))
+            if y == 0 or owner[y-1, x] < 0:
+                segments.add(tuple(sorted(((x,y),(x+1,y)))))
+
+    def path_for(edges):
+        segment_list = sorted(edges)
+        incident = {}
+        for i, (a, b) in enumerate(segment_list):
+            incident.setdefault(a, []).append(i)
+            incident.setdefault(b, []).append(i)
+        unused = set(range(len(segment_list)))
+        paths = []
+        while unused:
+            ends = [p for p, ids in incident.items() if len(ids) != 2 and any(i in unused for i in ids)]
+            start = ends[0] if ends else segment_list[next(iter(unused))][0]
+            ids = [i for i in incident[start] if i in unused]
+            points, current = [start], start
+            while ids:
+                i = ids[0]
+                unused.remove(i)
+                seg = segment_list[i]
+                current = seg[1] if seg[0] == current else seg[0]
+                points.append(current)
+                if len(incident[current]) != 2:
+                    break
+                ids = [j for j in incident[current] if j in unused]
+            if len(points) > 1:
+                paths.append(points)
+        commands = []
+        for points in paths:
+            closed = points[0] == points[-1]
+            ring = points[:-1] if closed else points
+            simplified = rdp(ring, 0.65) if closed else rdp_open(ring)
+            commands.append(
+                "M" + "L".join(f"{x} {y}" for x, y in simplified) + ("Z" if closed else "")
+            )
+        return "".join(commands)
+
+    exclusive = {n: owner == n for n in masks}
+    return exclusive, path_for(segments), path_for(region_segments)
+
 def pole(m):
     """Erode until (nearly) gone; centroid of the last survivors."""
     cur = m.copy()
@@ -181,15 +270,20 @@ def element_of(map_name, tech):
 
 def build(map_name):
     render, links, region_of = parse_map(map_name)
-    masks, paths, labels, elements = {}, {}, {}, {}
+    masks, labels, elements = {}, {}, {}
     for n, tech, x, y, w, h in render:
         n = int(n)
         m = mask_for(map_name, tech, int(x), int(y), int(w), int(h))
         masks[n] = m
-        paths[n] = trace(m)
         labels[n] = pole(m)
         elements[n] = element_of(map_name, tech)
-        print(f"{map_name} {n:2d} {tech:12s} px={int(m.sum()):5d} pathlen={len(paths[n]):5d}", file=sys.stderr)
+        print(f"{map_name} {n:2d} {tech:12s} px={int(m.sum()):5d}", file=sys.stderr)
+
+    fill_masks, borders, region_borders = shared_borders(masks, labels, region_of)
+    paths = {n: trace(mask) for n, mask in fill_masks.items()}
+    labels = {n: pole(mask) for n, mask in fill_masks.items()}
+    for n, path in paths.items():
+        print(f"{map_name} area {n:2d} pathlen={len(path):5d}", file=sys.stderr)
 
     # links between areas whose silhouettes don't touch
     link_lines = []
@@ -217,13 +311,6 @@ def build(map_name):
                 link_lines.append((a, b, [[(rp(A[i,0]), rp(A[i,1])), (rp(B[j,0]), rp(B[j,1]))]]))
     print(f"{map_name}: {len(link_lines)} links", file=sys.stderr)
 
-    regions = {}
-    for region in sorted(set(region_of.values())):
-        union = np.zeros((H, W), bool)
-        for n, area_region in region_of.items():
-            if area_region == region: union |= masks[n]
-        regions[region] = trace(dilate(union, 1), min_area=20, eps=0.9, smooth=2)
-
     if map_name == "original":
         view_box = (0, 0, W, H)   # the world map fills the legacy board edge to edge
     else:
@@ -234,7 +321,8 @@ def build(map_name):
         view_box = (x0, y0, x1 - x0, y1 - y0)
 
     return dict(render=render, paths=paths, labels=labels, elements=elements,
-                links=link_lines, regions=regions, view_box=view_box)
+                links=link_lines, borders=borders, region_borders=region_borders,
+                view_box=view_box)
 
 maps = {name: build(name) for name in ("original", "elements")}
 
@@ -257,7 +345,9 @@ lines.append("  styled by CSS instead of nine pre-colored GIFs per territory). L
 lines.append("  `MapInfo` adjacency — any two linked areas whose silhouettes are more than a few")
 lines.append("  pixels apart get a line between their closest boundary points (sea lanes on the world")
 lines.append("  map, where Alaska <-> Pevek wraps off the board edges; the arrow routes on elements).")
-lines.append("  Region borders are the traced union of each region's areas.")
+lines.append("  The legacy masks overlap slightly. Each covered pixel is assigned to the nearest")
+lines.append("  territory label anchor, then territory fills and both border networks are derived")
+lines.append("  from that shared partition so neighboring edges cannot drift or stack strokes.")
 lines.append("")
 lines.append("  A label anchor is the approximate pole of inaccessibility (last pixels to survive")
 lines.append("  repeated erosion), so army counts land inside the widest part of a territory —")
@@ -337,15 +427,13 @@ for name, mp in maps.items():
         h.append("  </pattern>")
     for n, tech, *_ in mp["render"]:
         h.append(f'  <path id="gc-area-{int(n)}" data-tech-name="{tech}" d="{mp["paths"][int(n)]}" />')
+    h.append(f'  <path id="gc-area-borders" d="{mp["borders"]}" />')
     h.append('  <g id="gc-links">')
     for a, b, segs in mp["links"]:
         for (x1, y1), (x2, y2) in segs:
             h.append(f'    <line data-link="{a}-{b}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" />')
     h.append("  </g>")
-    h.append('  <g id="gc-region-outlines">')
-    for r, p in mp["regions"].items():
-        h.append(f'    <path data-region="{r}" d="{p}" />')
-    h.append("  </g>")
+    h.append(f'  <path id="gc-region-outlines" d="{mp["region_borders"]}" />')
     h.append("</defs>")
     open(OUT_HEEX.format(map=name), "w").write("\n".join(h) + "\n")
     print(f"wrote {OUT_HEEX.format(map=name)} ({sum(len(x) for x in h)} bytes)", file=sys.stderr)
