@@ -9,9 +9,9 @@ defmodule GlobalCombatWeb.Components.Boutique.Card do
   `:header` renders as a real heading element (`heading_level`, default
   `h2`) rather than a styled `<div>` — Card is the primary section-title
   mechanism across the Home/Stats/Messages/PlayerInfo/IpAddresses/OptOut
-  surfaces (GIF-33), so a styled div there left those pages with no
+  surfaces, so a styled div there left those pages with no
   heading structure for screen-reader users to navigate by (WCAG 1.3.1,
-  2.4.6; GIF-86). Callers nesting a Card inside another heading's section
+  2.4.6). Callers nesting a Card inside another heading's section
   should raise `heading_level` to keep the page's heading order sequential.
   """
   use Phoenix.Component

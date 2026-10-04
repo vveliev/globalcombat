@@ -5,7 +5,7 @@ defmodule GlobalCombatWeb.Plugs.NormalizeLegacyPathCasing do
   by default. Phoenix's router does an exact byte-for-byte match, so without
   this, a 25-year-old inbound link, bookmark, or search result that differs
   only in case (`/game-684316`, `/PLAYERINFO`, `/game-manual`) would have
-  worked on the old globalcombat.com but 404 here (GIF-31).
+  worked on the old globalcombat.com but 404 here.
 
   Must run in the endpoint, before the router: route dispatch pattern-matches
   directly on `path_info`, before any pipeline (`pipe_through`) plugs run, so

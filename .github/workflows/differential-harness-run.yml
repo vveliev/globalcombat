@@ -2,15 +2,15 @@ name: differential harness (reusable run)
 
 # Shared implementation for differential-harness.yml's `smoke` and `full`
 # jobs: boots the .NET oracle (GlobalCombat.GrpcHost) and runs
-# `liveview/scripts/gif72_sweep.exs` (turn-by-turn combat/engine state) and
-# `liveview/scripts/gif109_tourney_sweep.exs` (tournament bracket resolution)
+# `liveview/scripts/engine_diff_sweep.exs` (turn-by-turn combat/engine state) and
+# `liveview/scripts/tourney_bracket_diff_sweep.exs` (tournament bracket resolution)
 # against it. Not triggered directly.
 
 on:
   workflow_call:
     inputs:
       smoke:
-        description: "1 = GIF72_SMOKE fast subset, 0 = full 120-scenario matrix"
+        description: "1 = DIFF_SWEEP_SMOKE fast subset, 0 = full 120-scenario matrix"
         required: true
         type: string
 
@@ -117,10 +117,10 @@ jobs:
         env:
           GRPC_HOST: "127.0.0.1"
           GRPC_PORT: "5251"
-          GIF72_SMOKE: ${{ inputs.smoke }}
-        run: mix run scripts/gif72_sweep.exs
+          DIFF_SWEEP_SMOKE: ${{ inputs.smoke }}
+        run: mix run scripts/engine_diff_sweep.exs
 
-      # GIF-109: tourney bracket resolution has no turns/RNG to trim for a "smoke" subset - every
+      # Tourney bracket resolution has no turns/RNG to trim for a "smoke" subset - every
       # scenario is a single stateless request/response pair - so this runs in full in both the
       # smoke and full jobs.
       - name: Run the tourney bracket differential sweep
@@ -128,7 +128,7 @@ jobs:
         env:
           GRPC_HOST: "127.0.0.1"
           GRPC_PORT: "5251"
-        run: mix run scripts/gif109_tourney_sweep.exs
+        run: mix run scripts/tourney_bracket_diff_sweep.exs
 
       - name: Oracle log (on failure)
         if: failure()

@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Engine.RandomAi do
   @moduledoc """
-  Port of `GlobalCombat.Core/RandomAiPlayer.cs` (GIF-28). Unscoped by
+  Port of `GlobalCombat.Core/RandomAiPlayer.cs`. Unscoped by
   default — same as the original, one `think/1` pass mashes random moves
   across the whole board regardless of area ownership, relying on
   `SetAssigned`/`SetAttack`/`SetTransfer`'s own ownership/adjacency checks
@@ -12,7 +12,7 @@ defmodule GlobalCombat.Engine.RandomAi do
   source with `grep -c` rather than eyeballed, since an off-by-one here
   desyncs every draw after it.
 
-  GIF-118: live Training Mode play (`Games.Server.run_ai_turns/1`) instead
+  Live Training Mode play (`Games.Server.run_ai_turns/1`) instead
   calls `think/2` with the Computer seat's player number, which scopes
   `pick_area`'s draw to areas that player owns — so the Computer only ever
   assigns/attacks/transfers using its own territories, the way a real
@@ -25,7 +25,7 @@ defmodule GlobalCombat.Engine.RandomAi do
 
   alias GlobalCombat.Engine.{DotnetRandom, Game, MapInfo}
 
-  @doc "Port of `RandomAiPlayer.Think`. `player_number` scopes area picks to that player's own areas (GIF-118); `nil` (default) draws from the whole board, unscoped, matching the oracle."
+  @doc "Port of `RandomAiPlayer.Think`. `player_number` scopes area picks to that player's own areas; `nil` (default) draws from the whole board, unscoped, matching the oracle."
   def think(%Game{} = game, player_number \\ nil) do
     game
     |> repeat(&random_assignment(&1, player_number), 12)
@@ -67,7 +67,7 @@ defmodule GlobalCombat.Engine.RandomAi do
     {index + 1, rng}
   end
 
-  # GIF-118: same shape as the unscoped draw above, but over `player_number`'s owned areas only —
+  # Same shape as the unscoped draw above, but over `player_number`'s owned areas only —
   # the candidate list is materialized (unlike the unscoped case) since owned areas aren't a
   # contiguous 1..N range.
   defp pick_area(game, player_number) do

@@ -139,7 +139,7 @@
 
 /* This file is for your main application CSS */
 
-/* Floating chat windows (GIF-33) — modernized replacement for Global.js's jQuery
+/* Floating chat windows — modernized replacement for Global.js's jQuery
    `.chatbox` styling; class names kept short and semantic rather than mirroring the
    legacy `cb_default`/`header_bg_default` names verbatim. */
 .chatbox {
@@ -199,7 +199,7 @@
    order (blue, green, yellow, orange, purple, grey, red, brown) — the decision
    and its constraints are recorded in docs/adr/0003-map-owner-palette.md.
    Everything else on the board reads semantic tokens. Army-count legibility on
-   every owner colour comes from the dark stroke under the count (GIF-83), not
+   every owner colour comes from the dark stroke under the count, not
    from the fill, so the palette can change without a contrast re-audit. */
 :root {
   --map-sea: var(--gray-1);
@@ -474,7 +474,7 @@
 
 /* Army counts: light fill over a dark stroke painted *under* the glyphs, so the
    number reads on every owner colour — the SVG equivalent of the text-shadow
-   outline the sprite board used (WCAG 1.4.3, GIF-83). */
+   outline the sprite board used (WCAG 1.4.3). */
 .world-map-count {
   font-family: inherit;
   font-size: 12px;

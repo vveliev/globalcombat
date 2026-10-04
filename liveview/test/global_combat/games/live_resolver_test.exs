@@ -38,8 +38,8 @@ defmodule GlobalCombat.Games.LiveResolverTest do
   describe "resolve_turn/1 — no live process for this game (offline rehydrate + run)" do
     test "rehydrates from games.serialized, runs the turn directly, and persists the result" do
       game = active_game_fixture()
-      # Server.alive?/1, not GamesLive.game_exists?/1 — the latter now rehydrates on demand
-      # (GIF-119), which would defeat this test's "no live process yet" precondition by
+      # Server.alive?/1, not GamesLive.game_exists?/1 — the latter now rehydrates on demand,
+      # which would defeat this test's "no live process yet" precondition by
       # starting one as a side effect of merely checking it.
       refute Server.alive?(game.id)
 

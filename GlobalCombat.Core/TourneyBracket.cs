@@ -5,7 +5,7 @@ namespace GlobalCombat.Core
 {
     // Port of Web/Models/TourneyRound.cs's persisted shape, extracted here (DB/Tourney-back-
     // reference-free) so it can travel over the wire as a gRPC response - see GameEngineService's
-    // TourneyBracket RPC (GIF-109) and GlobalCombat.Tourneys.Bracket.Round, the Elixir port (GIF-32)
+    // TourneyBracket RPC and GlobalCombat.Tourneys.Bracket.Round, the Elixir port
     // this exists to be diffed against.
     [ProtoContract]
     public class TourneyRound

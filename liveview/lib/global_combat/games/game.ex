@@ -3,9 +3,9 @@ defmodule GlobalCombat.Games.Game do
   Port of the live `gc_games.game` row (docs/schema-map.md §3.8) -- id/status/private, plus the
   ProtoBuf blob `GlobalCombat.Core.Game.Save()` writes to `serialized`. `GlobalCombat.Games.
   GameSummary` decodes that blob locally to render read-only game-list summaries on Home/
-  PlayerInfo (GIF-33) -- no gRPC round trip needed for that, since the already-generated wire
+  PlayerInfo -- no gRPC round trip needed for that, since the already-generated wire
   module speaks this exact format (ADR-0001). The blob's actual play-state semantics (turn
-  resolution, the board LiveView) are GIF-25/GIF-28/GIF-30's scope, not this schema's.
+  resolution, the board LiveView) belong to the engine and live-game modules, not this schema.
   """
 
   use Ecto.Schema
@@ -17,7 +17,7 @@ defmodule GlobalCombat.Games.Game do
     field :serialized, :binary
     field :private, :boolean, default: false
 
-    # GIF-68: scheduler-read turn-timing fields (docs/schema-map.md §3.5's `dead` columns,
+    # Turn-scheduler-read turn-timing fields (docs/schema-map.md §3.5's `dead` columns,
     # carried forward onto this live table — see the migration for why `realtime` is not among
     # them). `turn_length` nil means "not scheduler-managed"; `GlobalCombat.Games.Scheduling`
     # never selects such a row as due.
@@ -26,7 +26,7 @@ defmodule GlobalCombat.Games.Game do
     field :prev_turn_time, :utc_datetime
     field :last_turn_time, :utc_datetime
 
-    # GIF-112: the ruleset a lobby was created with, mirroring `Game.cs`'s `MapName`/`IsFogged`/
+    # The ruleset a lobby was created with, mirroring `Game.cs`'s `MapName`/`IsFogged`/
     # `IsNonRandom`/`ReverseAttackOrder`/`MinimumArmies` columns -- durable so `tourney.
     # option_game_id` has something to read regardless of whether this game ever started
     # (`GlobalCombat.Games.Server`'s own copy of these is the live source of truth once a

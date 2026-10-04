@@ -25,8 +25,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   The `:status` strip is `tabindex="-1"` and marked `data-focus-landmark` —
   it's the one region that survives every board/players patch, so it's the
   designated fallback focus target for consumers restoring keyboard focus
-  after a state-changing patch removes whatever was previously focused
-  (GIF-82).
+  after a state-changing patch removes whatever was previously focused.
 
   Collapses to a stacked status/board/players column at `lg:` (Tailwind's
   64rem breakpoint matches `--size-collapse`, tokens/scales.json), same
@@ -37,7 +36,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   in the players rail matter more than a board a phone/tablet viewport clips
   to a fraction of the map. The side-by-side `lg:` arrangement is unaffected.
 
-  Sizes to its container rather than forcing its own `min-h-screen` (GIF-102):
+  Sizes to its container rather than forcing its own `min-h-screen`:
   `GameLive` nests this inside `SiteChrome.site_chrome`'s already-`min-h-screen`
   content slot, so a second forced viewport-height here would inflate the page
   to roughly double the visible content. A standalone consumer (`DesignSmokeLive`)

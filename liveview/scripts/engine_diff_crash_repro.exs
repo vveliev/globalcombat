@@ -1,4 +1,5 @@
-# Minimal repro for the GIF-72 sweep crash: scenario 10 of the main matrix
+# Minimal repro for a crash seen in the broad sweep (engine_diff_sweep.exs): scenario 10 of
+# the main matrix
 # (map=Original, players=3, fogged=false, non_random=false, reverse=true,
 # min_armies=3, games=3, turns=120, seed_base=46) failed partway through with
 #   ** (MatchError) no match of right hand side value:

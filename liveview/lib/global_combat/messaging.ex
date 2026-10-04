@@ -1,14 +1,14 @@
 defmodule GlobalCombat.Messaging do
   @moduledoc """
-  Player-to-player messaging and the chat push it shares with the game board's PubSub design
-  (per the GIF-33 issue). Ports `Web/Models/GameServer.cs`'s `SendMessage` and
+  Player-to-player messaging and the chat push it shares with the game board's PubSub design.
+  Ports `Web/Models/GameServer.cs`'s `SendMessage` and
   `Web/Controllers/HomeController.cs`'s `LoadMessages`.
 
   Real-time delivery: `send_message/4` broadcasts on `"chat:<destination_id>"` via
   `GlobalCombatWeb.Endpoint` when the recipient is present (tracked by
   `GlobalCombatWeb.ChatChannel` on join, checked with `GlobalCombat.Presence`) — the Phoenix
   analogue of the legacy `GameHub.SendMessage` push to the recipient's SignalR session group.
-  This establishes the `"chat:<account_id>"` topic convention for DMs; the game board (GIF-30)
+  This establishes the `"chat:<account_id>"` topic convention for DMs; the game board
   should reuse the same `Endpoint` with a `"game:<id>"` convention for board-wide pushes
   (turn run, forced reload), mirroring the legacy `"Game-{id}"` SignalR group, rather than
   inventing a separate transport. Offline recipients get an email instead, exactly as
@@ -18,7 +18,7 @@ defmodule GlobalCombat.Messaging do
   `destination_id <= 0` is the legacy game-forum-broadcast sentinel (`-game.Id`, written by
   `GameServer.OnMessage`) — this module still inserts the row for it (matching `SendMessage`'s
   unconditional insert) but never pushes/emails for it (matching its `if (destinationId > 0)`
-  gate). Broadcasting game-forum chat to a `"game:<id>"` topic is GIF-30's job.
+  gate). Broadcasting game-forum chat to a `"game:<id>"` topic is the game board's job.
   """
 
   import Ecto.Query

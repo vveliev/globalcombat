@@ -3,7 +3,7 @@ defmodule GlobalCombat.GameEngine.Client do
   gRPC client for the GlobalCombat.GrpcHost spike service. Generated modules
   live in lib/global_combat/game_engine_pb/, produced from proto/game_engine.proto
   by `protoc --elixir_out=plugins=grpc`. Talks plaintext HTTP/2 (h2c, no TLS),
-  matching the spike server - see GIF-38.
+  matching the gRPC spike server.
 
   Field names on the generated structs are the exact PascalCase names from the
   C# [ProtoMember] properties (e.g. `:Owner`, `:AreaId` -> here `:Number`), not
@@ -84,7 +84,7 @@ defmodule GlobalCombat.GameEngine.Client do
     :ok
   end
 
-  # See the GIF-38 write-up: Game.RunTurn() totals each player's armies by
+  # From the gRPC spike's findings: Game.RunTurn() totals each player's armies by
   # scanning Areas for `area.Owner == player` - C# reference equality, since
   # Player has no Equals override. This recomputes the same total independently
   # by Number (a value, always correct) and compares it against what the

@@ -3,10 +3,10 @@ defmodule GlobalCombat.Games.TurnScheduler.Resolver do
   Callback contract for whatever actually applies a claimed turn's game logic — running
   `GlobalCombat.Engine.Game.run_turn/1` (or an AI's think step) against the game's real state
   and persisting the result. `GlobalCombat.Games.TurnScheduler` only owns the sweep + the atomic
-  DB claim (GIF-68's scope); it calls a configured resolver for the actual resolution rather
+  DB claim; it calls a configured resolver for the actual resolution rather
   than doing it itself, because there is currently no code path that persists a live
   `GlobalCombat.Engine.Game`'s play state to a `games` row at all — `GlobalCombat.Games.Server`
-  (GIF-30) owns that state entirely in-memory, keyed by a bare `System.unique_integer/1`, not a
+  owns that state entirely in-memory, keyed by a bare `System.unique_integer/1`, not a
   `games.id` (see that module's moduledoc: "the two don't share state yet"). Wiring a resolver
   that bridges the two is tracked as a follow-up; until one is configured, the scheduler finds
   due games and logs them without claiming, rather than silently advancing a game's turn clock
@@ -18,8 +18,8 @@ end
 
 defmodule GlobalCombat.Games.TurnScheduler do
   @moduledoc """
-  Supervised GenServer doing a periodic sweep for games due for a turn, per GIF-68's decision
-  record: not Oban, since this project runs on MySQL (myxql) and Oban's polling/notification
+  Supervised GenServer doing a periodic sweep for games due for a turn, per the scheduler's design
+  decision: not Oban, since this project runs on MySQL (myxql) and Oban's polling/notification
   optimizations are Postgres-specific, while a plain sweep + `GlobalCombat.Games.Scheduling.
   claim_turn/2`'s conditional `UPDATE` is DB-engine-agnostic and needs no extra dependency.
 

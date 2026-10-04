@@ -1,7 +1,7 @@
 defmodule GlobalCombat.Repo.Migrations.CreateAccounts do
   use Ecto.Migration
 
-  # Column shape follows docs/schema-map.md §2.3/§2.4/§3.1 (GIF-26/GIF-29). This creates the
+  # Column shape follows docs/schema-map.md §2.3/§2.4/§3.1 and ADR-0002. This creates the
   # target post-port shape for a fresh dev/test database; migrating a real legacy
   # `globalcombat.account` table's existing rows into this shape (ALTER TABLE, not CREATE
   # TABLE) is a separate, not-yet-scoped deployment task.

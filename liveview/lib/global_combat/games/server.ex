@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Games.Server do
   @moduledoc """
-  One process per live game (GIF-30) — the runtime replacement for the combination of
+  One process per live game — the runtime replacement for the combination of
   `Web/Models/GameServer.cs`'s in-memory `MemoryCache<Game>` and the `GlobalCombat.Core.Game`
   instance it cached. Owns the canonical `%GlobalCombat.Engine.Game{}` and is the only
   thing in the system allowed to touch it unfiltered — everyone else (`GameLive` included)
@@ -14,7 +14,7 @@ defmodule GlobalCombat.Games.Server do
   `GlobalCombat.Core/Game.cs`'s `Start()` — the RNG-driven, retry-until-balanced area deal —
   is explicitly not ported to Elixir (`GlobalCombat.Engine.Game`'s moduledoc: "the harness
   always sources a game's starting state from the .NET oracle's own `NewGame` response").
-  ADR-0001 (GIF-25) already settled that real game creation should ask the .NET engine over
+  ADR-0001 already settled that real game creation should ask the .NET engine over
   gRPC for that starting state, not reimplement its balancing algorithm here. Standing up that
   integration (a live `GlobalCombat.GrpcHost` process as a runtime dependency of the Phoenix
   app, plus the `games`/`game_players` Ecto persistence schema-map.md already designed in
@@ -102,8 +102,8 @@ defmodule GlobalCombat.Games.Server do
   end
 
   @doc """
-  Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited` (GIF-114).
-  `account_id` must already be seated (matches this ticket's "a player can invite another
+  Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited`.
+  `account_id` must already be seated (matches the intended rule "a player can invite another
   account" — the original C# action had no such check, but let any logged-in visitor
   invite strangers into someone else's lobby). `login` is resolved the same way
   `AccountController` resolves a name-or-email login. Lobby-only: once a game is playing,
@@ -166,7 +166,7 @@ defmodule GlobalCombat.Games.Server do
   @doc """
   Starts the game once it has enough seats, without checking who's calling — mirrors `Game.cs`'s
   `Join`-driven auto-start (`if (Players.Count >= MaxPlayers) Start()`), for callers like tourney
-  bracket seeding (GIF-115) where no single seat is a "host" to authorize `start_game/2`'s check.
+  bracket seeding where no single seat is a "host" to authorize `start_game/2`'s check.
   """
   def force_start(game_id) do
     GenServer.call(via(game_id), :force_start)
@@ -219,7 +219,7 @@ defmodule GlobalCombat.Games.Server do
   end
 
   @doc """
-  Runs the turn `GlobalCombat.Games.TurnScheduler` already claimed for this game (GIF-74) —
+  Runs the turn `GlobalCombat.Games.TurnScheduler` already claimed for this game —
   `claimed_last_turn_time` is the `last_turn_time` `GlobalCombat.Games.Scheduling.claim_turn/2`
   just wrote, so this process's own clock bookkeeping stays in sync with the DB without
   re-advancing it a second time (see `GlobalCombat.Games.advance_turn/4`'s moduledoc). Returns
@@ -270,7 +270,7 @@ defmodule GlobalCombat.Games.Server do
     }
   end
 
-  # Boot-time reconstruction (GIF-74 item 3): rebuilds a live, :playing Games.Server straight
+  # Boot-time reconstruction: rebuilds a live, :playing Games.Server straight
   # from its last persisted wire snapshot instead of an empty lobby — the roster comes back out
   # of the engine's own Players (Wire.from_wire_snapshot/2 needs no separate lobby-roster
   # persistence: a rehydrated game is always already past start_game). The RNG is freshly
@@ -546,7 +546,7 @@ defmodule GlobalCombat.Games.Server do
 
   def handle_cast({:force_turn, _account_id}, state), do: {:noreply, state}
 
-  # GIF-111: the four order-setters a player's territory clicks drive. Every clause
+  # The four order-setters a player's territory clicks drive. Every clause
   # re-derives the acting seat from `account_id` and re-checks ownership against the
   # live engine state before touching it — a `phx-value-area` is just a number a
   # browser sent us, never trusted the way `GameController`'s session-bound `player`
@@ -645,7 +645,7 @@ defmodule GlobalCombat.Games.Server do
     do: post_message(state, Accounts.computer_account_id(), Accounts.computer_name(), text)
 
   # Shared by {:start_game, account_id} (host-authorized) and :force_start (unconditional,
-  # GIF-115) — everything past "who's allowed to start this" is identical.
+  # for tourney seeding) — everything past "who's allowed to start this" is identical.
   defp do_start(state) do
     engine = state |> new_engine() |> run_ai_turns()
     {:ok, db_game} = state.game_id |> GamesDb.get_game!() |> GamesDb.mark_active()
@@ -729,7 +729,7 @@ defmodule GlobalCombat.Games.Server do
   end
 
   # Port of `Game.EliminatePlayer` called mid-play (a live Quit) rather than from
-  # `run_turn/1`'s own reinforcement pass — same engine call either way (GIF-114's fix
+  # `run_turn/1`'s own reinforcement pass — same engine call either way (the fix
   # direction: reuse the engine equivalent rather than reimplementing elimination here).
   # Doesn't advance games.turn/last_turn_time: this isn't a turn resolving, just a seat
   # dropping out mid-turn, so `run_turn/2`'s clock-advance machinery doesn't apply.
@@ -830,8 +830,8 @@ defmodule GlobalCombat.Games.Server do
     # players who didn't get country" loop (line ~327): every player starts with 20
     # unassigned armies, +5 more if they only got the base `NumAreas / CurrentPlayers`
     # share (no extra area from divvying up the remainder). `Player.Armies` folds that
-    # pending pool in immediately, before any turn resolves — GIF-105 is `PlayerView`'s
-    # display total not doing the same.
+    # pending pool in immediately, before any turn resolves — an earlier display bug was
+    # `PlayerView`'s total not doing the same.
     initial_area_count = div(num_areas, player_count)
 
     players =
@@ -870,7 +870,7 @@ defmodule GlobalCombat.Games.Server do
     end
   end
 
-  # GIF-104: `RandomAi` (GIF-28) was validated by the differential harness in isolation but
+  # `RandomAi` was validated by the differential harness in isolation but
   # never wired into live play — a seat's `done` flag only ever flipped via a human's
   # `set_done`/`force_turn` cast, which never arrives for the reserved "Computer" account
   # (`Accounts.computer_account_id/0`, see `Engine.reset_done_flags/1`), so training games stuck
@@ -882,7 +882,7 @@ defmodule GlobalCombat.Games.Server do
   # "AI" a purely passive placeholder there; this wires it up for real so Training Mode's
   # opponent actually plays instead of just rubber-stamping "done").
   #
-  # GIF-118: passes `player.number` so `RandomAi` only draws from the Computer seat's own
+  # Passes `player.number` so `RandomAi` only draws from the Computer seat's own
   # areas — the unscoped `think/1` (no player number) is whole-board-random by design, but
   # that's only correct for `Harness`'s oracle-lockstep diffing, not for a live opponent
   # whose orders should be constrained to its own territories like a real player's would be.
@@ -975,7 +975,7 @@ defmodule GlobalCombat.Games.Server do
     if engine.ended do
       GamesDb.finish_game(state.game_id)
 
-      # GIF-116: wires the seam `Tourneys.finish_game/2`'s moduledoc documents but nothing
+      # Wires the seam `Tourneys.finish_game/2`'s moduledoc documents but nothing
       # ever called outside tests -- mirrors `Web/Models/GameServer.cs`'s `Game.OnEnd` calling
       # into `Tourney.PlayerFinishedCheck`/`TourneyFinishedCheck`. Unconditional: `finish_game/2`
       # already no-ops (via `record_player_result/3`'s `Repo.get_by(TourneyGame, ...)` lookup)
@@ -998,7 +998,7 @@ defmodule GlobalCombat.Games.Server do
     state
   end
 
-  # Port of `GameServer.OnEliminated`/`OnEnd`'s non-training DB writes (GIF-120). `Engine.Game`
+  # Port of `GameServer.OnEliminated`/`OnEnd`'s non-training DB writes. `Engine.Game`
   # is deliberately pure (see its moduledoc), so unlike the C# original — which fires these as
   # side effects straight out of `EliminatePlayer`/`End` — this diffs `old_engine` against the
   # freshly-resolved `engine` to find the same two events: a player crossing from "in the game"

@@ -151,7 +151,7 @@ defmodule GlobalCombat.Engine.MapInfo do
     b in links
   end
 
-  # --- render geometry (GIF-30) -----------------------------------------
+  # --- render geometry -----------------------------------------
   #
   # `AreaInfo`'s `TechName`/`X`/`Y`/`Width`/`Height` fields (`GlobalCombat.Core/MapInfo.cs`)
   # never had rule logic attached — they're purely where GameLive positions each area's

@@ -1,11 +1,11 @@
 defmodule Mix.Tasks.GameEngine.DiffHarness do
   @moduledoc """
-  GIF-28: the differential harness. Runs N turns of a game through both the
+  The differential harness. Runs N turns of a game through both the
   .NET oracle (`GlobalCombat.GrpcHost`) and the Elixir port
   (`GlobalCombat.Engine`), from identical starting state, identical seeds,
   and identical (oracle-decided) orders each turn, and reports any
   divergence in AI order selection or turn-resolution state. Requires no
-  Ecto/database - same as `game_engine.resolve_turn` (GIF-38).
+  Ecto/database - same as `game_engine.resolve_turn`.
 
       GRPC_HOST=localhost GRPC_PORT=5251 mix game_engine.diff_harness --turns 50 --seed 42
 

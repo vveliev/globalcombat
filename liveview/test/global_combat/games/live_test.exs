@@ -1,5 +1,5 @@
 defmodule GlobalCombat.Games.LiveTest do
-  # GIF-74: create_game/1 now inserts a real `games` row (GamesDb.create_game/1), so this needs
+  # create_game/1 inserts a real `games` row (GamesDb.create_game/1), so this needs
   # the Ecto Sandbox checkout DataCase provides — a plain ExUnit.Case has none.
   use GlobalCombat.DataCase, async: true
 
@@ -17,7 +17,7 @@ defmodule GlobalCombat.Games.LiveTest do
     %{game_id: game_id}
   end
 
-  describe "invite/3 (GIF-114)" do
+  describe "invite/3" do
     test "a seated player can invite an existing account by name, and it shows up as a pending invite",
          %{game_id: game_id} do
       alice = account_fixture()
@@ -154,7 +154,7 @@ defmodule GlobalCombat.Games.LiveTest do
     end
   end
 
-  describe "quit/2 (GIF-114)" do
+  describe "quit/2" do
     test "a seated player quitting the lobby is removed and remaining players are renumbered", %{
       game_id: game_id
     } do
@@ -226,7 +226,7 @@ defmodule GlobalCombat.Games.LiveTest do
     end
   end
 
-  describe "kick/3 (GIF-114)" do
+  describe "kick/3" do
     test "the host can kick a player from the lobby before start", %{game_id: game_id} do
       alice = account_fixture()
       bob = account_fixture()
@@ -477,7 +477,7 @@ defmodule GlobalCombat.Games.LiveTest do
     end
   end
 
-  describe "on-demand rehydration when the Server process has died (GIF-119)" do
+  describe "on-demand rehydration when the Server process has died" do
     test "game_exists?/1 transparently restarts the Server from games.serialized", %{
       game_id: game_id
     } do

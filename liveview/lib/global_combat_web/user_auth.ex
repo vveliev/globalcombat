@@ -79,7 +79,7 @@ defmodule GlobalCombatWeb.UserAuth do
   @doc """
   Ports (and fixes) `HomeController.CloseChatWindow` — the legacy action mutated the list
   returned by the `OpenChatWindows` getter in place but never called `SetOpenChatWindows`, so
-  closing a chat window never actually persisted across a reload (GIF-33 research flagged this
+  closing a chat window never actually persisted across a reload (the port's research flagged this
   as a bug, not a behavior to preserve). This port persists the removal.
   """
   def remove_open_chat_window(conn, target_id, target_name) do
@@ -89,7 +89,7 @@ defmodule GlobalCombatWeb.UserAuth do
   end
 
   @doc """
-  `on_mount` hook: assigns `:current_account` for router-mounted LiveViews (GIF-30's
+  `on_mount` hook: assigns `:current_account` for router-mounted LiveViews (the board's
   `GameLive`) the same way `fetch_current_account/2` does for controllers. Session keys
   are looked up as both a string and an atom since which one a LiveView's `session` map
   uses is a Phoenix-version/session-store detail, not something this port should be

@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Engine.Harness do
   @moduledoc """
-  The differential harness for GIF-28: feeds identical game state, identical
+  The differential harness for the engine port: feeds identical game state, identical
   seeds, and identical orders to the .NET oracle (`GlobalCombat.GrpcHost`,
   ADR-0001) and the Elixir port (`GlobalCombat.Engine`), and diffs the
   resulting state turn by turn. See the `differential-harness` skill this

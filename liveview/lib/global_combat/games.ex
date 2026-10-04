@@ -1,13 +1,13 @@
 defmodule GlobalCombat.Games do
   @moduledoc """
   Port of the live-table slice of `Web/Models/GameServer.cs` -- both mutation (`SaveNewGame`,
-  `PlayerJoined`, `GetGame`, just enough to let a tourney bracket round (GIF-32) create games
+  `PlayerJoined`, `GetGame`, just enough to let a tourney bracket round create games
   and seat players in them) and the read-side game listings for Home/PlayerInfo
-  (`GetNewGames`/`GetPlayerGames`, GIF-33) against `gc_games.game`/`player` (renamed `games`/
+  (`GetNewGames`/`GetPlayerGames`) against `gc_games.game`/`player` (renamed `games`/
   `game_players` in this single-repo port, docs/schema-map.md §1.1). Turn resolution, the board
-  LiveView, and the ProtoBuf blob's actual play-state semantics are GIF-25/GIF-28/GIF-30's
-  scope, not this module's -- the read side only ever decodes `serialized` for display, via
-  `GlobalCombat.Games.GameSummary`. The GIF-30 in-memory board lives in `GlobalCombat.Games.Live`
+  LiveView, and the ProtoBuf blob's actual play-state semantics belong to the engine and
+  live-game modules, not this one -- the read side only ever decodes `serialized` for display, via
+  `GlobalCombat.Games.GameSummary`. The in-memory board lives in `GlobalCombat.Games.Live`
   (renamed from an original `GlobalCombat.Games` to avoid colliding with this module once the
   two landed together); the two don't share state yet -- see `GlobalCombat.Games.Server`'s
   moduledoc for that follow-up.
@@ -22,7 +22,7 @@ defmodule GlobalCombat.Games do
   @doc """
   Port of `GameServer.SaveNewGame` for a freshly-created game (insert only, no blob to save).
 
-  `turn_length` (minutes) is optional and, per GIF-68, opts this game into the periodic turn
+  `turn_length` (minutes) is optional and opts this game into the periodic turn
   scheduler once it's `mark_active/1`'d -- a `nil` `turn_length` (the default) leaves it outside
   `GlobalCombat.Games.Scheduling.list_due/1` entirely, same as today.
   """
@@ -48,7 +48,7 @@ defmodule GlobalCombat.Games do
   def get_game!(id), do: Repo.get!(Game, id)
 
   @doc """
-  Games currently `:active` — the boot-time rehydration set (GIF-74): every row a resolved
+  Games currently `:active` — the boot-time rehydration set: every row a resolved
   turn-scheduler claim might target, so `GlobalCombat.Games.Supervisor` knows which
   `GlobalCombat.Games.Server` children to restart from persisted state after a node restart.
   """
@@ -104,7 +104,7 @@ defmodule GlobalCombat.Games do
     :ok
   end
 
-  @doc "Marks `game_id` `:finished` (GIF-74) — once `GlobalCombat.Engine.Game.run_turn/1` sets `ended: true`, the game must stop showing up in `GlobalCombat.Games.Scheduling.list_due/1`, or the scheduler would keep claiming and bumping its turn counter forever on a game with no more turns to run."
+  @doc "Marks `game_id` `:finished` — once `GlobalCombat.Engine.Game.run_turn/1` sets `ended: true`, the game must stop showing up in `GlobalCombat.Games.Scheduling.list_due/1`, or the scheduler would keep claiming and bumping its turn counter forever on a game with no more turns to run."
   def finish_game(game_id) do
     from(g in Game, where: g.id == ^game_id and g.status != :finished)
     |> Repo.update_all(set: [status: :finished])
@@ -281,7 +281,7 @@ defmodule GlobalCombat.Games do
 
   @doc """
   Persists a pending invite (`GamePlayer.is_invite = true`) — the DB half of
-  `GameServer.PlayerInvited` (GIF-114). `GlobalCombat.Games.Server` holds the in-memory
+  `GameServer.PlayerInvited`. `GlobalCombat.Games.Server` holds the in-memory
   pending-invite list that actually gates joining a private game; this only keeps
   `list_invited_games/1` (the Home dashboard's "Games Invites" panel) in sync with it.
   """

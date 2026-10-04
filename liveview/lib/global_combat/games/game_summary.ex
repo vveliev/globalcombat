@@ -1,7 +1,7 @@
 defmodule GlobalCombat.Games.GameSummary do
   @moduledoc """
   Read-only projection of a decoded game, for the game-list displays on Home/PlayerInfo
-  (GIF-33) — ports the display-relevant subset of `GlobalCombat.Core/Game.cs`'s
+  — ports the display-relevant subset of `GlobalCombat.Core/Game.cs`'s
   `DisplayGameStatus` (`Web/Views/Home/Index.cshtml`, `PlayerInfo.cshtml`).
 
   Decodes `games.serialized` locally with the already-generated `GlobalCombat.GrpcHost.Game`
@@ -15,7 +15,7 @@ defmodule GlobalCombat.Games.GameSummary do
   Deliberately omits `TimeLeft` (needs a `Bcl.DateTime` → `DateTime` conversion — protobuf-net's
   epoch/scale surrogate for .NET's `DateTime`, not modeled anywhere in this port yet) and the
   per-player status pips (`p.gif`/`pc.gif`/`pd.gif`/etc., `Game.cs:791-826`) — both are
-  turn-countdown/board-status concerns that belong to the live game board (GIF-30), not this
+  turn-countdown/board-status concerns that belong to the live game board, not this
   read-only summary list.
   """
 

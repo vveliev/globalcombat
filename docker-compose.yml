@@ -6,7 +6,7 @@
 #
 #   11400  Phoenix / LiveView web        (+00)
 #   11402  Phoenix test endpoint         (+02)
-#   11410  .NET gRPC engine host         (+10)  — reserved, added by GIF-38
+#   11410  .NET gRPC engine host         (+10)  — reserved, added by the gRPC spike
 #   11434  MySQL                         (+34)
 #
 # The subnet follows 10.<block/100>.0.0/24, which keeps us out of Docker's
@@ -76,7 +76,7 @@ services:
         condition: service_started
     networks: [gc]
 
-  # The .NET engine from GIF-38's spike, serving GlobalCombat.Core over gRPC.
+  # The .NET engine from the gRPC spike, serving GlobalCombat.Core over gRPC.
   # Plaintext HTTP/2 (h2c, no TLS) -- fine inside the compose network for a
   # spike, not a production posture.
   #

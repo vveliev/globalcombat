@@ -1,16 +1,16 @@
-# GIF-109: differential-harness coverage for tournament bracket resolution.
+# Differential-harness coverage for tournament bracket resolution.
 #
-# GIF-72/101 documented a structural gap: GlobalCombat.GrpcHost only exposed NewGame/Think/
-# ResolveQueuedTurn, so GlobalCombat.Tourneys's bracket logic (ported from Web/Models/Tourney.cs
-# in GIF-32) was never diffed against the .NET oracle - only covered by the Elixir port's own
-# unit tests (bracket_test.exs et al.). GIF-109 added a TourneyBracket RPC, backed by
+# The original sweep left a structural gap: GlobalCombat.GrpcHost only exposed NewGame/Think/
+# ResolveQueuedTurn, so GlobalCombat.Tourneys's bracket logic (ported from Web/Models/Tourney.cs)
+# was never diffed against the .NET oracle - only covered by the Elixir port's own
+# unit tests (bracket_test.exs et al.). A TourneyBracket RPC now closes it, backed by
 # GlobalCombat.Core.TourneyBracket - a pure, DB-free extraction of Tourney.cs's BuildRounds()
 # that both Tourney.cs itself (Web/Models/Tourney.cs) and the gRPC oracle now share as one
 # implementation. This script is that RPC's differential harness: same style as
-# gif72_sweep.exs (a matrix, a diff, a PASS/FAIL summary, non-zero exit on divergence), but for
+# engine_diff_sweep.exs (a matrix, a diff, a PASS/FAIL summary, non-zero exit on divergence), but for
 # bracket shape instead of turn-by-turn combat state.
 #
-# Unlike gif72_sweep.exs there is no RNG, no turns loop, and no seed - BuildRounds is a pure
+# Unlike engine_diff_sweep.exs there is no RNG, no turns loop, and no seed - BuildRounds is a pure
 # function of (initial_games, game_size, winners, double_elimination), so every scenario is a
 # single request/response pair diffed against GlobalCombat.Tourneys.Bracket.build_rounds/1
 # computed locally from the same inputs. WinnersOfRoundNumber/LosersOfRoundNumber - the fields
@@ -21,14 +21,14 @@
 # Run (oracle must already be listening, e.g. `dotnet
 # GlobalCombat.GrpcHost/bin/Release/net10.0/GlobalCombat.GrpcHost.dll` from the repo root):
 #
-#     GRPC_HOST=localhost GRPC_PORT=5251 mix run scripts/gif109_tourney_sweep.exs
+#     GRPC_HOST=localhost GRPC_PORT=5251 mix run scripts/tourney_bracket_diff_sweep.exs
 #
 # Exits non-zero if any scenario's bracket diverged.
 
 Application.ensure_all_started(:gun)
 Application.ensure_all_started(:grpc)
 
-defmodule GIF109.Wire do
+defmodule TourneySweep.Wire do
   @moduledoc "Converts a wire `GlobalCombat.GrpcHost.TourneyRound`/`TourneyBracket` into `GlobalCombat.Tourneys.Bracket.Round`/plain map, for diffing against the Elixir port's own `Bracket.build_rounds/1`."
 
   alias GlobalCombat.Tourneys.Bracket.Round
@@ -111,7 +111,7 @@ results =
 
     {:ok, reply} = GameEngine.Stub.tourney_bracket(channel, request)
 
-    oracle_bracket = reply |> Map.fetch!(:Bracket) |> GIF109.Wire.from_wire_bracket()
+    oracle_bracket = reply |> Map.fetch!(:Bracket) |> TourneySweep.Wire.from_wire_bracket()
 
     local_bracket =
       Bracket.build_rounds(%{
@@ -150,7 +150,7 @@ GRPC.Stub.disconnect(channel)
 all_diverged = results |> Enum.flat_map(fn {_, diverged} -> diverged end)
 
 IO.puts("\n" <> String.duplicate("=", 70))
-IO.puts("GIF-109 tourney bracket sweep complete: #{scenario_count} scenarios")
+IO.puts("Tourney bracket sweep complete: #{scenario_count} scenarios")
 
 if all_diverged == [] do
   IO.puts(

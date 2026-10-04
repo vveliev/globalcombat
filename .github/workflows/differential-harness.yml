@@ -1,25 +1,25 @@
 name: differential harness
 
-# GIF-101: standing CI wiring for the GIF-28/GIF-72 differential harness
-# (`liveview/scripts/gif72_sweep.exs`), which diffs the Elixir port against a
+# Standing CI wiring for the differential harness
+# (`liveview/scripts/engine_diff_sweep.exs`), which diffs the Elixir port against a
 # live .NET oracle (`GlobalCombat.GrpcHost`, ADR-0001) turn by turn. See the
 # `differential-harness` skill for the method this follows.
 #
-# Two jobs, per GIF-72's follow-up recommendation of "a smaller always-on
+# Two jobs, per the broad sweep's follow-up recommendation of "a smaller always-on
 # subset gating PRs, or a scheduled full-matrix run, or both":
 #
 #   - `smoke` gates every push/PR: same 120-scenario matrix as the full
-#     sweep, but GIF72_SMOKE=1 trims each scenario to 1 game / 8 turns
+#     sweep, but DIFF_SWEEP_SMOKE=1 trims each scenario to 1 game / 8 turns
 #     (~960 turns total) so it's fast enough to block a PR.
 #   - `full` runs the entire 120-scenario / 328-game / ~39,000-turn matrix
-#     (~6 minutes against a live oracle, per GIF-72's sandbox run) on a
+#     (~6 minutes against a live oracle, per the broad sweep's sandbox run) on a
 #     nightly schedule and on demand (workflow_dispatch), not on every PR.
 #
-# GIF-109 closed the scope gap GIF-72/101 carried forward: `GlobalCombat.GrpcHost` now also
+# The original sweep only covered turn resolution; `GlobalCombat.GrpcHost` now also
 # exposes a `TourneyBracket` RPC (backed by `GlobalCombat.Core.TourneyBracket`, the pure
 # extraction of `Web/Models/Tourney.cs`'s `BuildRounds()`), and both jobs also run
-# `liveview/scripts/gif109_tourney_sweep.exs` to diff tournament bracket resolution
-# (`GlobalCombat.Tourneys.Bracket`, ported in GIF-32) against it - see
+# `liveview/scripts/tourney_bracket_diff_sweep.exs` to diff tournament bracket resolution
+# (`GlobalCombat.Tourneys.Bracket`, the Elixir port) against it - see
 # `differential-harness-run.yml`.
 
 on:

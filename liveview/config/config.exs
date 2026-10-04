@@ -66,14 +66,14 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
-# GIF-74: GlobalCombat.Games.LiveResolver bridges a claimed games row back to whichever of "the
+# GlobalCombat.Games.LiveResolver bridges a claimed games row back to whichever of "the
 # live GlobalCombat.Games.Server process" or "games.serialized" actually holds this game's play
 # state — see its moduledoc.
 config :global_combat, GlobalCombat.Games.TurnScheduler,
   interval_ms: 15_000,
   resolver: GlobalCombat.Games.LiveResolver
 
-# GIF-74: GlobalCombat.Games.Supervisor restarts one GlobalCombat.Games.Server per `status:
+# GlobalCombat.Games.Supervisor restarts one GlobalCombat.Games.Server per `status:
 # :active` games row at boot, rehydrated from its last games.serialized snapshot — off in :test,
 # see that module's moduledoc.
 config :global_combat, :rehydrate_active_games, true

@@ -115,7 +115,7 @@ defmodule GlobalCombat.GamesTest do
   end
 
   describe "list_active_games/0" do
-    test "only returns :active rows, for GIF-74 boot-time rehydration" do
+    test "only returns :active rows, for boot-time rehydration" do
       active = game_fixture(%{status: :active})
       _new = game_fixture(%{status: :new})
       _finished = game_fixture(%{status: :finished})

@@ -1,7 +1,7 @@
 defmodule GlobalCombatWeb.Components.SiteChrome do
   @moduledoc """
   The GlobalCombat site shell for Home/Stats/Messages/PlayerInfo/IpAddresses/OptOut/GameManual
-  (GIF-33) — ports `Web/Views/Shared/_Layout.cshtml` + `_DefaultMenu.cshtml` onto the
+  — ports `Web/Views/Shared/_Layout.cshtml` + `_DefaultMenu.cshtml` onto the
   design-boutique `admin_layout` shell (`docs/design-boutique/LAYOUTS.md`: "Left sidebar + top
   bar + content", the closest shipped match to the legacy left-menu/center-content shape).
 
@@ -14,8 +14,8 @@ defmodule GlobalCombatWeb.Components.SiteChrome do
   `page_title` renders as a visually-hidden `<h1>` ahead of the content slot. The legacy
   `_Layout.cshtml` never had one either (just a `ViewBag.Title` browser-tab string) — this
   isn't a regression to preserve, since it left every page under this chrome with no
-  heading a screen-reader user could jump to for "what page is this" (WCAG 1.3.1, 2.4.6;
-  GIF-86). `sr-only` because the design has no visual slot for a page title (`Card`'s own
+  heading a screen-reader user could jump to for "what page is this" (WCAG 1.3.1, 2.4.6).
+  `sr-only` because the design has no visual slot for a page title (`Card`'s own
   `:header` already carries the visible section titles) and this port isn't the place to
   add one.
 

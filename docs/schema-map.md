@@ -58,7 +58,7 @@ one repo. §1.1 explains why that collision is actually easy to resolve.
   `globalcombat.game`'s column list — and `GlobalCombat.Core/Player.cs` similarly mirrors
   `globalcombat.player`'s columns (`Number`, `Done`, `Areas`, `Armies`, `Score`, `ScoreExpected`, `Rating`,
   `RatingChange`). Those fields now live **inside the ProtoBuf blob** in `gc_games.game.serialized`
-  (out of scope — GIF-25 owns it), and `globalcombat.game`/`globalcombat.player` are what they were
+  (out of scope — the game-state transport decision, ADR-0001, owns it), and `globalcombat.game`/`globalcombat.player` are what they were
   superseded from. Same story for `globalcombat.area` vs. `GlobalCombat.Core/Area.cs` (§3.4).
 
 **Decision:** the live `game`/`player` tables become real Ecto schemas, named to avoid the collision:
@@ -182,10 +182,11 @@ never compared against in the C# outside that one check. `Ecto.Enum` is still th
 boolean here because the column genuinely carries 7 distinct values on disk today (rank/role tiers), even
 though only one is currently load-bearing in application logic.
 
-### 2.4 `account.password` — storage facts for GIF-29, not an algorithm choice
+### 2.4 `account.password` — storage facts for the password migration, not an algorithm choice
 
-Out of scope to *decide* the hashing algorithm (GIF-29's call), but the `account` table's shape constrains
-what GIF-29 can choose, and that's worth recording precisely:
+Out of scope to *decide* the hashing algorithm (the password migration's call — see
+`docs/adr/0002-account-password-migration.md`), but the `account` table's shape constrains
+what that migration can choose, and that's worth recording precisely:
 
 - `password varchar(30) CHARACTER SET latin1 COLLATE latin1_general_ci` — 30 bytes max.
 - Every write path stores the raw password: `BaseController.CreateAccount` inserts
@@ -199,20 +200,20 @@ what GIF-29 can choose, and that's worth recording precisely:
   fit in `varchar(30)` — so `CalculateHash`'s own output has never actually been the value on the right-hand
   side of that comparison for any row this application itself wrote; the fallback branch is effectively dead
   for this schema, kept perhaps for compatibility with some other never-seen import path.
-- **What this means for GIF-29:** the 30-byte column rules out storing a bcrypt hash (~60 chars), Argon2id
+- **What this means for the password migration:** the 30-byte column rules out storing a bcrypt hash (~60 chars), Argon2id
   (~95+ chars depending on params), or even a hex-encoded SHA-256 (64 chars) in that column as-is — every
-  realistic modern hash format exceeds 30 bytes. Whatever algorithm GIF-29 picks, the `password` column
+  realistic modern hash format exceeds 30 bytes. Whatever algorithm the migration picks, the `password` column
   needs to widen (`varchar(255)` or `text` is the safe default for all common hash output lengths) as part
   of that change; it isn't optional based on algorithm choice.
 
 ### 2.5 `game.Serialized` (the ProtoBuf blob) — explicitly out of scope
 
-`gc_games.game.serialized longblob` is GIF-25's, not this issue's. Recorded here only for completeness in
-the per-column table (§3.13) with `decision: out of scope (GIF-25)`. One fact worth surfacing though: under
-GIF-25's gRPC-front-the-.NET-engine option, Phoenix may never issue a SQL read against this column at all —
+`gc_games.game.serialized longblob` belongs to the game-state transport decision (ADR-0001), not this issue. Recorded here only for completeness in
+the per-column table (§3.13) with `decision: out of scope (ADR-0001)`. One fact worth surfacing though: under
+ADR-0001's gRPC-front-the-.NET-engine option, Phoenix may never issue a SQL read against this column at all —
 the .NET side would own `gc_games.game.serialized` entirely and hand Phoenix decoded game state over gRPC,
 in which case the Ecto schema for `games` might legitimately omit the `serialized` field rather than map it
-to `:binary`. That's a consequence of which GIF-25 option gets picked, not a decision this doc makes.
+to `:binary`. That's a consequence of which ADR-0001 option gets picked, not a decision this doc makes.
 
 ### 2.6 What `DBConnection.cs`'s string-concatenation implies beyond the DDL
 
@@ -263,7 +264,7 @@ as inert historical data with no schema/app-code binding, per §1.1.
 |---|---|---|---|
 | `id` | `int(11)` PK AUTO_INCREMENT | `:id` | AUTO_INCREMENT=99371 — preserve on import, same reasoning as §1.1's game id. |
 | `name` | `varchar(30)` latin1 | `:string`, utf8mb4 (needs byte-validation pass, §2.1) | Login name; unique in practice (checked via `select name from account where name=`) — add a DB unique index, the legacy schema has none (only a non-unique `KEY name`). |
-| `password` | `varchar(30)` latin1 | `:string`, width TBD by GIF-29 | See §2.4 — column must widen regardless of algorithm chosen. |
+| `password` | `varchar(30)` latin1 | `:string`, width TBD by ADR-0002 | See §2.4 — column must widen regardless of algorithm chosen. |
 | `email` | `varchar(255)` latin1 | `:string`, utf8mb4 | Used for login (`where name = '{0}' or email = '{0}'`) as well as contact. |
 | `cc_info` | `varchar(255)` latin1 | `dead — zero code references (§2.6); possible PCI-sensitive historical data, flag for Dev before drop` | |
 | `visible_cc_info` | `varchar(255)` latin1 | `dead — zero code references (§2.6)` | Same subsystem as `cc_info`. |
@@ -378,7 +379,7 @@ that was never wired up (or was removed) before this snapshot.
 |---|---|---|---|
 | `id` | `int(11)` PK AUTO_INCREMENT | `:id` | AUTO_INCREMENT=751207 — **this** is the counter `/Game-{id}/` URLs depend on; preserve on import (§1.1). |
 | `status` | `int(11)` | `:integer` | Read via `select Id from game where status = 0 and private = 0` (open-games list) and `status = 1` (admin active-game count) — small closed set of integer states used as filters; kept `:integer` rather than `Ecto.Enum` since the DDL gives no named value list to map against (unlike the `enum(...)` columns elsewhere) and inventing names here would be a guess, not a decision grounded in evidence. |
-| `serialized` | `longblob` | out of scope (GIF-25), possibly `:binary` or omitted entirely | §2.5. |
+| `serialized` | `longblob` | out of scope (ADR-0001), possibly `:binary` or omitted entirely | §2.5. |
 | `private` | `int(11)` | `:boolean` | §2.6 — written only as 0/1 (`(game.TourneyId != 0 \|\| game.IsPrivate ? 1 : 0)`). |
 
 ### 3.9 `gc_games.player` (3 columns) — live (see §1.1)

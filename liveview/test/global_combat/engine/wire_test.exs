@@ -8,7 +8,7 @@ defmodule GlobalCombat.Engine.WireTest do
   alias GlobalCombat.GrpcHost
 
   describe "to_wire_game/2 + from_wire_snapshot/2" do
-    test "round-trips a live GlobalCombat.Games.Server's engine state through games.serialized (GIF-74)" do
+    test "round-trips a live GlobalCombat.Games.Server's engine state through games.serialized" do
       game = %Game{
         map_name: :original,
         rng: DotnetRandom.new(42),

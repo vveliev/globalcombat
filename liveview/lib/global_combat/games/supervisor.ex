@@ -2,7 +2,7 @@ defmodule GlobalCombat.Games.Supervisor do
   @moduledoc """
   DynamicSupervisor holding one `GlobalCombat.Games.Server` child per live game.
 
-  GIF-74 item 3: also does the boot-time reconstruction nothing did before — every `games` row
+  Also does the boot-time reconstruction nothing did before — every `games` row
   left `status: :active` (a node restart mid-game, or the whole app just booting fresh against
   an existing database) gets its `GlobalCombat.Games.Server` restarted straight from its last
   `games.serialized` snapshot, via the same rehydration path `GlobalCombat.Games.LiveResolver`
@@ -28,7 +28,7 @@ defmodule GlobalCombat.Games.Supervisor do
   def init(_opts), do: DynamicSupervisor.init(strategy: :one_for_one)
 
   @doc """
-  On-demand counterpart to the boot-time sweep below (GIF-119): ensures a live
+  On-demand counterpart to the boot-time sweep below: ensures a live
   `GlobalCombat.Games.Server` process backs `game_id`, starting one from its persisted
   `games.serialized` snapshot if none is currently registered. Unlike `rehydrate_active_games/0`
   (which only ever runs once, at application boot), this is meant to be called from
@@ -53,8 +53,8 @@ defmodule GlobalCombat.Games.Supervisor do
   # Every status rehydrates from its snapshot; `Server.init/1` branches on the snapshot's own
   # `Started` flag, so this path doesn't need to know which it is:
   #   - `:new` — a persisted lobby (`GlobalCombat.Games.Server` writes one on every roster change).
-  #   - `:active` — a game mid-play (GIF-119).
-  #   - `:finished` — GIF-124: the final snapshot is just as valid and complete; rehydrating it
+  #   - `:active` — a game mid-play.
+  #   - `:finished` — the final snapshot is just as valid and complete; rehydrating it
   #     brings back a read-only `Server` that can render the final board/winner. It never gets
   #     another turn claimed against it: `Scheduling.list_due/1` only ever selects `:active` rows,
   #     so its boot-time-reconstructed `:playing` in-memory status can't be handed a scheduled turn.

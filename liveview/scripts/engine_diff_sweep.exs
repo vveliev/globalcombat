@@ -1,7 +1,7 @@
-# GIF-72: broad differential-harness sweep across game modes.
+# Broad differential-harness sweep across game modes.
 #
-# GIF-28 built the harness (`GlobalCombat.Engine.Harness`, driven by
-# `mix game_engine.diff_harness`) and ran it once: 60 games / 5,069 turns, all
+# The harness (`GlobalCombat.Engine.Harness`, driven by
+# `mix game_engine.diff_harness`) was first run once: 60 games / 5,069 turns, all
 # default map/player-count/mode. This script re-runs the same harness (same
 # oracle calls, same diff logic - it just drives `Harness.run/2` directly
 # instead of through the single-scenario mix task) across a deliberately
@@ -16,9 +16,9 @@
 # GlobalCombat.GrpcHost/bin/Release/net10.0/GlobalCombat.GrpcHost.dll` from
 # the repo root):
 #
-#     GRPC_HOST=localhost GRPC_PORT=5251 mix run scripts/gif72_sweep.exs
+#     GRPC_HOST=localhost GRPC_PORT=5251 mix run scripts/engine_diff_sweep.exs
 #
-# Set GIF72_SMOKE=1 for a fast structural check (1 game, 8 turns per
+# Set DIFF_SWEEP_SMOKE=1 for a fast structural check (1 game, 8 turns per
 # scenario) instead of the full sweep. Exits non-zero if any turn, in any
 # scenario, diverged.
 
@@ -30,7 +30,7 @@ alias GlobalCombat.Engine.Harness.TurnReport
 
 host = System.get_env("GRPC_HOST", "localhost")
 port = System.get_env("GRPC_PORT", "5251") |> String.to_integer()
-smoke? = System.get_env("GIF72_SMOKE") == "1"
+smoke? = System.get_env("DIFF_SWEEP_SMOKE") == "1"
 
 IO.puts("Connecting to #{host}:#{port} (plaintext h2c)...")
 {:ok, channel} = GRPC.Stub.connect("#{host}:#{port}")
@@ -115,7 +115,7 @@ scenarios =
     scenarios
   end
 
-base_seed = System.get_env("GIF72_BASE_SEED", "1") |> String.to_integer()
+base_seed = System.get_env("DIFF_SWEEP_BASE_SEED", "1") |> String.to_integer()
 
 indexed = Enum.with_index(scenarios)
 scenario_count = length(scenarios)
@@ -180,7 +180,7 @@ all_diverged = results |> Enum.flat_map(fn {_, _, _, diverged} -> diverged end)
 IO.puts("\n" <> String.duplicate("=", 70))
 
 IO.puts(
-  "GIF-72 sweep complete: #{scenario_count} scenarios, #{total_games} games, #{total_turns} turns"
+  "Differential sweep complete: #{scenario_count} scenarios, #{total_games} games, #{total_turns} turns"
 )
 
 if all_diverged == [] do

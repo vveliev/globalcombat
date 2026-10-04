@@ -1,7 +1,7 @@
 defmodule GlobalCombat.Accounts.AccountTest do
   @moduledoc """
   Verifies `Account.rank/1` against the legacy `Account.Rank` C# property
-  (`Web/Models/Account.cs:36-52`) — this is the GIF-33 "Elo figures for a sample of players
+  (`Web/Models/Account.cs:36-52`) — this is the port's "Elo figures for a sample of players
   match the current site" check for Stats/PlayerInfo's Rating/Rank columns.
 
   Why a rank/rating comparison, not a live Elo *computation* comparison: the rating number
@@ -9,17 +9,17 @@ defmodule GlobalCombat.Accounts.AccountTest do
   column, written once, at game-end, by `GameServer.OnEnd`'s
   `update account set rating = rating + <RatingChange>` (the Elo math itself already has a
   bit-for-bit differential harness against the .NET engine, see
-  `GlobalCombat.Engine.Game`/`GlobalCombat.Engine.Harness`, GIF-28). Both apps read the same
+  `GlobalCombat.Engine.Game`/`GlobalCombat.Engine.Harness`). Both apps read the same
   MySQL `account.rating` column with zero transformation, so they trivially agree on the
   number *by construction* — there is no independent Elixir-side computation to diverge. The
   one piece of display logic that genuinely reads `rating` and derives something from it is
-  the `Rank` ladder, so that's what this test differentially verifies, the same way GIF-28's
+  the `Rank` ladder, so that's what this test differentially verifies, the same way the engine
   harness verifies engine logic: by re-deriving the expected answer from an independent
   implementation, not by calling the code under test twice.
 
   This also could not be checked against the live production site by request/response
   comparison — globalcombat.com no longer serves the game (parked domain, confirmed
-  2026-08-29, see GIF-34) — so "matches the current site" is verified against the legacy
+  2026-08-29, see `docs/launch.md`) — so "matches the current site" is verified against the legacy
   source (`Web/Models/Account.cs`), not a live HTTP round trip.
   """
 
@@ -79,7 +79,7 @@ defmodule GlobalCombat.Accounts.AccountTest do
     end
   end
 
-  describe "sample-of-players verification (GIF-33 done-when criterion)" do
+  describe "sample-of-players verification (done-when criterion)" do
     # Sample size: 7 accounts, one per rank tier plus one duplicate-tier check, ratings chosen
     # to land inside every tier `Account.cs`'s ladder defines (not just at boundaries — the
     # boundary test above already covers those exhaustively).

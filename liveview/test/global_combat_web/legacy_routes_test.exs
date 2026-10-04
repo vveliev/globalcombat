@@ -1,19 +1,19 @@
 defmodule GlobalCombatWeb.LegacyRoutesTest do
   @moduledoc """
-  GIF-31: globalcombat.com has been live since 2001-01-22, and every path
+  globalcombat.com has been live since 2001-01-22, and every path
   below is a real inbound link, bookmark, or search result. Asserts that
   every explicit route in `Web/Program.cs` still resolves in the Phoenix
   router, with the same capitalised-hyphenated shape and the same ids
   (`game.AUTO_INCREMENT` is at 684316 — ids are never renumbered).
 
-  Originally a pure router-shape test against thin GIF-31 stubs, where most controllers echoed
+  Originally a pure router-shape test against thin legacy-route stubs, where most controllers echoed
   back the id/action they resolved -- enough to prove the route matched the right controller
   with the right params. Several surfaces have since grown real behavior and their assertions
-  were upgraded to match: `Tournament-:id` (`TourneyController` is a real port as of GIF-32, so
+  were upgraded to match: `Tournament-:id` (`TourneyController` is now a real port, so
   those cases assert against a real tourney fixture instead of a stub echo), the `Home`-routed
-  paths (GIF-33 replaced `HomeController`'s stubs with real behavior, so those assertions check
+  paths (the home/messaging port replaced `HomeController`'s stubs with real behavior, so those assertions check
   the real, often auth-gated, response instead of an echoed placeholder string), and the bare
-  `/Game-:id` / `/Create-Game` routes (GIF-30 turned them into LiveViews, so those tests no
+  `/Game-:id` / `/Create-Game` routes (the board port turned them into LiveViews, so those tests no
   longer assert stub text at a hardcoded historical id — `GlobalCombat.Games.Live` games are
   ephemeral and id-generated, not the fixed `game.AUTO_INCREMENT` row 684316 the stub echoed
   back; what's still very much a router-shape concern, and still asserted there, is that the
@@ -70,7 +70,7 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   describe "Player-Info-{id:int}" do
     import GlobalCombat.AccountsFixtures
 
-    test "GET /Player-Info-:id resolves the id and renders that account (GIF-33)", %{
+    test "GET /Player-Info-:id resolves the id and renders that account", %{
       conn: conn
     } do
       account = account_fixture()
@@ -116,7 +116,7 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "Create-Game / Create-Tournament" do
-    test "GET /Create-Game redirects home when logged out (GameCreateLive, GIF-30)", %{
+    test "GET /Create-Game redirects home when logged out (GameCreateLive)", %{
       conn: conn
     } do
       conn = get(conn, "/Create-Game")
@@ -128,7 +128,7 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert html_response(conn, 200) =~ "Create a New Game"
     end
 
-    test "GET /Create-Tournament redirects an anonymous visitor (admin-only, GIF-32)", %{
+    test "GET /Create-Tournament redirects an anonymous visitor (admin-only)", %{
       conn: conn
     } do
       conn = get(conn, "/Create-Tournament")
@@ -145,12 +145,12 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "Game-Manual / Send-Message (hyphenated literals, not swallowed by Game-:id)" do
-    test "GET /Game-Manual renders the real manual (GIF-33)", %{conn: conn} do
+    test "GET /Game-Manual renders the real manual", %{conn: conn} do
       conn = get(conn, "/Game-Manual")
       assert html_response(conn, 200) =~ "Game Manual"
     end
 
-    test "POST /Send-Message redirects anonymous visitors home (GIF-33: requires login)", %{
+    test "POST /Send-Message redirects anonymous visitors home (requires login)", %{
       conn: conn
     } do
       conn = post(conn, "/Send-Message", %{"AccountId" => "1", "Message" => "hi"})
@@ -159,19 +159,19 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "{action} shortcut set: Messages|Stats|IpAddresses|GameManual|OptOut|PlayerInfo|Chat|LoadChatMessages|CloseChatWindow|SendMessage" do
-    test "GET /Messages redirects anonymous visitors home (GIF-33: requires login)", %{
+    test "GET /Messages redirects anonymous visitors home (requires login)", %{
       conn: conn
     } do
       conn = get(conn, "/Messages")
       assert redirected_to(conn) == "/"
     end
 
-    test "GET /Stats redirects non-admins home (GIF-33: admin-only)", %{conn: conn} do
+    test "GET /Stats redirects non-admins home (admin-only)", %{conn: conn} do
       conn = get(conn, "/Stats")
       assert redirected_to(conn) == "/"
     end
 
-    test "GET /IpAddresses redirects non-admins home (GIF-33 admin-hardening)",
+    test "GET /IpAddresses redirects non-admins home (admin hardening)",
          %{conn: conn} do
       conn = get(conn, "/IpAddresses")
       assert redirected_to(conn) == "/"
@@ -182,37 +182,37 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert html_response(conn, 200) =~ "Game Manual"
     end
 
-    test "GET /OptOut with no Account/Key shows the missing-key error (GIF-33)", %{conn: conn} do
+    test "GET /OptOut with no Account/Key shows the missing-key error", %{conn: conn} do
       conn = get(conn, "/OptOut")
       assert html_response(conn, 200) =~ "Missing account or opt out key."
     end
 
-    test "GET /PlayerInfo with no id 404s (GIF-33: same `id <= 0` guard as the legacy action)",
+    test "GET /PlayerInfo with no id 404s (same `id <= 0` guard as the legacy action)",
          %{conn: conn} do
       conn = get(conn, "/PlayerInfo")
       assert conn.status == 404
     end
 
-    test "GET /Chat redirects anonymous visitors home (GIF-33: requires login)", %{conn: conn} do
+    test "GET /Chat redirects anonymous visitors home (requires login)", %{conn: conn} do
       conn = get(conn, "/Chat")
       assert redirected_to(conn) == "/"
     end
 
-    test "GET /LoadChatMessages redirects anonymous visitors home (GIF-33: requires login)", %{
+    test "GET /LoadChatMessages redirects anonymous visitors home (requires login)", %{
       conn: conn
     } do
       conn = get(conn, "/LoadChatMessages")
       assert redirected_to(conn) == "/"
     end
 
-    test "GET /CloseChatWindow redirects anonymous visitors home (GIF-33: requires login)", %{
+    test "GET /CloseChatWindow redirects anonymous visitors home (requires login)", %{
       conn: conn
     } do
       conn = get(conn, "/CloseChatWindow")
       assert redirected_to(conn) == "/"
     end
 
-    test "GET /SendMessage redirects anonymous visitors home (GIF-33: requires login)", %{
+    test "GET /SendMessage redirects anonymous visitors home (requires login)", %{
       conn: conn
     } do
       conn = get(conn, "/SendMessage")
@@ -221,13 +221,13 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "case-insensitive matching (ASP.NET Core's default routing behavior)" do
-    test "GET /game-:id resolves like /Game-:id (LiveView mount, GIF-30)", %{conn: conn} do
+    test "GET /game-:id resolves like /Game-:id (LiveView mount)", %{conn: conn} do
       game_id = GlobalCombat.Games.Live.create_game(%{max_players: 2})
       conn = get(conn, "/game-#{game_id}")
       assert html_response(conn, 200) =~ "Game #{game_id}"
     end
 
-    test "GET /GAME-:id resolves like /Game-:id (LiveView mount, GIF-30)", %{conn: conn} do
+    test "GET /GAME-:id resolves like /Game-:id (LiveView mount)", %{conn: conn} do
       game_id = GlobalCombat.Games.Live.create_game(%{max_players: 2})
       conn = get(conn, "/GAME-#{game_id}")
       assert html_response(conn, 200) =~ "Game #{game_id}"
@@ -276,7 +276,7 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
   end
 
   describe "default {controller=Home}/{action=Index}/{id?} — only its existing concrete instantiations" do
-    test "GET /Home renders the same home page as / (GIF-33: real content, not the Phoenix placeholder)",
+    test "GET /Home renders the same home page as / (real content, not the Phoenix placeholder)",
          %{conn: conn} do
       conn = get(conn, "/Home")
       assert html_response(conn, 200) =~ "GLOBAL COMBAT"

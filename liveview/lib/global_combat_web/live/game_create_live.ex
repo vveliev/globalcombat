@@ -1,11 +1,11 @@
 defmodule GlobalCombatWeb.GameCreateLive do
   @moduledoc """
-  Port of `Views/Game/Create.cshtml` + `GameController.Create` (GIF-30). Creates a
+  Port of `Views/Game/Create.cshtml` + `GameController.Create`. Creates a
   `GlobalCombat.Games.Live` lobby and joins the creating account as player 1 (mirroring
   the original's `model.Join(Account.Id, ...)` right after `GameServer.SaveNewGame`),
   then redirects to the board.
 
-  GIF-93: the form now exposes all 9 of the legacy settings — `GlobalCombat.Games.Server`
+  The form now exposes all 9 of the legacy settings — `GlobalCombat.Games.Server`
   already accepted `is_training`/`minimum_armies`/`turn_length_minutes` (this module's
   moduledoc just hadn't caught up to submit them). Training Mode additionally auto-joins
   the reserved "Computer" account (`Accounts.computer_account_id/0`) and forces

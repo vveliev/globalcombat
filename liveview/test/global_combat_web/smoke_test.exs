@@ -4,8 +4,8 @@ defmodule GlobalCombatWeb.SmokeTest do
   register -> Create Game (Training Mode) -> Start -> click two territories to queue an attack
   -> End Turn -> turn 2 resolves -> the game shows up under "Your Current Games" on Home.
 
-  Every bug GIF-107/GIF-108's hands-on QA found (GIF-111 clicks did nothing, GIF-114 stubbed
-  actions, GIF-118 the AI ordering the human's armies, GIF-122 no end state) was a wiring gap
+  Every bug hands-on QA found (territory clicks did nothing, stubbed lobby actions, the AI
+  ordering the human's armies, no end state) was a wiring gap
   between surfaces that each had their own green unit tests. This is the test that fails when
   the seams come apart, so it deliberately drives the real controller, LiveView events and
   `Games.Server` together instead of any one of them in isolation.
