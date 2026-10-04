@@ -96,6 +96,10 @@ defmodule GlobalCombat.Games.PlayerView do
     :ended,
     :is_fogged,
     :viewer_number,
+    # The game's "Minimum Army Bonus" option: the floor on every player's
+    # reinforcements each turn (`Engine.Game.reinforce/2`). A public game
+    # setting, shown in the HUD's income breakdown.
+    minimum_armies: 0,
     areas: [],
     players: [],
     messages: [],
@@ -121,6 +125,7 @@ defmodule GlobalCombat.Games.PlayerView do
       ended: engine.ended,
       is_fogged: is_fogged,
       viewer_number: viewer_number,
+      minimum_armies: engine.minimum_armies,
       areas:
         Enum.map(
           Engine.areas_in_order(engine),

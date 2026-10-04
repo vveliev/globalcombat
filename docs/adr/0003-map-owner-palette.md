@@ -74,3 +74,18 @@ audited alongside them and clears 3:1 comfortably in both themes.
 to land in the same ~4-7:1 band the rest of the palette already gets against
 `--gray-8`, while keeping owner 8 far enough from owner 4's unchanged `--orange-5` on
 the same orange ramp that the two stay easy to tell apart. Light mode is untouched.
+
+## Amendment (2026-10-04): army tokens
+
+The game HUD (`liveview/docs/mobile-battle-mode.md` §8) draws each army count on a round
+token, and queued reinforcements as a gold `+N` tab beside it. Like the owner fills, these
+are board pieces with no semantic-vocabulary equivalent, so three more `--map-*` tokens
+alias primitives under the same rule as the palette above:
+
+- `--map-token-plate` (`--black`): the token's dark plate, the outline of the pending tab,
+  and the stroke under every count — the same black the count stroke already uses.
+- `--map-token-ink` (`--white`): light ink drawn on the plate (roster initials).
+- `--map-pending` (`--yellow-3`): the queued-reinforcements tab.
+
+They stay on the board. HUD controls outside the SVG (End Turn, its progress ring and its
+armed state) use semantic tokens only.

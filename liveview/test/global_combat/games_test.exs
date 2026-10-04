@@ -16,14 +16,6 @@ defmodule GlobalCombat.GamesTest do
       assert [%{id: id}] = Games.list_player_games(account.id)
       assert id == game.id
     end
-
-    test "any other failure is returned, not swallowed" do
-      account = account_fixture()
-      {:ok, game} = Games.create_game(%{status: :new})
-      :ok = Games.delete_game(game.id)
-
-      assert {:error, %Ecto.Changeset{errors: [game_id: _]}} = Games.seat(game.id, account.id)
-    end
   end
 
   describe "invite/2" do

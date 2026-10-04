@@ -122,7 +122,7 @@ Dock contents by state (`@selected_area`):
 Order panel changes:
 
 - Amount input: add `inputmode="numeric"`, `pattern="[0-9]*"`, `autocomplete="off"`, `enterkeyhint="done"`.
-- Stepper: `−` and `+` buttons (`phx-click="step_amount"` with `phx-value-delta`) and `Max` (`phx-click="max_amount"`). New handlers set `order_amount` only; `submit_order` validation is unchanged. `Max` uses the source area's `armies` for transfer and attack, and the viewer's unassigned reinforcements for assign if `PlayerView` exposes that number (otherwise `Max` is omitted in assign mode; note it in the PR).
+- Stepper: `−` and `+` buttons (`phx-click="step_amount"` with `phx-value-delta`) and `Max` (`phx-click="max_amount"`). New handlers set `order_amount` only; `submit_order` validation is unchanged. `Max` uses what the source area can actually send for transfer and attack (its `armies` less the one the engine always leaves behind), and the viewer's unassigned reinforcements for assign if `PlayerView` exposes that number (otherwise `Max` is omitted in assign mode; note it in the PR).
 - Buttons stay `Assign`/`Transfer`/`Attack`, `Unassign`, `Cancel`; on phones they wrap to full-width rows.
 
 ### 4.4 `.MapViewport` hook (`lib/global_combat_web/live/game_live/world_map.ex`)
@@ -266,3 +266,65 @@ Depends on: WP1 to WP5. Effort: half a day.
 | Should tablets in portrait (768px) get the stage? | Yes, anything below `lg` | Play testing shows the stacked layout is better on iPad |
 | Default zoom on phones: fit whole map or fill height? | Fit whole map, then double tap | Players consistently double tap first thing; then start at 1.5x centred on the viewer's territories |
 | Drawer side | Right | Left-handed feedback |
+
+## 8. Game HUD (follow-up)
+
+Status: implemented after WP1–WP6, chosen from a three-way clickable prototype
+(floating HUD with drag to order, a command bar with tap-then-tap, an order
+tray with hold-and-drag). The floating HUD won.
+
+Below `lg`, stage mode lays the board full-bleed under the whole viewport:
+`GameLayout` marks the shell `data-hud` and `app.css` floats `:status` over
+the top edge and `:dock` over the bottom edge, see-through except for their
+own controls. `GameLive.Hud` holds the HUD's own logic (turn phase and its
+wording, the Undo history, the optimistic copies of a placement or order).
+
+### Phone only (below `lg`)
+
+| Piece | Behaviour |
+|---|---|
+| Tap a territory | Never places armies by itself (`tap_area`). Your own: selects it and opens the placement bar on it — another of yours switches the selection. With one of yours selected, an enemy neighbour: targets it (the attack panel). Anything else closes the panel |
+| Placement bar | On the selected territory: one compact row of −1, +1, +5, All and ✓ (`quick_assign`, `unplace_one`), with its armies and how many are left to place. Sideways it becomes a column down the right edge. The selected token is ringed, and if it ends up under the bar or the status strip the map pans it back into view |
+| Drag an army token | Draws a live arrow over a veiled board with the reachable neighbours redrawn on top; released over one, it opens the order panel on that pair (`drag_order`). With nothing queued from the territory the order is queued straight away with everything it can spare; a drag onto the target already ordered reopens that order untouched; a drag to a different target queues nothing until submitted, and the panel says which order it would replace (a territory carries one order a turn). A drag that starts anywhere but a token pans, own land included |
+| Order panel | For a transfer/attack it floats beside the arrow (`data-anchor`, positioned by `.MapViewport`); assign mode stays in the dock |
+| Undo | Takes back the latest placement, whichever territory it was on (`undo_assign`): clears that area's assignment, re-queues the rest, and puts back as much of an order queued from it as it can still send. The history is reconciled with what is really queued on every reload, so it follows the order panel's Assign/Unassign and survives a reconnect |
+| Lens | In the ⋯ menu, one button that steps owner → region → frontier (`cycle_lens`); the segmented control stays at `lg` |
+| End Turn | Round thumb button whose ring fills as reinforcements go out |
+| Fit | From the whole board it returns to the starting view; from anywhere else it fits the whole board |
+| Status strip | One row: the turn pill, a ⋯ menu (Fit, the replay controls, the lens), the roster and full screen. All its controls are 44px touch targets |
+
+A player who has ended their turn gets none of the gestures, and the
+placement, drag and Undo events refuse them server-side.
+
+(The first cut placed an army on every tap and five on a hold. In play that
+made selecting your own territory impossible while armies were unplaced, so a
+tap now only selects and the placement bar does the placing.)
+
+### Every size
+
+| Piece | Behaviour |
+|---|---|
+| Turn pill | "Turn 7" plus where the viewer is in the turn: "Place 4 armies", "2 orders ready", "Waiting on others", and the army readout: "140 armies · +14 next turn". Kept out of the status strip's live announcements, since it changes on every placement |
+| Your armies | A card in the Players drawer: armies on the board and in hand, left to place, and next turn's reinforcements worked out the way the engine does (territories ÷ 2, plus each region held outright, never below the game's minimum) |
+| Roster | The drawer opener (below `lg`) shows each seat's colour and initial, with a tick once they have ended their turn |
+| Coach line | One sentence on what to do next, worded for how that size is played: tap/hold/drag below `lg`, click a territory then a neighbour from `lg` up |
+| End Turn confirm | With armies unplaced the first press arms the button ("3 unplaced · tap again") for three seconds and the second ends the turn (`arm_end_turn`) |
+| Order panel | A slider and 1 / half / Max picks beside the exact number, all capped at what the order can really send (a transfer/attack leaves one army behind). On a queued order the primary button updates it and Remove takes it off the board: the engine has no cancel, so Remove resubmits zero, and a zero order draws no arrow, is left out of Your orders and is not counted as ready (`WorldMap.queued_order?/1`) |
+| Tokens | Army counts sit on owner-ringed tokens with a gold `+N` while reinforcements are queued; `.MapViewport` sets `--token-scale` so they keep a readable size at any zoom, and bumps a token when its count changes. Order arrows bow and carry their amount in a badge |
+
+From `lg` up a click still selects and a drag still pans, as before — at any
+zoom, with the board free to be pulled most of the way off its panel. The
+desktop game also sizes to the screen: the board fills the height beside a
+20rem rail that scrolls on its own, the status strip stays one row (the turn
+pill stacked as on a phone, the replay steps as ◀ ▶), and from `lg` to 80rem
+the strip uses the phone's compact lens button and replay label. A narrow,
+upright board column starts zoomed onto the viewer's territories, as an
+upright phone does. The rail, as a non-modal `<dialog>`, no longer takes
+focus when it opens (which had scrolled it to the chat box on load).
+
+The viewBox always takes the stage's aspect ratio, so nothing letterboxes:
+"fit" is the whole board (a phone held sideways shows all of it), and a phone
+held upright starts zoomed to fill its height around the viewer's biggest group
+of bordering territories. Sideways, the map's own bonus legend steps aside for
+the HUD (the drawer still lists the bonuses).
+Turning the phone between the two starts over from that home view.
