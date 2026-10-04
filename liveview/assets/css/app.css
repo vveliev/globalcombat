@@ -219,6 +219,7 @@
   --hud-order-panel: 19rem;
   --hud-amount-field: 5.5rem;
   --hud-coach-min: 12rem;
+  --hud-landscape-panel: 15rem;
   --map-sea: var(--gray-1);
   --map-fog-a: var(--stone-3);
   --map-fog-b: var(--stone-5);
@@ -1269,15 +1270,19 @@
 .placement-hint {
   margin: 0;
   font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .placement-hint {
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
 .placement-buttons {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
   gap: var(--space-2);
 }
 
@@ -1312,8 +1317,113 @@
   font-weight: 700;
 }
 
+/* The selected territory's token, so it's clear what the panel acts on. */
+.world-map-token--selected .world-map-token-ring {
+  stroke: var(--color-focus-ring);
+  stroke-width: 3.5px;
+}
+
+/* The "⋯" menu group: from lg up it isn't a box at all, its controls sit
+   inline in the status strip as they always have. */
+.hud-more {
+  display: contents;
+}
+
 @media (width < 64rem) {
+  /* One row: the turn pill, then ⋯, the roster and fullscreen. */
+  [data-hud] .game-status {
+    flex-wrap: nowrap;
+  }
+
+  [data-hud] .hud-more {
+    display: none;
+  }
+
+  [data-hud] .hud-more.is-open {
+    position: absolute;
+    top: 100%;
+    right: var(--space-3);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-surface) 92%, transparent);
+    backdrop-filter: blur(var(--blur-strip));
+    -webkit-backdrop-filter: blur(var(--blur-strip));
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
+  }
+
+  [data-hud] .hud-more.is-open #turn-replay-controls > span {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  [data-hud] .hud-more.is-open .hud-menu-label {
+    display: inline;
+  }
+
+  [data-hud] .hud-more.is-open .hud-chip {
+    justify-content: flex-start;
+    gap: var(--space-2);
+    box-shadow: none;
+  }
+
+  [data-hud] .turn-hint,
   [data-hud] .army-summary {
-    font-size: var(--text-xs);
+    font-size: 0.8125rem;
+  }
+
+  /* The placement bar is one compact row docked under the map. */
+  [data-hud] #order-panel.order-panel--assign > :first-child {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+  }
+
+  [data-hud] #order-panel.order-panel--assign > :nth-child(2) {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  [data-hud] .turn-controls-force {
+    min-height: var(--size-touch-target);
+  }
+}
+
+/* Phones held sideways: little height to spare, so the placement bar becomes
+   a column down the right edge, the coach line stays on one line, and the
+   map's own bonus legend steps aside (the drawer still lists the bonuses). */
+@media (width < 64rem) and (orientation: landscape) and (max-height: 32rem) {
+  [data-hud] #order-panel.order-panel--assign {
+    position: fixed;
+    top: var(--space-2);
+    right: var(--space-2);
+    bottom: var(--space-2);
+    width: var(--hud-landscape-panel);
+    min-width: 0;
+    overflow-y: auto;
+  }
+
+  [data-hud] .placement-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-hud] .placement-status,
+  [data-hud] .placement-hint {
+    white-space: normal;
+  }
+
+  [data-hud] .turn-coach {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  [data-hud] .world-map-legend {
+    display: none;
   }
 }

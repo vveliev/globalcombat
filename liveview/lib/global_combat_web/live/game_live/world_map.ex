@@ -210,6 +210,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
       data-zoomed="false"
       data-unassigned={@interactive && @unassigned}
       data-token-radius={@token_radius}
+      data-selected={@selected_area}
       data-curve={curve_json(@map_name)}
       tabindex="0"
       phx-hook=".MapViewport"
@@ -363,6 +364,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             map_name={@map_name}
             delta={Map.fetch!(@fills, area.number).delta}
             owner={Map.fetch!(@fills, area.number).owner}
+            selected={area.number == @selected_area}
           />
         </g>
         <%!-- The drag-to-order preview arrow `.MapViewport` draws while a finger
@@ -563,6 +565,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
         const PANEL_GAP_PX = 28
         const PANEL_MARGIN_PX = 8
         const EDGE_SLACK = 0.12
+        const OVERSIZE_SLACK = 0.3
         // From `lg` up the board isn't a full-screen stage: as before, a drag
         // may pull it most of the way off its panel.
         const DESKTOP_VISIBLE_MARGIN = 0.2
@@ -606,6 +609,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.raf = null
             this.counts = this.readCounts()
             this.bumpedAt = {}
+            this.lastSelected = this.el.dataset.selected
             this.tokenRadius = Number(this.el.dataset.tokenRadius)
             this.onVisualViewport = () => this.positionOrderPanel()
             window.visualViewport?.addEventListener("resize", this.onVisualViewport)
@@ -650,6 +654,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             this.dragLayer = this.el.querySelector("#world-map-drag")
             this.applyViewBox()
             this.bumpChangedCounts()
+            this.followSelection()
           },
 
           destroyed() {
@@ -706,8 +711,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             const aspect = this.aspect()
             if (aspect >= 1 || this.desktop.matches) return this.fit()
 
-            const mine = [...this.el.querySelectorAll(".world-map-territory[data-mine]")]
-              .map((t) => this.labelOf(t.dataset.area))
+            const mine = this.largestOwnCluster()
+              .map((area) => this.labelOf(area))
               .filter(Boolean)
             if (mine.length === 0) return this.fit()
 
@@ -717,6 +722,38 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             const h = this.base.h * PORTRAIT_HEIGHT
             const w = h * aspect
             return this.clamped({ x: cx - w / 2, y: cy - h / 2, w, h })
+          },
+
+          // The viewer's biggest group of bordering territories — where the
+          // upright phone view starts, rather than the middle of every
+          // territory they own, which can land in open sea between groups.
+          largestOwnCluster() {
+            const own = new Map(
+              [...this.el.querySelectorAll(".world-map-territory[data-mine]")].map((t) => [
+                t.dataset.area,
+                (t.dataset.adjacent || "").split(",").filter(Boolean)
+              ])
+            )
+            const seen = new Set()
+            let best = []
+            for (const start of own.keys()) {
+              if (seen.has(start)) continue
+              const group = []
+              const queue = [start]
+              seen.add(start)
+              while (queue.length) {
+                const area = queue.shift()
+                group.push(area)
+                for (const next of own.get(area)) {
+                  if (own.has(next) && !seen.has(next)) {
+                    seen.add(next)
+                    queue.push(next)
+                  }
+                }
+              }
+              if (group.length > best.length) best = group
+            }
+            return best
           },
 
           // A saved or resized view keeps its centre and zoom but takes the
@@ -818,6 +855,72 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
             )
           },
 
+          // On a phone, a newly selected territory must stay visible beside
+          // the panel acting on it: if it ended up under the panel or the
+          // status strip, pan it to the middle of the map that's still showing.
+          followSelection() {
+            const selected = this.el.dataset.selected
+            if (selected === this.lastSelected) return
+            this.lastSelected = selected
+            if (!selected || this.desktop.matches) return
+
+            requestAnimationFrame(() => {
+              const label = this.labelOf(selected)
+              if (!label || !this.svg) return
+              const open = this.openArea()
+              const rect = this.svg.getBoundingClientRect()
+              const ppu = this.pixelsPerUnit()
+              const x = rect.left + (label.x - this.current.x) * ppu
+              const y = rect.top + (label.y - this.current.y) * ppu
+              const margin = 32
+              const inside =
+                x > open.left + margin &&
+                x < open.right - margin &&
+                y > open.top + margin &&
+                y < open.bottom - margin
+              if (inside) return
+
+              const cx = (open.left + open.right) / 2
+              const cy = (open.top + open.bottom) / 2
+              this.showView(
+                this.clamped({
+                  ...this.current,
+                  x: this.current.x + (x - cx) / ppu,
+                  y: this.current.y + (y - cy) / ppu
+                })
+              )
+            })
+          },
+
+          // The part of the screen the HUD leaves the map: below the status
+          // strip's controls, above (or, in landscape, left of) the dock.
+          openArea() {
+            // Not `offsetParent`: that is null for the fixed-position panels.
+            const visible = (el) => el && el.getClientRects().length > 0
+            const strip = [...document.querySelectorAll(".game-status .turn-pill, .game-status .hud-chip")]
+              .filter(visible)
+              .map((el) => el.getBoundingClientRect().bottom)
+            const dock = [...(document.querySelector(".game-dock")?.children || [])]
+              .filter(visible)
+              .map((el) => el.getBoundingClientRect())
+            const area = {
+              left: 0,
+              right: window.innerWidth,
+              top: strip.length ? Math.max(...strip) : 0,
+              bottom: window.visualViewport?.height || window.innerHeight
+            }
+            for (const r of dock) {
+              // A panel docked down the right side (landscape) narrows the
+              // map; one along the bottom shortens it.
+              if (r.left > window.innerWidth / 2 && r.height > area.bottom / 2) {
+                area.right = Math.min(area.right, r.left)
+              } else {
+                area.bottom = Math.min(area.bottom, r.top)
+              }
+            }
+            return area
+          },
+
           clearPanelPosition() {
             const root = document.documentElement.style
             root.removeProperty("--order-panel-left")
@@ -837,7 +940,14 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
                     start + length - DESKTOP_VISIBLE_MARGIN * size
                   )
               : (pos, size, start, length) => {
-                  if (size >= length) return start + length / 2 - size / 2
+                  // Bigger than the board on this axis: centred, give or take
+                  // OVERSIZE_SLACK — enough to lift a territory out from under
+                  // the panels floating over the map.
+                  if (size >= length) {
+                    const centred = start + length / 2 - size / 2
+                    const slack = size * OVERSIZE_SLACK
+                    return Math.min(Math.max(pos, centred - slack), centred + slack)
+                  }
                   const slack = size * EDGE_SLACK
                   return Math.min(Math.max(pos, start - slack), start + length - size + slack)
                 }
@@ -1588,6 +1698,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     doc: ":frontier lens only — delta vs. the strongest adjacent opposing stack"
 
   attr :owner, :any, default: nil, doc: "the fill's owner slot, which colours the token's ring"
+  attr :selected, :boolean, default: false, doc: "the territory the order panel is acting on"
 
   # Each count sits on a round token ringed in the owner colour, like a game
   # piece, with a gold `+N` badge while reinforcements are queued on it. The
@@ -1610,7 +1721,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
     # rendered markup; the stroke/fill colours come from `.world-map-count`.
     ~H"""
     <g
-      class="world-map-token world-map-owner"
+      class={["world-map-token world-map-owner", @selected && "world-map-token--selected"]}
       data-owner={@owner}
       data-area={@area.number}
       style={"transform-origin: #{@x}px #{@y}px"}

@@ -799,15 +799,23 @@ defmodule GlobalCombatWeb.GameLive do
               </SegmentedControl.segmented_control>
             </form>
             <div class="ml-auto flex items-center gap-[var(--space-2)]">
+              <%!-- Phone only: Fit, the replay controls and the lens sit behind
+              this one button (`#hud-more` in status_line/1), so the strip
+              stays a single row over the map. --%>
               <button
                 :if={@stage}
                 type="button"
-                id="lens-cycle"
-                phx-click="cycle_lens"
-                aria-label={"Map lens: #{Hud.lens_name(@lens)}. Switch lens"}
+                id="hud-more-toggle"
+                aria-label="Map and replay controls"
+                aria-controls="hud-more"
+                aria-expanded="false"
+                phx-click={
+                  JS.toggle_class("is-open", to: "#hud-more")
+                  |> JS.toggle_attribute({"aria-expanded", "true", "false"})
+                }
                 class="hud-chip lg:hidden"
               >
-                <.icon name={Hud.lens_icon(@lens)} class="size-5" />
+                <.icon name="hero-ellipsis-horizontal" class="size-5" />
               </button>
               <%!-- The roster as avatars doubles as the drawer opener on a phone:
               each seat's colour, initial and a tick once they've ended their
@@ -848,7 +856,7 @@ defmodule GlobalCombatWeb.GameLive do
                 phx-hook=".Fullscreen"
                 aria-pressed="false"
                 aria-label="Full screen"
-                class="hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                class="hud-chip hidden shrink-0 items-center justify-center rounded-[var(--radius-sm)] p-[var(--space-2)] border border-border bg-surface hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               >
                 <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
               </button>
@@ -1253,28 +1261,43 @@ defmodule GlobalCombatWeb.GameLive do
       {@ended_pill.label}
     </StatusPill.status_pill>
     <StatusPill.status_pill :if={@view.is_fogged} tone="partial">Fog of war</StatusPill.status_pill>
-    <Button.button
-      type="button"
-      intent="neutral"
-      id="map-fit"
-      phx-hook=".MapFit"
-      aria-label="Reset map zoom"
-      class="hud-chip"
-    >
-      <.icon name="hero-globe-americas" class="size-5 lg:hidden" />
-      <span class="hidden lg:inline">Fit</span>
-    </Button.button>
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".MapFit">
-      // The .MapViewport hook (world_map.ex) lives on a different element,
-      // so rather than it reaching out with a document-level click listener,
-      // this button announces itself over a window event.
-      export default {
-        mounted() {
-          this.el.addEventListener("click", () => window.dispatchEvent(new CustomEvent("gc:map-fit")))
+    <%!-- On a phone this group is the "⋯" menu (#hud-more-toggle); from `lg`
+    up it isn't a box at all (`display: contents`) and its controls sit inline
+    in the strip as before. --%>
+    <span id="hud-more" class="hud-more">
+      <Button.button
+        type="button"
+        intent="neutral"
+        id="map-fit"
+        phx-hook=".MapFit"
+        aria-label="Reset map zoom"
+        class="hud-chip"
+      >
+        <.icon name="hero-globe-americas" class="size-5 lg:hidden" />
+        <span class="hud-menu-label hidden lg:inline">Fit</span>
+      </Button.button>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MapFit">
+        // The .MapViewport hook (world_map.ex) lives on a different element,
+        // so rather than it reaching out with a document-level click listener,
+        // this button announces itself over a window event.
+        export default {
+          mounted() {
+            this.el.addEventListener("click", () => window.dispatchEvent(new CustomEvent("gc:map-fit")))
+          }
         }
-      }
-    </script>
-    <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
+      </script>
+      <.turn_replay_controls turn={@view.turn} steps={@replay_steps} />
+      <button
+        :if={@stage}
+        type="button"
+        id="lens-cycle"
+        phx-click="cycle_lens"
+        class="hud-chip lg:hidden"
+      >
+        <.icon name={Hud.lens_icon(@lens)} class="size-5" />
+        <span>Lens: {Hud.lens_name(@lens)}</span>
+      </button>
+    </span>
     <span :if={@view.ended} id="game-over-announce" class="sr-only">
       {@headline}<span :if={@outcome}>{" " <> @outcome}</span>
     </span>
@@ -1754,12 +1777,8 @@ defmodule GlobalCombatWeb.GameLive do
       data-anchor={@anchor}
     >
       <:header>
-        <%= if @mode == :assign && @source do %>
-          <span class="lg:hidden">Place armies on {@source.name}</span>
-          <span class="hidden lg:inline">{order_panel_title(@mode, @target)}</span>
-        <% else %>
-          {order_panel_title(@mode, @target)}
-        <% end %>
+        <span class="lg:hidden">{phone_panel_title(@mode, @source, @target)}</span>
+        <span class="hidden lg:inline">{order_panel_title(@mode, @target)}</span>
       </:header>
       <%!-- The phone's placement bar: a tap selected this territory; these
       buttons place on it, one tap each, and −1 takes one back. Below `lg`
@@ -1767,11 +1786,11 @@ defmodule GlobalCombatWeb.GameLive do
       <div :if={@mode == :assign && @source} id="placement-bar" class="placement-bar lg:hidden">
         <p id="placement-status" class="placement-status">
           <b>{@source.armies}</b>
-          armies here<span :if={@source.pending_armies > 0}>
-            (+{@source.pending_armies} placed)
+          armies<span :if={@source.pending_armies > 0}>
+            (+{@source.pending_armies})
           </span>
           · <b>{@limit}</b>
-          left to place
+          left
         </p>
         <div class="placement-buttons">
           <Button.button
@@ -1815,13 +1834,17 @@ defmodule GlobalCombatWeb.GameLive do
           >
             All {@limit}
           </Button.button>
+          <Button.button
+            id="placement-done"
+            type="button"
+            intent="neutral"
+            phx-click="cancel_order"
+            aria-label="Done"
+          >
+            <.icon name="hero-check" class="size-5" />
+          </Button.button>
         </div>
-        <p class="placement-hint">
-          Tap another of your territories to place there, or drag this one's army token onto a neighbour to attack or move.
-        </p>
-        <Button.button id="placement-done" type="button" intent="neutral" phx-click="cancel_order">
-          Done
-        </Button.button>
+        <p class="placement-hint">Drag the army token onto a neighbour to attack or move</p>
       </div>
       <form
         id="order-form"
@@ -1938,6 +1961,11 @@ defmodule GlobalCombatWeb.GameLive do
 
   defp order_mode(view, target),
     do: if(target.owner_number == view.viewer_number, do: :transfer, else: :attack)
+
+  # The phone's short panel titles: the territory first, then what the panel does.
+  defp phone_panel_title(:assign, source, _target), do: "#{source.name} · place armies"
+  defp phone_panel_title(:transfer, source, target), do: "#{source.name} → #{target.name} · move"
+  defp phone_panel_title(:attack, source, target), do: "#{source.name} → #{target.name} · attack"
 
   defp order_panel_title(:assign, _target), do: "Assign new armies or select a target area"
   defp order_panel_title(:transfer, target), do: "Transfer how many armies to #{target.name}?"

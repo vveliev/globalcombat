@@ -284,14 +284,14 @@ wording, the Undo history, the optimistic copies of a placement or order).
 | Piece | Behaviour |
 |---|---|
 | Tap a territory | Never places armies by itself (`tap_area`). Your own: selects it and opens the placement bar on it — another of yours switches the selection. With one of yours selected, an enemy neighbour: targets it (the attack panel). Anything else closes the panel |
-| Placement bar | On the selected territory: −1, +1, +5 and All (`quick_assign`, `unplace_one`), with its armies and how many are left to place; Done closes it |
+| Placement bar | On the selected territory: one compact row of −1, +1, +5, All and ✓ (`quick_assign`, `unplace_one`), with its armies and how many are left to place. Sideways it becomes a column down the right edge. The selected token is ringed, and if it ends up under the bar or the status strip the map pans it back into view |
 | Drag an army token | Draws a live arrow over a veiled board with the reachable neighbours redrawn on top; released over one, it opens the order panel on that pair (`drag_order`). With nothing queued from the territory the order is queued straight away with everything it can spare; a drag onto the target already ordered reopens that order untouched; a drag to a different target queues nothing until submitted, and the panel says which order it would replace (a territory carries one order a turn). A drag that starts anywhere but a token pans, own land included |
 | Order panel | For a transfer/attack it floats beside the arrow (`data-anchor`, positioned by `.MapViewport`); assign mode stays in the dock |
 | Undo | Takes back the latest placement, whichever territory it was on (`undo_assign`): clears that area's assignment, re-queues the rest, and puts back as much of an order queued from it as it can still send. The history is reconciled with what is really queued on every reload, so it follows the order panel's Assign/Unassign and survives a reconnect |
-| Lens | One button that steps owner → region → frontier (`cycle_lens`); the segmented control stays at `lg` |
+| Lens | In the ⋯ menu, one button that steps owner → region → frontier (`cycle_lens`); the segmented control stays at `lg` |
 | End Turn | Round thumb button whose ring fills as reinforcements go out |
 | Fit | From the whole board it returns to the starting view; from anywhere else it fits the whole board |
-| Replay | The status strip's replay controls shrink to chips: "▶ Replay" and ◀ / ▶ for the steps |
+| Status strip | One row: the turn pill, a ⋯ menu (Fit, the replay controls, the lens), the roster and full screen. All its controls are 44px touch targets |
 
 A player who has ended their turn gets none of the gestures, and the
 placement, drag and Undo events refuse them server-side.
@@ -317,5 +317,7 @@ zoom, with the board free to be pulled most of the way off its panel.
 
 The viewBox always takes the stage's aspect ratio, so nothing letterboxes:
 "fit" is the whole board (a phone held sideways shows all of it), and a phone
-held upright starts zoomed to fill its height around the viewer's territories.
+held upright starts zoomed to fill its height around the viewer's biggest group
+of bordering territories. Sideways, the map's own bonus legend steps aside for
+the HUD (the drawer still lists the bonuses).
 Turning the phone between the two starts over from that home view.

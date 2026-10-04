@@ -1172,6 +1172,40 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#order-submit", "Attack 4")
     end
 
+    test "the selected territory is marked on the board and named in the phone panel title",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+
+      %{alice_view: alice_view, alice: alice, game_id: game_id} =
+        start_two_player_game(conn1, conn2)
+
+      {:playing, view} = Games.player_view(game_id, alice.id)
+      [one, two] = Enum.map([1, 2], fn n -> Enum.find(view.areas, &(&1.number == n)).name end)
+
+      render_hook(alice_view, "tap_area", %{"area" => "1"})
+      assert has_element?(alice_view, ~s(#world-map[data-selected="1"]))
+      assert has_element?(alice_view, ~s(.world-map-token--selected[data-area="1"]))
+      assert has_element?(alice_view, "#order-panel", "#{one} · place armies")
+
+      render_hook(alice_view, "tap_area", %{"area" => "2"})
+      assert has_element?(alice_view, "#order-panel", "#{one} → #{two} · attack")
+    end
+
+    test "on a phone the strip's map and replay controls sit behind one ⋯ button",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(
+               alice_view,
+               ~s(#hud-more-toggle[aria-controls="hud-more"][aria-expanded="false"])
+             )
+
+      assert has_element?(alice_view, "#hud-more #map-fit")
+      assert has_element?(alice_view, "#hud-more #turn-replay-controls")
+      assert has_element?(alice_view, "#hud-more #lens-cycle")
+    end
+
     test "the turn pill and the drawer show the army total, what's left to place, and next turn's income",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
