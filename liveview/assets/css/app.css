@@ -333,15 +333,6 @@
   pointer-events: none;
 }
 
-.world-map-outlines {
-  fill: none;
-  stroke: var(--map-ink);
-  stroke-opacity: 0.6;
-  stroke-width: 1.6;
-  stroke-linejoin: round;
-  pointer-events: none;
-}
-
 .world-map-territory {
   outline: none;
 }
@@ -358,7 +349,7 @@
 .world-map-area {
   fill: var(--map-owner-fill, var(--map-owner-0));
   stroke: var(--map-ink);
-  stroke-opacity: 0.45;
+  stroke-opacity: 0.38;
   stroke-width: 0.8;
   stroke-linejoin: round;
   transition:
@@ -368,7 +359,6 @@
 
 .world-map-territory[data-fog] .world-map-area {
   fill: url(#gc-fog);
-  stroke-opacity: 0.25;
 }
 
 /* :frontier lens: interior areas keep the true owner fill, just
