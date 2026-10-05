@@ -1,6 +1,6 @@
 defmodule GlobalCombatWeb.GameLiveTest do
   @moduledoc """
-  Proves GIF-30's "done when": two browser sessions in one game see a turn resolve
+  Proves the live game page's core contract: two browser sessions in one game see a turn resolve
   live on both (`GameHub.Refresh`'s `:reload` equivalent), plus one test per
   remaining SignalR event equivalent (`addMessage`, `setDone`, `receiveMessage`,
   `sendNotification`), plus a fog-of-war leak regression at the rendered-HTML level
@@ -215,7 +215,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
-  test "the lobby renders a just-joined player without crashing (GIF-94 regression)", %{
+  test "the lobby renders a just-joined player without crashing (regression)", %{
     conn: conn
   } do
     alice = account_fixture(%{"name" => "Alice"})
@@ -229,7 +229,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert html =~ "Waiting for players"
   end
 
-  test "the board keeps the site chrome (header + left nav) visible during play (GIF-102)",
+  test "the board keeps the site chrome (header + left nav) visible during play",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -262,7 +262,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     refute has_element?(view, "#lobby h1")
   end
 
-  test "the lobby (pre-Start-Game) also keeps the site chrome visible (GIF-102)", %{conn: conn} do
+  test "the lobby (pre-Start-Game) also keeps the site chrome visible", %{conn: conn} do
     alice = account_fixture(%{"name" => "Alice"})
 
     game_id = Games.create_game(%{max_players: 6})
@@ -350,7 +350,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
   end
 
-  test "each territory carries an accessible name giving the area, its owner and its armies (WCAG 1.1.1, GIF-79)",
+  test "each territory carries an accessible name giving the area, its owner and its armies (WCAG 1.1.1)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
 
@@ -370,7 +370,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
            )
   end
 
-  test "the status strip and chat log are wired as polite live regions (WCAG 4.1.3, GIF-80)",
+  test "the status strip and chat log are wired as polite live regions (WCAG 4.1.3)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -380,12 +380,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # :status carries turn-advance/game-ended announcements (the :reload broadcast);
     # the chat <ul> carries :add_message. Both are "polite" (not "assertive") so a
     # screen reader finishes the player's current sentence before interrupting —
-    # per GIF-80's fix direction, mid-input chat/turn updates shouldn't cut in.
+    # mid-input chat/turn updates shouldn't cut in.
     assert html =~ ~r/aria-label="Game status"[^>]*aria-live="polite"/
     assert html =~ ~r/<ul aria-live="polite"/
   end
 
-  test "the game board carries a focus-management hook targeting a focusable status landmark (WCAG 2.4.3, GIF-82)",
+  test "the game board carries a focus-management hook targeting a focusable status landmark (WCAG 2.4.3)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -425,11 +425,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
            )
 
     # ColocatedHook rewrites ".Fullscreen" to the fully-qualified manifest key
-    # at compile time (see the FocusManager test above for why the literal
-    # ".Fullscreen" name would never match rendered output).
+    # of the module that defines it (`GameLive.StatusBar`) at compile time (see
+    # the FocusManager test above for why the literal ".Fullscreen" name would
+    # never match rendered output).
     assert has_element?(
              alice_view,
-             ~s(#fullscreen-toggle[phx-hook="GlobalCombatWeb.GameLive.Fullscreen"])
+             ~s(#fullscreen-toggle[phx-hook="GlobalCombatWeb.GameLive.StatusBar.Fullscreen"])
            )
   end
 
@@ -451,7 +452,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
            )
   end
 
-  test "the board has a visually-hidden table equivalent listing territory, owner, armies, and adjacency (WCAG 1.3.1, GIF-81)",
+  test "the board has a visually-hidden table equivalent listing territory, owner, armies, and adjacency (WCAG 1.3.1)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
 
@@ -463,7 +464,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert owned_by_alice
 
     # `sr-only` lives on the wrapping `<div>`, not the `<table>` itself — see
-    # `board_table/1`'s comment for why (a table's auto layout algorithm
+    # `GameLive.Board`'s `board_table/1` comment for why (a table's auto layout algorithm
     # ignores an explicit width smaller than its min-content width, so
     # `sr-only` directly on `<table>` still pushed the document's
     # scrollWidth) — and the real-browser verification that backs it.
@@ -476,7 +477,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert has_element?(alice_view, "table td", neighbor_name)
   end
 
-  test "army-count overlays carry a dark outline independent of the owner colour (WCAG 1.4.3, GIF-83)",
+  test "army-count overlays carry a dark outline independent of the owner colour (WCAG 1.4.3)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -487,12 +488,12 @@ defmodule GlobalCombatWeb.GameLiveTest do
     # contract is visible in the rendered markup, background-independent by
     # construction; the stroke/fill colours come from `.world-map-count` in
     # app.css. The counts live in a pointer-events-free layer above the
-    # territories (GIF-111), so clicking the digits still selects the territory
-    # underneath.
+    # territories, so clicking the digits still selects the territory
+    # underneath (click-to-select ordering).
     assert has_element?(alice_view, ~s(text.world-map-count[paint-order="stroke"]))
   end
 
-  test "the board shows a Region Bonuses panel listing every continent's control bonus (GIF-103)",
+  test "the board shows a Region Bonuses panel listing every continent's control bonus",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
     %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
@@ -544,7 +545,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     refute has_element?(alice_view, "figure #region-bonuses")
   end
 
-  describe "territory click-to-order composition (GIF-111)" do
+  describe "territory click-to-order composition" do
     # `start_two_player_game/2` deals :original's 42 areas round-robin over 2 players
     # (`Games.Server.deal_areas/2`): Alice (player 1) gets every odd area, Bob (player
     # 2) every even one. Area 1 links to [2, 3, 37] (`MapInfo.areas(:original)`), so
@@ -1654,10 +1655,10 @@ defmodule GlobalCombatWeb.GameLiveTest do
       refute has_element?(alice_view, "#{territory}[data-owner]")
       assert has_element?(alice_view, "#{territory}[data-fog]")
 
-      # Same leak, via the accessible name (GIF-79): a hidden area's owner name must
+      # Same leak, via the accessible name (WCAG 1.1.1): a hidden area's owner name must
       # never reach a non-owner's markup either, even though the plain-text owner
       # name is a much easier thing to accidentally source from unfiltered state
-      # than a colour slot is. GIF-121: a fogged area no longer reuses the
+      # than a colour slot is. And a fogged area no longer reuses the
       # neutral/unclaimed "unclaimed" wording — it gets its own distinct "hidden by
       # fog of war" treatment so it can't be mistaken for a genuinely-unclaimed tile.
       true_owner_name = Enum.find(alice_state.players, &(&1.number == true_owner)).name
@@ -1677,7 +1678,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
                ~s(#{territory}[aria-label="#{hidden_area.name}, hidden by fog of war"])
              )
 
-      # Same leak, via the sr-only board table (GIF-81): the hidden area's row must
+      # Same leak, via the sr-only board table (WCAG 1.3.1): the hidden area's row must
       # report "hidden by fog of war", never the true owner's name/army count nor
       # the "unclaimed" wording a genuinely-unowned area gets — the table is built
       # from the same fog-filtered PlayerView data as the sprite/alt text, so it
@@ -1690,7 +1691,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert owner_cell == "hidden by fog of war"
     end
 
-    test "a fogged area's tile is visually distinct from a genuinely-unclaimed one (GIF-121)",
+    test "a fogged area's tile is visually distinct from a genuinely-unclaimed one",
          %{conn: conn1} do
       map_name = :original
       {player_count, hidden_area_number, _true_owner} = scenario_with_a_hidden_area(map_name)
@@ -1754,7 +1755,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
     end
   end
 
-  describe "Invite/Quit/Kick (GIF-114)" do
+  describe "lobby Invite/Quit/Kick" do
     test "the lobby's actions and invite form carry stable ids", %{conn: conn} do
       alice = account_fixture(%{"name" => "Alice"})
       bob = account_fixture(%{"name" => "Bob"})
@@ -1823,7 +1824,7 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(view, "#flash-error", ~s(No account found for "no-such-account".))
     end
 
-    test "an invited account can join a private game; a stranger is refused (GIF-93 gap this closes)" do
+    test "an invited account can join a private game; a stranger is refused" do
       conn2 = Phoenix.ConnTest.build_conn()
       conn3 = Phoenix.ConnTest.build_conn()
 
@@ -2081,12 +2082,13 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "button", "Turn 1 results ▶")
       assert has_element?(alice_view, "#turn-results", "Turn 1 results")
 
-      # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name at
+      # ColocatedHook rewrites `.TurnReplay` to its fully-qualified manifest name
+      # (qualified by `GameLive.TurnResults`, the module that defines it) at
       # compile time, same as `.FocusManager` (see the focus-management test above) —
       # asserting the literal dot-name here would never match the real output.
       assert has_element?(
                alice_view,
-               ~s(#turn-replay-controls[phx-hook="GlobalCombatWeb.GameLive.TurnReplay"])
+               ~s(#turn-replay-controls[phx-hook="GlobalCombatWeb.GameLive.TurnResults.TurnReplay"])
              )
 
       # This game isn't fogged (`is_fogged: false` default) — Bob's own results

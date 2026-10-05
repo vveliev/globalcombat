@@ -36,9 +36,9 @@ defmodule GlobalCombat.Repo.Migrations.CreateTourneys do
 
     # `tourneygame` (docs/schema-map.md §3.12). `game_size` is a deliberate addition beyond the
     # legacy 7 columns: the original app got a bracket round's per-game player count from the
-    # live in-memory `TourneyRound`/`Game.MaxPlayers` (the latter inside the GIF-25 blob), which
+    # live in-memory `TourneyRound`/`Game.MaxPlayers` (the latter inside the serialized game blob), which
     # this port doesn't have -- BuildRounds already computes it per round, so it's persisted
-    # here instead of re-derived, bridging the gap until full game persistence (GIF-30) lands.
+    # here instead of re-derived, bridging the gap until full game persistence lands.
     create table(:tourneygame) do
       add :tourney_id, references(:tourney, on_delete: :delete_all), null: false
       add :game_id, references(:games, on_delete: :delete_all), null: false

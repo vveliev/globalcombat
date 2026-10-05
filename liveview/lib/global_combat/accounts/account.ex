@@ -4,7 +4,7 @@ defmodule GlobalCombat.Accounts.Account do
 
   alias GlobalCombat.Accounts.Password
 
-  # Value/mapping decisions: docs/schema-map.md §2.3, §2.4, §3.1 (GIF-26/GIF-29). `status` and
+  # Value/mapping decisions: docs/schema-map.md §2.3, §2.4, §3.1 and ADR-0002. `status` and
   # `forward_emails` preserve the exact legacy strings (including the `Comissioned` typo) since
   # those are the literal values already on disk in the source app; see the schema-map for why.
   @statuses [
@@ -111,9 +111,9 @@ defmodule GlobalCombat.Accounts.Account do
   @doc """
   Ports `Account.Rank` (`Web/Models/Account.cs:36-52`) — the rank ladder is purely a function
   of `rating`, so this must match the C# thresholds exactly for Stats/PlayerInfo/Index to show
-  the same rank as the legacy site for any given rating (GIF-33's "Elo figures must match"
+  the same rank as the legacy site for any given rating (the port's "Elo figures must match"
   bar). Boundary values are cross-checked against an independently-written reimplementation in
-  `GlobalCombat.AccountTest` (differential-harness style, per GIF-28's precedent), not just
+  `GlobalCombat.AccountTest` (differential-harness style, per the engine port's precedent), not just
   eyeballed against this function.
   """
   def rank(%__MODULE__{rating: rating}), do: rank(rating)

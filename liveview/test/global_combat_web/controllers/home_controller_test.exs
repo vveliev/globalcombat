@@ -26,7 +26,7 @@ defmodule GlobalCombatWeb.HomeControllerTest do
       assert body =~ "Your Current Games"
     end
 
-    test "the logged-in viewer counts as online without a live chat connection (GIF-75)", %{
+    test "the logged-in viewer counts as online without a live chat connection", %{
       conn: conn
     } do
       account = account_fixture()
@@ -128,7 +128,7 @@ defmodule GlobalCombatWeb.HomeControllerTest do
       assert Accounts.get_account(target.id) != nil
     end
 
-    test "the contact form's Message textarea has a real label (WCAG 3.3.2, GIF-88)", %{
+    test "the contact form's Message textarea has a real label (WCAG 3.3.2)", %{
       conn: conn
     } do
       viewer = account_fixture()
@@ -199,7 +199,7 @@ defmodule GlobalCombatWeb.HomeControllerTest do
     end
   end
 
-  describe "heading structure (WCAG 1.3.1/2.4.6, GIF-86)" do
+  describe "heading structure (WCAG 1.3.1/2.4.6)" do
     # Card's :header used to render as a plain styled <div> — these surfaces had zero
     # real headings for a screen-reader user to navigate by. Every page under
     # SiteChrome now carries exactly one <h1> (the page title, sr-only — the legacy

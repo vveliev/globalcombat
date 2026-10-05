@@ -42,8 +42,8 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   (the selected area, else the first) and the arrow keys moving focus to the
   nearest territory in that direction. The army-count text is decorative
   (`aria-hidden`, the label already says it) and gets a dark stroke under a light fill via `paint-order: stroke`
-  so it stays legible on every owner colour (GIF-83). `GameLive.board_table/1`
-  remains the tabular equivalent for screen readers (GIF-81); it and the labels
+  so it stays legible on every owner colour. `GameLive.Board.board_table/1`
+  remains the tabular equivalent for screen readers; it and the labels
   here share `owner_text/2` so the two can never word an owner differently.
 
   Last-turn replay: the board renders every replay arrow, capture pulse and
@@ -105,7 +105,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   How an area's owner is worded everywhere a player reads it (territory labels,
   the sr-only board table's Owner cell verbatim; `owner_phrase/2` is the same
   wording as a label clause). A fog-hidden area is neither "owned by <player>"
-  nor "unclaimed" (GIF-121) — collapsing the two would make a fogged enemy tile
+  nor "unclaimed" — collapsing the two would make a fogged enemy tile
   indistinguishable from a real unowned one for a screen reader user.
   `owner_names` is `%{player_number => name}`.
   """
@@ -826,7 +826,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
           },
 
           // On a phone the order panel for a transfer/attack floats beside its
-          // arrow instead of sitting in the dock: `GameLive` puts the arrow's
+          // arrow instead of sitting in the dock: `GameLive.Dock` puts the arrow's
           // midpoint (board units) in the card's `data-anchor`, and this turns
           // it into screen pixels, below the arrow when there is room and
           // above it when not. The position goes out as custom properties on
@@ -2115,7 +2115,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
   @doc """
   The board point (`"x,y"`) at the middle of the arrow an order from area
-  `from` to area `to` draws — where `GameLive`'s order panel anchors itself on
+  `from` to area `to` draws — where `GameLive.Dock`'s order panel anchors itself on
   a phone.
   """
   def order_anchor(map_name, from, to) do
@@ -2140,7 +2140,7 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
 
   # Fog-hidden areas get no owner slot at all (`data-owner` is omitted) — the fog
   # hatch is styled off `data-fog`, never off a neutral "0" that would be
-  # indistinguishable from a genuinely unclaimed territory (GIF-121).
+  # indistinguishable from a genuinely unclaimed territory.
   defp territory_label(%{visible: false} = area, owner_names),
     do: "#{area.name}, #{owner_phrase(area, owner_names)}"
 

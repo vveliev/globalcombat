@@ -1,12 +1,12 @@
 defmodule GlobalCombatWeb.HomeController do
   @moduledoc """
-  The home, stats, messaging and chat surfaces (GIF-33) — ports
+  The home, stats, messaging and chat surfaces — ports
   `Web/Controllers/HomeController.cs` (314 lines) and its views (`Home/Index`, `Stats`,
   `Messages`, `PlayerInfo`, `IpAddresses`, `OptOut`, `GameManual`).
 
   Chat (`Chat`/`LoadChatMessages`/`CloseChatWindow`/`SendMessage`) is pushed over
   `GlobalCombatWeb.ChatChannel` — see its moduledoc for the `"chat:<account_id>"` PubSub
-  convention this establishes for the game board (GIF-30) to share.
+  convention this establishes for the game board to share.
 
   Two deliberate deviations from the legacy behavior, both security-motivated (not silently
   dropped — see `docs/schema-map.md`'s own precedent of flagging rather than hiding issues):

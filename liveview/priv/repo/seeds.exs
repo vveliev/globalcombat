@@ -2,7 +2,7 @@
 #
 #     mix run priv/repo/seeds.exs
 #
-# GIF-29: seeds a handful of `account` rows in the legacy password shapes ADR-0002 describes,
+# Seeds a handful of `account` rows in the legacy password shapes ADR-0002 describes,
 # so `authenticate_account/2`'s three-way match (bcrypt-of-old-hash-format / legacy SHA-512 /
 # plaintext) can be exercised against a real database, not just fixtures inlined in tests.
 

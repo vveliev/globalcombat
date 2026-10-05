@@ -26,7 +26,7 @@ defmodule GlobalCombatWeb.Components.Boutique.CardTest do
     assert html =~ "shadow-md"
   end
 
-  test "renders :header as a real heading element, not a styled div (WCAG 1.3.1/2.4.6, GIF-86)" do
+  test "renders :header as a real heading element, not a styled div (WCAG 1.3.1/2.4.6)" do
     assigns = %{}
 
     html =

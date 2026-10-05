@@ -1,11 +1,11 @@
 defmodule GlobalCombat.Stats do
   @moduledoc """
-  Admin dashboard aggregates for `HomeController.stats` (GIF-33) — ports the scalar counts and
+  Admin dashboard aggregates for `HomeController.stats` — ports the scalar counts and
   daily series inlined in `Web/Controllers/HomeController.cs:Stats()` (lines 214-269).
 
   Read-only: the legacy page's `?ForceAll=1` link force-checks every running game for a stalled
   end-condition and mutates them (`GameServer.GetGame`/`ForceEndCheck`/`ForceEnd`/`SaveGame`) —
-  that's live-game mutation, squarely the game board's territory (GIF-30), so this port drops
+  that's live-game mutation, squarely the game board's territory, so this port drops
   the maintenance action and keeps the dashboard purely informational.
   """
 

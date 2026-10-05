@@ -1,4 +1,4 @@
-// Player-to-player chat (GIF-33) — the Phoenix Channel + fetch() replacement for
+// Player-to-player chat — the Phoenix Channel + fetch() replacement for
 // `Web/wwwroot/Global.js`'s jQuery/SignalR chat client. Floating chat windows, the
 // `/Home/Chat` / `/Home/LoadChatMessages` / `/Home/CloseChatWindow` endpoints, and the
 // `"chat:<account id>"` push topic all mirror the legacy behavior (see

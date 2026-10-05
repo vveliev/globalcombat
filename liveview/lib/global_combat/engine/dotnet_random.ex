@@ -7,8 +7,8 @@ defmodule GlobalCombat.Engine.DotnetRandom do
   the *unseeded* algorithm in .NET 6+, and explicitly kept this one for
   seeded reproducibility).
 
-  `GlobalCombat.Core.Game.Rng` (`GlobalCombat.Core/Game.cs:160`, added for
-  GIF-55) is exactly this constructor. The differential harness (GIF-28)
+  `GlobalCombat.Core.Game.Rng` (`GlobalCombat.Core/Game.cs:160`) is exactly
+  this constructor. The differential harness
   depends on this module producing the identical draw sequence the .NET
   engine produces for the same seed — see `differential-harness` skill,
   "RNG determinism and seeding": same seed only means same sequence if it's

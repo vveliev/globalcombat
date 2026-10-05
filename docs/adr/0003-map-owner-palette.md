@@ -46,7 +46,7 @@ elsewhere in the system.
 - Themes can restyle the sea and fog per mode, and could re-alias the owner slots
   per brand if a brand ever needed it, without touching the component.
 - Contrast is not the palette's job: army counts sit on a dark stroke under a light
-  fill (`paint-order: stroke`, GIF-83), so any owner colour stays legible and the
+  fill (`paint-order: stroke`), so any owner colour stays legible and the
   palette can change without a contrast re-audit. Territory fills are not text.
 - The `dark` Tailwind custom variant in `app.css` used to match the bare
   `[data-theme=dark]`, which the `<brand>-<mode>` theme names never satisfy; it now

@@ -5,7 +5,7 @@ defmodule GlobalCombat.Engine.GameTest do
   alias GlobalCombat.Engine.Game.{Area, Player}
 
   # Every expected value below was captured by actually resolving the equivalent turn against
-  # the live .NET GrpcHost oracle (GIF-28's differential harness), not derived from reading
+  # the live .NET GrpcHost oracle (the differential harness), not derived from reading
   # Game.cs and guessing — see the differential-harness skill's "the oracle is truth" rule.
 
   describe "do_attack/2" do
@@ -40,7 +40,7 @@ defmodule GlobalCombat.Engine.GameTest do
       assert Game.area!(resolved, 2).owner_number == 2
     end
 
-    # Regression for the GIF-28 ReverseAttackOrder divergence: Game.cs only clamps (and only
+    # Regression for the harness-found ReverseAttackOrder divergence: Game.cs only clamps (and only
     # possibly early-returns) when Amount *exceeds* Armies - 1. An order with Amount already at
     # or below that bound — including Amount == 0, a "no-op" order in AI-generated games — falls
     # through unchanged: the attack-roll loop then runs zero times, but the *defend*-roll loop
@@ -115,7 +115,7 @@ defmodule GlobalCombat.Engine.GameTest do
     end
   end
 
-  describe "clear_assigned/2 (GIF-111, port of Game.ClearAssigned)" do
+  describe "clear_assigned/2 (port of Game.ClearAssigned)" do
     test "returns the area's pending armies to the owner's unassigned pool and zeroes the area" do
       game = %Game{
         areas: %{1 => %Area{number: 1, owner_number: 1, armies: 10, assigned_armies: 4}},

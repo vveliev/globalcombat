@@ -25,10 +25,10 @@ defmodule GlobalCombatWeb.Router do
     get "/", HomeController, :index
 
     # Bootstrap smoke page for the vendored design-boutique layer. Remove when
-    # the real board LiveView lands (GIF-30).
+    # the real board LiveView lands.
     live "/design", DesignSmokeLive
 
-    # --- Legacy globalcombat.com URL scheme (live since 2001-01-22) — GIF-31 ---
+    # --- Legacy globalcombat.com URL scheme (live since 2001-01-22) ---
     # Mirrors the explicit MapControllerRoute calls in Web/Program.cs so 25
     # years of inbound links, bookmarks and search results keep resolving.
     # Do not "clean up" these paths into e.g. /games/:id — if new canonical
@@ -48,9 +48,9 @@ defmodule GlobalCombatWeb.Router do
     # None of these carried an `[HttpPost]` attribute in the .NET app (only the
     # OptOut *confirmation* did), so ASP.NET's conventional routing accepted
     # either verb — but `Web/wwwroot/Global.js` only ever issues `$.post(...)`
-    # for Chat/LoadChatMessages/CloseChatWindow/SendMessage (GIF-33 research).
-    # Both verbs are kept here for the shortcut paths (URL-shape fidelity,
-    # GIF-31); the `/Home/...` paths the JS actually calls are POST-only below.
+    # for Chat/LoadChatMessages/CloseChatWindow/SendMessage.
+    # Both verbs are kept here for the shortcut paths (URL-shape fidelity);
+    # the `/Home/...` paths the JS actually calls are POST-only below.
     get "/Messages", HomeController, :messages
     get "/Stats", HomeController, :stats
     get "/IpAddresses", HomeController, :ip_addresses
@@ -79,7 +79,7 @@ defmodule GlobalCombatWeb.Router do
     get "/Home/Index", HomeController, :index
 
     # `/Home/{Action}` — the exact paths `Web/wwwroot/Global.js`'s jQuery AJAX
-    # calls POST to (`$.post("/Home/Chat", ...)` etc., GIF-33 research), distinct
+    # calls POST to (`$.post("/Home/Chat", ...)` etc.), distinct
     # from the bare `/{Action}` shortcut set above.
     post "/Home/Chat", HomeController, :chat
     post "/Home/LoadChatMessages", HomeController, :load_chat_messages
@@ -92,7 +92,7 @@ defmodule GlobalCombatWeb.Router do
     get "/Tournament-:id/Join", TourneyController, :join
     get "/Tournament-:id/Quit", TourneyController, :quit
 
-    # The game board (GIF-30): SignalR + server-rendered HTML replaced by a LiveView
+    # The game board: SignalR + server-rendered HTML replaced by a LiveView
     # driven over GlobalCombat.Games.PubSub. `on_mount` resolves `:current_account`
     # from the session the same way the `:browser` pipeline's `fetch_current_account`
     # does for controllers (see `GlobalCombatWeb.UserAuth.on_mount/4`).
@@ -102,7 +102,7 @@ defmodule GlobalCombatWeb.Router do
     end
   end
 
-  # Account surface (GIF-29): register / log on / log off / password reset / settings.
+  # Account surface: register / log on / log off / password reset / settings.
   # Ports Web/Controllers/AccountController.cs and its views.
   scope "/account", GlobalCombatWeb do
     pipe_through [:browser, :redirect_if_account_is_authenticated]
@@ -131,14 +131,14 @@ defmodule GlobalCombatWeb.Router do
     post "/contact", AccountContactController, :create
   end
 
-  # --- Legacy globalcombat.com URL scheme for the Account controller (GIF-31
-  # follow-up, filed as GIF-78) ---
+  # --- Legacy globalcombat.com URL scheme for the Account controller (a
+  # follow-up to the main legacy-route port) ---
   # ASP.NET's default route (`{controller=Home}/{action=Index}/{id?}`) put
   # AccountController's actions at PascalCase, no-slash-after-Account paths
   # like `/Account/Register` and `/Account/LogOn` (see
   # `Web/Controllers/AccountController.cs` and the anchors/forms in
   # `Web/Views/Shared/_DefaultMenu.cshtml` and `Web/Views/Account/*.cshtml`).
-  # GIF-31's audit of legacy paths never covered this controller, so these
+  # The original audit of legacy paths never covered this controller, so these
   # never got aliases. `LostPassword` is the legacy name for what's now
   # reset-password (`AccountController.LostPassword` called `ResetPassword`).
   # Do not "clean up" these paths — if canonical paths are ever restructured,

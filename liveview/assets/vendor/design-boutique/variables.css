@@ -818,7 +818,7 @@
   --color-text-muted: var(--zinc-4);
   --color-border: var(--zinc-7);
   --color-primary-contrast: var(--zinc-9);
-  /* GIF-89: red-4 measures ~3.82:1 against --zinc-8 here, below the AA 4.5:1
+  /* red-4 measures ~3.82:1 against --zinc-8 here, below the AA 4.5:1
      floor for text. red-3 clears it (~4.87:1). Local override — red-4 comes
      from upstream vveliev/design-boutique tokens/themes/industry-dark.json,
      which this repo can't push to; reconcile there and drop this override

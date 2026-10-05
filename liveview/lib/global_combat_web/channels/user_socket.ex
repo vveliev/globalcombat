@@ -1,6 +1,6 @@
 defmodule GlobalCombatWeb.UserSocket do
   @moduledoc """
-  Transport for the chat channel (GIF-33) — the Phoenix Channel analogue of the legacy
+  Transport for the chat channel — the Phoenix Channel analogue of the legacy
   `GameHub` SignalR connection (`Web/wwwroot/Global.js`'s `new signalR.HubConnectionBuilder()`).
 
   Auth mirrors the classic Phoenix-channel pattern rather than reading the Plug session

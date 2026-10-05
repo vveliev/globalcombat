@@ -16,11 +16,11 @@ defmodule GlobalCombat.Games.ServerTest do
   alias GlobalCombat.GrpcHost
   alias GlobalCombat.Tourneys
 
-  describe "GIF-116: engine.ended wires into Tourneys.finish_game/2" do
+  describe "engine.ended wires into Tourneys.finish_game/2" do
     test "a tourney game ending through the live Server advances the winner into the next round" do
       {:ok, tourney} =
         Tourneys.create_tourney(%{
-          "name" => "GIF-116 Cup #{System.unique_integer([:positive])}",
+          "name" => "Finish Game Cup #{System.unique_integer([:positive])}",
           "initial_games" => 2,
           "game_size" => 2,
           "winners" => 1,
@@ -44,7 +44,7 @@ defmodule GlobalCombat.Games.ServerTest do
         loser_account_id: loser.account_id
       )
 
-      # Confirmed live on a real bracket (GIF-116): before this fix, nothing outside tests
+      # Confirmed live on a real bracket: before this fix, nothing outside tests
       # ever called Tourneys.finish_game/2, so a finished round-1 game left round 2 sitting at
       # `:new` with zero seated game_players forever. `run_turn/2`'s `engine.ended` branch now
       # calls it, so the winner should already be seated once the turn that ends the game
@@ -62,7 +62,7 @@ defmodule GlobalCombat.Games.ServerTest do
   end
 
   # Rigs a 2-player engine one turn away from ending (the loser already at 0 areas) inside the
-  # `Games.Server` the tourney bracket seeding (GIF-115) already started for `game_id` — a real
+  # `Games.Server` the tourney bracket seeding already started for `game_id` — a real
   # fought-out game would exercise the same `run_turn/2` `engine.ended` branch, just via many
   # more turns of combat RNG this doesn't need to reproduce to prove the bracket-advancement
   # wiring itself.
@@ -108,7 +108,7 @@ defmodule GlobalCombat.Games.ServerTest do
     assert view.turn == 4
   end
 
-  describe "training mode: the Computer opponent takes its turn on its own (GIF-104)" do
+  describe "training mode: the Computer opponent takes its turn on its own" do
     test "the Computer seat is Done the instant its turn starts, never left Thinking forever" do
       game_id =
         Games.create_game(%{map_name: :original, is_training: true, minimum_armies: 3})
@@ -209,7 +209,7 @@ defmodule GlobalCombat.Games.ServerTest do
   # transfer, area 1 <-> area 2 is an owned-vs-enemy adjacent pair for attack, and
   # area 1 <-> area 4 is an owned-vs-enemy *non-adjacent* pair for the fog/adjacency
   # no-op cases below.
-  describe "order setters — assign/unassign/transfer/attack (GIF-111)" do
+  describe "order setters — assign/unassign/transfer/attack" do
     defp start_two_player_original(opts \\ %{}) do
       game_id =
         Games.create_game(Map.merge(%{map_name: :original, max_players: 2}, opts))
@@ -331,7 +331,7 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
-  describe "rehydrate_from: — boot-time reconstruction (GIF-74)" do
+  describe "rehydrate_from: — boot-time reconstruction" do
     test "starts straight into :playing with the persisted engine state, not an empty lobby" do
       game_id = System.unique_integer([:positive])
       serialized = serialized_engine(turn: 5)
@@ -373,7 +373,7 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
-  describe "new_engine/1 — initial reinforcement bonus (GIF-105)" do
+  describe "new_engine/1 — initial reinforcement bonus" do
     test "a fresh turn-1 engine folds the unplaced reinforcement pool into Player.armies, matching .NET's Start()" do
       state = %Server{
         map_name: :original,
@@ -427,7 +427,7 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
-  describe "game completion persists wins/games/rating to account (GIF-120)" do
+  describe "game completion persists wins/games/rating to account" do
     test "ending a non-training game updates the winner's wins/games and both players' rating, matching GameServer.OnEnd" do
       winner_account = account_fixture()
       loser_account = account_fixture()
@@ -508,7 +508,7 @@ defmodule GlobalCombat.Games.ServerTest do
     end
   end
 
-  describe "on-demand rehydration of a :finished game whose Server has died (GIF-124)" do
+  describe "on-demand rehydration of a :finished game whose Server has died" do
     test "ensure_started/1 rehydrates from games.serialized instead of reporting :not_found, and the read-only view still shows the final board" do
       winner_account = account_fixture()
       loser_account = account_fixture()
@@ -531,7 +531,7 @@ defmodule GlobalCombat.Games.ServerTest do
       )
 
       # Resolving this turn eliminates player 2 and, with only one player then left alive,
-      # ends the game in the same turn — same fixture the GIF-120 tests above use.
+      # ends the game in the same turn — same fixture the game-completion tests above use.
       assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
       assert %{status: :finished} = GamesDb.get_game!(game.id)
 

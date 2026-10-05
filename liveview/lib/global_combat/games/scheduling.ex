@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Games.Scheduling do
   @moduledoc """
-  DB-level query + atomic claim primitives for GIF-68's turn scheduler.
+  DB-level query + atomic claim primitives for the turn scheduler.
 
   `GlobalCombat.Games.TurnScheduler` is a supervised GenServer that periodically sweeps for
   games due for a turn and needs a double-resolve guard that survives a node restart. Since a

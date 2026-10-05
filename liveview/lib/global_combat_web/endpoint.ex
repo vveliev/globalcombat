@@ -15,7 +15,7 @@ defmodule GlobalCombatWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
-  # Chat push (GIF-33) — see `GlobalCombatWeb.UserSocket`'s moduledoc for the auth design.
+  # Chat push — see `GlobalCombatWeb.UserSocket`'s moduledoc for the auth design.
   socket "/socket", GlobalCombatWeb.UserSocket, websocket: true
 
   # Serve at "/" the static files from "priv/static" directory.

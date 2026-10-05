@@ -1,14 +1,14 @@
 defmodule GlobalCombat.Games.Live do
   @moduledoc """
-  Public API for live games (GIF-30). `GameLive` and `GameCreateLive` talk to games
+  Public API for live games. `GameLive` and `GameCreateLive` talk to games
   exclusively through this module — never to `GlobalCombat.Games.Server` or
   `GlobalCombat.Engine.Game` directly — so the fog-of-war filtering boundary in
   `GlobalCombat.Games.PlayerView` can't be bypassed by a shortcut call from the web layer.
 
   Named `Games.Live` rather than `Games` because `GlobalCombat.Games` is already the
-  MySQL-backed persistence/listing facade for the `games`/`game_players` tables (GIF-32/33).
+  MySQL-backed persistence/listing facade for the `games`/`game_players` tables.
 
-  As of GIF-74, `create_game/1` creates its `games` row here (a real `games.id`, not a bare
+  `create_game/1` creates its `games` row here (a real `games.id`, not a bare
   `System.unique_integer/1`) and starts `GlobalCombat.Games.Server` against that same id, so a
   `GlobalCombat.Games.TurnScheduler` claim and this in-memory process refer to the same game —
   see `GlobalCombat.Games.LiveResolver`'s moduledoc for the other half (the scheduler handing a
@@ -67,14 +67,14 @@ defmodule GlobalCombat.Games.Live do
 
   @doc """
   Whether `game_id` has a valid game to attach to — either already live, or rehydratable
-  on-demand from `games.serialized` if its `Server` process isn't currently alive (GIF-119).
+  on-demand from `games.serialized` if its `Server` process isn't currently alive.
   """
   def game_exists?(game_id), do: GamesSupervisor.ensure_started(game_id) == :ok
 
   @doc "Port of `GameController.Join` + `Game.Join`/`GameServer.PlayerJoined`."
   def join(game_id, account_id, name), do: with_game(game_id, &Server.join(&1, account_id, name))
 
-  @doc "Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited` (GIF-114)."
+  @doc "Port of `GameController.Invite` + `Game.Invites`/`GameServer.PlayerInvited`."
   def invite(game_id, account_id, login),
     do: with_game(game_id, &Server.invite(&1, account_id, login))
 
@@ -85,10 +85,10 @@ defmodule GlobalCombat.Games.Live do
   def invite_many(game_id, account_id, logins),
     do: with_game(game_id, &Server.invite_many(&1, account_id, logins))
 
-  @doc "Port of `GameController.Quit` + `Game.Unjoin`/`Game.EliminatePlayer` (GIF-114)."
+  @doc "Port of `GameController.Quit` + `Game.Unjoin`/`Game.EliminatePlayer`."
   def quit(game_id, account_id), do: with_game(game_id, &Server.quit(&1, account_id))
 
-  @doc "Port of `GameController.Kick` + `Game.Unjoin` (GIF-114)."
+  @doc "Port of `GameController.Kick` + `Game.Unjoin`."
   def kick(game_id, account_id, player_number),
     do: with_game(game_id, &Server.kick(&1, account_id, player_number))
 
@@ -98,7 +98,7 @@ defmodule GlobalCombat.Games.Live do
   @doc """
   Starts a game once its seats are full without a designated host — port of `Game.cs`'s `Join`
   auto-start (`if (Players.Count >= MaxPlayers) Start()`), used by tourney bracket seeding
-  (GIF-115) where no single seat is the "host" authorized to call `start_game/2`.
+  where no single seat is the "host" authorized to call `start_game/2`.
   """
   def force_start(game_id), do: with_game(game_id, &Server.force_start/1)
 
@@ -150,7 +150,7 @@ defmodule GlobalCombat.Games.Live do
   @doc "Subscribes the calling process to one account's private messages/notifications."
   def subscribe_account(account_id), do: GamePubSub.subscribe_account(account_id)
 
-  # GIF-119: on-demand rehydration, not just a Registry check — a game whose `Server` process
+  # On-demand rehydration, not just a Registry check — a game whose `Server` process
   # died after boot (crash, deploy without a full node restart, a concurrent dev-server restart)
   # otherwise stays permanently "not found" even though `games.serialized` is fully valid.
   defp with_game(game_id, fun) do

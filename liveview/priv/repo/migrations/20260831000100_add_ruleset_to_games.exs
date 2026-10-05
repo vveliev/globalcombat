@@ -1,7 +1,7 @@
 defmodule GlobalCombat.Repo.Migrations.AddRulesetToGames do
   use Ecto.Migration
 
-  # GIF-112: the `games` row never persisted the ruleset a lobby was created with (map/fog/
+  # The `games` row never persisted the ruleset a lobby was created with (map/fog/
   # non-random/reverse-attack-order/minimum-armies live only in `GlobalCombat.Games.Server`'s
   # in-memory state today, mirrored into `serialized` only once a game starts). That made
   # `tourney.option_game_id` -- meant to let a tourney admin point every bracket game at an

@@ -1,7 +1,7 @@
 defmodule GlobalCombat.Games.PlayerView do
   @moduledoc """
   Builds the fog-of-war-filtered projection of a `GlobalCombat.Engine.Game` for one
-  viewer — the *only* sanctioned way game state reaches `GameLive` (GIF-30).
+  viewer — the *only* sanctioned way game state reaches `GameLive`.
 
   Port of the filtering `Web/Views/Game/Index.cshtml` does inline while rendering
   (`Model.IsFogged && !isOwner` at line 158, and the `isOwner ? areaData.AssignedArmies : 0`
@@ -168,7 +168,7 @@ defmodule GlobalCombat.Games.PlayerView do
       visible: visible?,
       owner_number: if(visible?, do: area.owner_number, else: nil),
       armies: area_armies(area, visible?, owns_it?),
-      # GIF-111: how many of `armies` above are still a pending (unresolved) assignment
+      # How many of `armies` above are still a pending (unresolved) assignment
       # this owner queued this turn, as opposed to already-resolved troops — the same
       # `assigned_armies` this area's `armies` already folds in for its owner (see
       # `area_armies/3` below), exposed separately so the order panel can offer
@@ -178,7 +178,7 @@ defmodule GlobalCombat.Games.PlayerView do
       # Map topology (which territories border which) is never secret — it's the
       # same static layout every viewer already sees rendered on the board
       # regardless of fog, unlike `owner_number`/`armies` above. Safe to expose in
-      # full for GIF-81's accessible board table.
+      # full for the accessible board table.
       adjacent: links,
       # The viewer's own queued transfer/attack, for the board's pending-orders arrow
       # overlay. `nil` for every non-owner (fog-of-war for *orders*, not just areas —

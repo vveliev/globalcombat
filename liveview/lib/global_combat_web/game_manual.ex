@@ -1,7 +1,7 @@
 defmodule GlobalCombatWeb.GameManual do
   @moduledoc """
-  The rules document players actually read (GIF-33: "carry the content across verbatim rather
-  than paraphrasing it"). `priv/game_manual.html` is `Web/Views/Home/GameManual.cshtml`'s body
+  The rules document players actually read (the port's brief: "carry the content across verbatim
+  rather than paraphrasing it"). `priv/game_manual.html` is `Web/Views/Home/GameManual.cshtml`'s body
   (everything after its Razor `@{ ViewBag.Title = ... }` header) extracted byte-for-byte with
   `sed -n '5,$p'` — not retyped — so there's no transcription risk in the rules text, the damage
   tables, or the worked Elo rating example. It's legacy-era HTML (some `<p>` tags are never

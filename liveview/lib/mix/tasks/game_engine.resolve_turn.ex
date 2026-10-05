@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.GameEngine.ResolveTurn do
   @moduledoc """
-  GIF-38 spike: creates a game and resolves one turn through the GlobalCombat
+  gRPC spike: creates a game and resolves one turn through the GlobalCombat
   gRPC host, using only the generated protobuf/gRPC client - no Ecto, no
   Endpoint, no MySQL. That's deliberate: it demonstrates that under option 4
   Phoenix does not need to touch the game-state DB column itself.

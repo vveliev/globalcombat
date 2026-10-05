@@ -25,7 +25,7 @@ defmodule GlobalCombat.Presence do
   the whole session, regardless of any live connection. Our presence tracking, by contrast, only starts
   once the browser's chat socket finishes its async `ChatChannel` join (`GlobalCombatWeb.ChatChannel`),
   which hasn't happened yet on the very first server-rendered page after login/registration — so the
-  logged-in viewer would otherwise be missing from their own "currently online" list (GIF-75). Passing
+  logged-in viewer would otherwise be missing from their own "currently online" list. Passing
   `current_account` here backfills that gap by treating the viewer as online unconditionally, same as
   the legacy session-scoped list did.
   """

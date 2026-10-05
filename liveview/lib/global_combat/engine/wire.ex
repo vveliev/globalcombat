@@ -2,7 +2,7 @@ defmodule GlobalCombat.Engine.Wire do
   @moduledoc """
   Converts between the gRPC wire structs (`GlobalCombat.GrpcHost.*`, generated
   from `proto/game_engine.proto`) and `GlobalCombat.Engine.Game`'s native
-  structs, for the differential harness (GIF-28).
+  structs, for the differential harness.
 
   Generated struct fields are the exact PascalCase `[ProtoMember]` names and
   can't be accessed with `struct.Field` dot syntax (an uppercase name after
@@ -90,8 +90,8 @@ defmodule GlobalCombat.Engine.Wire do
   Builds a wire `GlobalCombat.GrpcHost.Game` from a `GlobalCombat.Engine.Game` plus the
   `GlobalCombat.Games.Server`-only config wrapping it (`:game_id`, `:turn_length_minutes`,
   `:max_players`, `:is_fogged`) — for persisting live play state to `games.serialized` between
-  turns (GIF-74). Reuses the same wire format `GlobalCombat.Games.GameSummary` already decodes
-  for the tourney flow (GIF-33), so a `games` row's `serialized` blob means the same thing
+  turns. Reuses the same wire format `GlobalCombat.Games.GameSummary` already decodes
+  for the tourney flow, so a `games` row's `serialized` blob means the same thing
   regardless of which flow wrote it.
 
   RNG state has no wire representation (the .NET oracle owns its `System.Random` internally and
@@ -154,7 +154,7 @@ defmodule GlobalCombat.Engine.Wire do
   @doc """
   Reverse of `to_wire_game/2`: decodes a persisted wire `GlobalCombat.GrpcHost.Game` back into
   a `%{engine: %GlobalCombat.Engine.Game{}, is_fogged: boolean, max_players: integer}` — the full
-  set `GlobalCombat.Games.Server` needs to rehydrate after a process/node restart (GIF-74), not
+  set `GlobalCombat.Games.Server` needs to rehydrate after a process/node restart, not
   just the engine struct `from_wire_game/2` alone builds (that's also used by the differential
   harness, which never needs `is_fogged`/`max_players` — Server-only config, not engine state).
   """

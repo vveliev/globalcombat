@@ -1,8 +1,8 @@
 defmodule GlobalCombatWeb.GameCreateLiveTest do
   @moduledoc """
-  GIF-93: proves the Create-Game form exposes and submits all 9 legacy settings
+  Proves the Create-Game form exposes and submits all 9 legacy settings
   (`Views/Game/Create.cshtml`/`GameController.Create`), not just the 5 that shipped
-  with GIF-30 — Training Mode, Turn Timeout Length, Minimum Army Bonus, and Private
+  with the first board port — Training Mode, Turn Timeout Length, Minimum Army Bonus, and Private
   Invite Only were missing entirely.
   """
 

@@ -2,28 +2,26 @@
 
 - Status: Proposed
 - Date: 2026-08-30
-- Issue: GIF-34
 
 This is a launch plan, not a cutover plan. There is no running `.NET` site, no production
-database, and no in-flight games to preserve — see the evidence in GIF-34's description and the
-two independent re-checks in its comment thread (matching `302` redirect to
-`Bryan-Legend/globalcombat`, connection timeout on HTTPS, and a Namecheap-parking IP). Every
-decision below is written against that reality: this is a fresh deployment of the Phoenix port,
+database, and no in-flight games to preserve — the evidence was checked independently twice
+(matching `302` redirect to `Bryan-Legend/globalcombat`, connection timeout on HTTPS, and a
+Namecheap-parking IP). Every decision below is written against that reality: this is a fresh deployment of the Phoenix port,
 not a migration off something live.
 
 The app being launched: a Phoenix/LiveView web app (`liveview/`) plus a companion **`.NET` gRPC
 engine host** (`GlobalCombat.GrpcHost`) that Phoenix calls for turn resolution — this two-process
-shape was decided in `docs/adr/0001-game-state-transport-to-elixir.md` (ADR-0001, GIF-25) and is
-not renegotiated here. A single MySQL database backs both (`docs/schema-map.md`, GIF-26): 13
-tables, 126 columns, one already-scaffolded `Ecto.Repo`. As of this doc, GIF-33/28/30/32/29/31
-(surfaces, engine, board, tournaments, accounts, legacy routes) are all `done` on `main`
-(`c048b8c`), so there is a functionally complete app to plan hosting against. `GIF-68` (a
-realtime turn scheduler) is still `backlog` — it is a gameplay-timing feature, not a deployment
+shape was decided in `docs/adr/0001-game-state-transport-to-elixir.md` (ADR-0001) and is
+not renegotiated here. A single MySQL database backs both (`docs/schema-map.md`): 13
+tables, 126 columns, one already-scaffolded `Ecto.Repo`. As of this doc, the surfaces, engine,
+board, tournaments, accounts and legacy routes are all done on `main` (`c048b8c`), so there is
+a functionally complete app to plan hosting against. The realtime turn scheduler is still in the
+backlog — it is a gameplay-timing feature, not a deployment
 blocker, and is called out in Gaps below rather than treated as launch-blocking.
 
 ## 1. Domain
 
-**Already answered in GIF-34's description — cited here, not re-litigated:** `globalcombat.com`
+**Already answered when this launch was scoped — cited here, not re-litigated:** `globalcombat.com`
 is Namecheap-parked and 302s to the upstream author's GitHub repo. We do not control it. The
 README on `main` (written by the original author, Bryan Legend) confirms this is intentional on
 their end: the site was taken offline in 2026 and the repo open-sourced, with a note directing
@@ -74,7 +72,7 @@ Neither Dockerfile in the repo today is a production build:
   only ... Not the production release Dockerfile," runs `MIX_ENV=dev`, and its `CMD` runs a
   one-off mix task, not the Phoenix server.
 - `GlobalCombat.GrpcHost/Dockerfile` runs `dotnet run` from the full SDK image with no
-  publish/multi-stage step — fine for the GIF-38 spike, not a release artifact.
+  publish/multi-stage step — fine for the original gRPC spike, not a release artifact.
 - `mix.exs` has no `releases:` config and `phx.gen.release` has not been run (no `rel/`, no
   `bin/server`), and `liveview-ci.yml` builds and tests but publishes nothing.
 
@@ -119,12 +117,12 @@ secrets against it. The values needed:
 
 **Owner: vveliev** for provisioning the secrets-manager items and wiring them into the fleet's
 deployment mechanism (however it injects env vars today — outside this company's visibility per
-the GIF-57 boundary). The mailer-provider decision is a small open sub-question; flagged in Gaps.
+the cross-company fleet boundary). The mailer-provider decision is a small open sub-question; flagged in Gaps.
 
 ## 3. Database provisioning
 
-Per GIF-34's scope: this is a **fresh database**, not a migration. No dump exists, there's no
-data to import, and `docs/schema-map.md` (GIF-26) is the authoritative shape — 13 tables, one
+Per this launch's scope: this is a **fresh database**, not a migration. No dump exists, there's no
+data to import, and `docs/schema-map.md` is the authoritative shape — 13 tables, one
 MySQL 8/MariaDB-compatible `Ecto.Repo`, already merged as Ecto migrations on `main`
 (`liveview/priv/repo/migrations/`).
 
@@ -155,7 +153,7 @@ exists, or flags that as a gap (see Gaps) if it doesn't.
 
 ## 4. Rollback
 
-There is nothing currently serving players, so — as GIF-34's description frames it — "rollback"
+There is nothing currently serving players, so — as this launch was scoped — "rollback"
 cannot mean failing back to a previous system. It means **pulling the new deployment back down**
 cleanly, with no player-facing system left half-up.
 
@@ -172,7 +170,7 @@ cleanly, with no player-facing system left half-up.
   rollback time, not a decision this doc can make in advance.
 - **Trigger conditions:** anything that would put player data or account security at risk (e.g. a
   bug in the ADR-0002 rehash-on-login path, or a gRPC-boundary correctness bug like the one
-  GIF-38's evidence describes for `AsReference` reference-equality) is an automatic rollback,
+  the gRPC spike found for `AsReference` reference-equality — see `GlobalCombat.GrpcHost/Contracts.cs`) is an automatic rollback,
   not a judgment call. Anything else (UI bugs, missing features, performance issues under real
   load) is a judgment call for whoever is on point at launch — named below.
 - **Rollback window:** **14 days post-launch** of elevated readiness (someone actively monitoring
@@ -190,16 +188,16 @@ cleanly, with no player-facing system left half-up.
 |---|---|---|
 | Domain (contact upstream / register alternate) | vveliev | Track 1 open, no fixed deadline. Track 2 decided: launch on hosting provider's default subdomain first (zero-cost interim) — see Status below |
 | Fleet host + port block + reverse proxy/TLS | vveliev | Not yet provisioned — vveliev will ping when ready to hand off details |
-| Production release Dockerfiles + `phx.gen.release` | **Done** — GIF-110, PR #34 (merged to `main`) | Shipped `Dockerfile.prod` for both services, `bin/server`/`bin/migrate` overlays, `docker-compose.prod.yml` |
+| Production release Dockerfiles + `phx.gen.release` | **Done** — PR #34 (merged to `main`) | Shipped `Dockerfile.prod` for both services, `bin/server`/`bin/migrate` overlays, `docker-compose.prod.yml` |
 | Secrets wired into fleet deploy mechanism | vveliev | Not yet provisioned |
 | Mailer provider decision | Follow-up issue (new) | Blocks password-reset emails only, not launch |
 | MySQL instance sizing + backup job | vveliev | Provision alongside app host |
 | Migration execution (`mix ecto.migrate`) on deploy | Release-owner (same as Dockerfiles) | `bin/migrate` shipped in PR #34, ready to run once a host exists |
 | Rollback execution during the 14-day window | vveliev | On call for the window |
 
-## Status: GIF-110 execution (2026-08-31)
+## Status: release execution (2026-08-31)
 
-Per the decisions vveliev made on GIF-110's launch-decisions interaction:
+Per the launch decisions vveliev made:
 
 - **Domain:** launch on the hosting provider's default subdomain first (zero-cost interim per §1
   track 2), not a fresh registration. Track 1 (contacting the upstream owner about
@@ -222,7 +220,7 @@ further an agent can provision toward a live URL until the fleet host exists.
   `mix phx.gen.release`.
 - **Mailer adapter is unconfigured** (§2.3) — password-reset and notification email
   (`accounts/notifier.ex`) has no prod transport selected yet.
-- **GIF-68 (realtime turn scheduler)** is still `backlog`. It affects gameplay timing, not
+- **The realtime turn scheduler** is still in the backlog. It affects gameplay timing, not
   deployability, so it does not block this plan, but it should land before or shortly after
   launch — turns not resolving on schedule is a player-facing correctness issue once real users
   are playing.

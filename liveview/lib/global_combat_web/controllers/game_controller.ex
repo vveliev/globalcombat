@@ -2,7 +2,7 @@ defmodule GlobalCombatWeb.GameController do
   @moduledoc """
   Legacy globalcombat.com slug routes: `/Game-:id` and `/Game-:id/:action`
   (see `Web/Controllers/GameController.cs`). Ported as thin acknowledgement
-  stubs until the real game view lands in Phoenix; this ticket (GIF-31) only
+  stubs until the real game view lands in Phoenix; the legacy-route port only
   guarantees the URL shape and id survive.
   """
 

@@ -1,6 +1,6 @@
 defmodule GlobalCombatWeb.DesignTokensTest do
   @moduledoc """
-  GIF-89: guards the industry-dark danger/surface pairing against regressing
+  Guards the industry-dark danger/surface pairing against regressing
   below WCAG AA 4.5:1, since re-running sync_design_boutique.sh re-copies
   variables.css from upstream and would silently revert the local override
   documented in assets/vendor/design-boutique/PROVENANCE.md.

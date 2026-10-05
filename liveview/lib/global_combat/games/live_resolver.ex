@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Games.LiveResolver do
   @moduledoc """
-  Production `GlobalCombat.Games.TurnScheduler.Resolver` (GIF-74) — the bridge the scheduler's
+  Production `GlobalCombat.Games.TurnScheduler.Resolver` — the bridge the scheduler's
   own moduledoc says doesn't exist yet. `GlobalCombat.Games.TurnScheduler` has already claimed
   `game`'s turn slot (advanced `turn`/`prev_turn_time`/`last_turn_time`) by the time
   `resolve_turn/1` runs; this module's only job is making the actual `GlobalCombat.Engine.Game`
@@ -30,7 +30,7 @@ defmodule GlobalCombat.Games.LiveResolver do
   @impl true
   def resolve_turn(%GamesDb.Game{} = game) do
     # Server.alive?/1 (a raw Registry check), not Games.Live.game_exists?/1 — the latter now
-    # also does on-demand rehydration (GIF-119), which here would defeat the point of
+    # also does on-demand rehydration, which here would defeat the point of
     # resolve_offline/1 below: every scheduler tick would spin up (and never tear down) a
     # Server for every currently-orphaned :active game instead of the deliberately cheap
     # one-off "decode, run turn, persist, done" this module was written to do for that case.

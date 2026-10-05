@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Games.PubSub do
   @moduledoc """
-  Port of `Web/GameHub.cs` (GIF-30): the SignalR hub's two group kinds and five
+  Port of `Web/GameHub.cs`: the SignalR hub's two group kinds and five
   broadcast events, as `Phoenix.PubSub` topics/messages.
 
   ## Group -> topic mapping

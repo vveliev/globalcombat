@@ -23,7 +23,7 @@ defmodule GlobalCombat.Engine.RandomAiTest do
     %Game{map_name: :original, rng: DotnetRandom.new(seed), areas: areas, players: players}
   end
 
-  describe "think/2 scoped to the Computer seat (GIF-118)" do
+  describe "think/2 scoped to the Computer seat" do
     test "never assigns, attacks, or transfers using the human's areas, across many seeds" do
       for seed <- 1..50 do
         game = two_player_game(seed)

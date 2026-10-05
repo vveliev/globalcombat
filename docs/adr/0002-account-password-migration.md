@@ -3,7 +3,6 @@
 - Status: Accepted (rehash-on-login strategy, PBKDF2-HMAC-SHA256 as the target algorithm) /
   Proposed (admin forced-reset carve-out — needs Dev sign-off)
 - Date: 2026-08-29
-- Issue: GIF-29
 
 ## Context
 
@@ -31,7 +30,7 @@ here as-is.
    one hardcoded pepper shared by every account, no per-user salt. Its 88-char output cannot
    fit in `varchar(30)`, so any row that legitimately holds a hash must have been silently
    truncated to 30 characters at insert time (consistent with a pre-strict-mode MySQL default;
-   there's no dump to confirm this — see GIF-26). Truncation degrades whatever the hash was
+   there's no dump to confirm this — see `docs/schema-map.md`). Truncation degrades whatever the hash was
    protecting further, though it isn't reversible on its own.
 
 2. **Registration** (`Web/Controllers/BaseController.cs:178-187`, `CreateAccount`): inserts
@@ -53,7 +52,7 @@ to call `CalculateHash` on write) already holds the plaintext password today, in
 independent of any port decision. **That's worth flagging to Dev/security on its own — it's a
 live exposure, not something this port introduces or can wait to fix.**
 
-There's no production dump (per GIF-26) to size the plaintext-vs-hashed split.
+There's no production dump (see `docs/schema-map.md`) to size the plaintext-vs-hashed split.
 
 ### Minimum requirements enforced
 
@@ -80,8 +79,8 @@ differently from a legacy-hash match once verified. This keeps every existing us
 in with their current password on day one, same as the issue requires, and the column
 self-heals to a real hash as accounts are used, with no bulk migration job needed. The new
 hash's output is much longer than 30 characters, so this requires the `password` column itself
-to widen (`text`, effectively), which the `account`/`account_login` migration written for
-GIF-29 does.
+to widen (`text`, effectively), which the `account`/`account_login` migration written alongside
+this ADR does.
 
 **Algorithm, revised from this ADR's first draft:** originally scoped as Bcrypt/Argon2 via
 `phx.gen.auth`'s usual default, both of which ship as C NIFs (`bcrypt_elixir`/`argon2_elixir`)
@@ -113,7 +112,7 @@ still cleartext-over-SMTP by nature of "email you a password," which is a UX/pro
 (replace with a reset-link flow) worth raising with Dev separately, not a storage-format
 question this ADR resolves.
 
-## Adjacent findings (context for GIF-26 / GIF-33, not decided here)
+## Adjacent findings (context for the schema map and messaging work, not decided here)
 
 - **`account_login`** is written on every successful login (`AccountController.SetSession`,
   `Web/Controllers/AccountController.cs:222`, `insert ignore` keyed on `(account_id, datetime)`)
@@ -127,12 +126,12 @@ question this ADR resolves.
   Don't drop it silently: even unused going forward, existing rows may be moderation history
   worth preserving. Flag for Dev confirmation before deciding its fate in the schema map.
 
-## Status of the rest of GIF-29
+## Status of the rest of the password migration
 
-This ADR was originally written while GIF-29 was still blocked on **GIF-26** (Map both MySQL
-schemas to Ecto) and **GIF-27** (Scaffold the Phoenix LiveView app), both since landed on
+This ADR was originally written while the password work was still blocked on mapping both MySQL
+schemas to Ecto and scaffolding the Phoenix LiveView app, both since landed on
 `main` (`docs/schema-map.md`'s §2.4/§3.1/§3.2 carry this ADR's `account`/`account_login`
-decisions into the Ecto column mapping). With both blockers cleared, this same GIF-29 pass
+decisions into the Ecto column mapping). With both blockers cleared, this same pass
 implements the register/log on/log off/reset/settings-password-change flow described above
 against the Phoenix app — see `liveview/lib/global_combat/accounts.ex` (context),
 `accounts/password.ex` (the PBKDF2 scheme), and the

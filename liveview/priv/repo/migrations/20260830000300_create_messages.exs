@@ -1,7 +1,7 @@
 defmodule GlobalCombat.Repo.Migrations.CreateMessages do
   use Ecto.Migration
 
-  # Column shape follows docs/schema-map.md §3.7 (GIF-26/GIF-33). `to_id`/`from_id` are
+  # Column shape follows docs/schema-map.md §3.7. `to_id`/`from_id` are
   # deliberately plain integers, not `references/belongs_to` FKs: `GameServer.OnMessage`
   # writes `-game.Id` as a sentinel recipient for game-forum broadcasts
   # (`Web/Models/GameServer.cs:48`), and account id `1` is the reserved System account — a real

@@ -7,11 +7,11 @@ defmodule GlobalCombat.Tourneys do
   `Tourney.PlayerFinishedCheck`/`Tourney.TourneyFinishedCheck`) are the meat of it.
 
   What a "finished game" *is* -- turn resolution, elimination, the board LiveView -- is out of
-  scope (GIF-25/GIF-28/GIF-30); `finish_game/2` is the seam a caller supplies results through,
+  scope here; `finish_game/2` is the seam a caller supplies results through,
   mirroring where `Web/Models/GameServer.cs`'s `Game.OnEliminated`/`Game.OnEnd` handlers call
   into `Tourney.PlayerFinishedCheck`/`TourneyFinishedCheck` today.
 
-  `list_open_tourneys/0` and `list_recent_tourneys_for_account/1` (GIF-33) are the two read-only
+  `list_open_tourneys/0` and `list_recent_tourneys_for_account/1` are the two read-only
   exceptions: they port the inline queries in `Web/Controllers/HomeController.cs:25-29` and
   `:42-50` for the Home page's "Tournaments to Join"/"Your Recent Tourneys" lists.
   """
@@ -170,7 +170,7 @@ defmodule GlobalCombat.Tourneys do
   copy the way `Start()` calls back into `CreateTournament(this)`.
 
   Only the DB bookkeeping (tourney status flip, `tourneygame` rows) runs inside a transaction --
-  `seed_round_one/1` (GIF-115) calls into `Games.Server` processes, which are a *different* OS
+  `seed_round_one/1` calls into `Games.Server` processes, which are a *different* OS
   process than this one and need their own DB checkout for `Games.Live.force_start/1`'s
   `mark_active` write. A process can't check out the sandbox's single connection while this one
   is sitting inside an open `Repo.transaction` holding it and synchronously blocked waiting on
@@ -207,7 +207,7 @@ defmodule GlobalCombat.Tourneys do
     end
   end
 
-  # GIF-115: every bracket game must be created through `Games.Live.create_game/1` rather than
+  # Every bracket game must be created through `Games.Live.create_game/1` rather than
   # the plain DB-only `Games.create_game/1` -- only the `Live` context also starts the
   # `Games.Server` GenServer a game needs to be joinable/playable at all (`GameLive.mount/2`
   # gates entry on `Server.alive?/1`). The `TourneyGame`'s `game_id` still points at the same
@@ -276,7 +276,7 @@ defmodule GlobalCombat.Tourneys do
     end
   end
 
-  # GIF-115: seating a player has to reach both the `game_players` row (the DB-side roster the
+  # Seating a player has to reach both the `game_players` row (the DB-side roster the
   # bracket page (`tourney_html.ex`) and this module's own `Games.player_count/1` checks read)
   # *and* the running `Games.Server` (the only thing that makes the seat actually playable) --
   # `players/1` above already hands us full `Account` structs, so no extra lookup is needed for

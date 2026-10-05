@@ -1,6 +1,6 @@
 defmodule GlobalCombat.Engine.Game do
   @moduledoc """
-  Port of the turn-resolution rules in `GlobalCombat.Core/Game.cs` (GIF-28).
+  Port of the turn-resolution rules in `GlobalCombat.Core/Game.cs`.
 
   Scope: this module ports `RunTurn` and everything it calls transitively —
   transfers, attack resolution (`DoAttack`/`DoTransfer`), reinforcement/region

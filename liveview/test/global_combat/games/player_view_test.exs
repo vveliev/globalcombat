@@ -194,7 +194,7 @@ defmodule GlobalCombat.Games.PlayerViewTest do
     end
   end
 
-  describe "name/adjacent (GIF-81 accessible board table)" do
+  describe "name/adjacent (accessible board table)" do
     test "every area carries its display name and full map-topology adjacency, regardless of fog" do
       {engine, is_fogged} = game()
       view = PlayerView.build(engine, 1, game_id: 1, is_fogged: is_fogged)

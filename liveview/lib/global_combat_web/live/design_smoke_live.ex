@@ -5,7 +5,7 @@ defmodule GlobalCombatWeb.DesignSmokeLive do
   its colours from `assets/vendor/design-boutique/variables.css`.
 
   This is a bootstrap smoke page, not the game board. Delete it once a real
-  board LiveView exists (GIF-30).
+  board LiveView exists.
   """
   use GlobalCombatWeb, :live_view
 

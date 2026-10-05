@@ -1,6 +1,6 @@
 defmodule GlobalCombatWeb.ChatChannel do
   @moduledoc """
-  Real-time push half of player-to-player messaging (GIF-33) — the Phoenix Channel analogue of
+  Real-time push half of player-to-player messaging — the Phoenix Channel analogue of
   the legacy `GameHub`'s per-session SignalR group (`Web/GameHub.cs`'s `SendMessage`, pushed to
   a group keyed by the recipient's `HttpContext.Session.Id`).
 
@@ -10,8 +10,8 @@ defmodule GlobalCombatWeb.ChatChannel do
   `GlobalCombat.Messaging.send_message/4` broadcasts `"receive_message"` to this topic when a
   DM arrives and `GlobalCombat.Presence` shows the recipient connected.
 
-  This establishes the `"chat:<id>"` topic convention the GIF-33 issue asks the game board to
-  share rather than inventing its own transport — GIF-30's board should broadcast turn/board
+  This establishes the `"chat:<id>"` topic convention the game board is meant to
+  share rather than inventing its own transport — the board should broadcast turn/board
   events on `"game:<id>"` on this same endpoint, mirroring the legacy `"Game-{id}"` SignalR
   group.
   """

@@ -244,7 +244,7 @@ namespace WebGame
             return tourney;
         }
 
-        // Delegates the actual round-progression math to GlobalCombat.Core.TourneyBracket (GIF-109)
+        // Delegates the actual round-progression math to GlobalCombat.Core.TourneyBracket
         // - the same pure algorithm this method used to compute inline, extracted so it has a
         // single implementation shared with the gRPC oracle's TourneyBracket RPC instead of two
         // copies that could silently drift apart. Only the DB/Tourney-back-reference-bearing
