@@ -65,9 +65,15 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   `:dock`'s own row leaves). Rendering `:dock` twice — once for the sheet,
   once inside the rail — was the first cut of this, dropped once it was
   clear every id inside it (`order-panel`, `order-form`, `turn-controls`, …)
-  would then exist twice in one document. `stage` is silently a no-op unless
-  `:dock` has content — with an empty `:dock` slot the shell falls back to
-  today's stacked/side-by-side shape.
+  would then exist twice in one document. An empty `:dock` (a viewer without
+  a seat) simply leaves its row empty.
+
+  Below `lg:`, stage mode is a game HUD rather than three stacked bands: the
+  wrapper carries `data-hud` (with or without a `:dock`), and `assets/css/app.css` lays `:board` full-bleed
+  under the whole viewport with `:status` floating over its top edge and
+  `:dock` over its bottom edge, both see-through except for their own
+  controls (it selects on their `game-status`/`game-dock` classes, never on
+  their accessible names). The grid classes above still describe the shape at `lg:` and up.
   """
   use Phoenix.Component
 
@@ -118,6 +124,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
         ),
         @class
       ]}
+      data-hud={@stage}
       {@rest}
     >
       <section
@@ -231,7 +238,16 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
             if (this.el.open) this.el.close()
 
             if (desktop) {
+              // As a static rail it must not take focus: `show()` focuses the
+              // first focusable control inside (the chat box, far down), which
+              // also scrolls the rail to it on page load.
+              const before = document.activeElement
               this.el.show()
+              if (this.el.contains(document.activeElement) && !this.el.contains(before)) {
+                document.activeElement.blur()
+                before?.focus?.({ preventScroll: true })
+              }
+              this.el.scrollTop = 0
             } else if (this.wantOpen) {
               try { this.el.showModal() } catch (e) {}
             }

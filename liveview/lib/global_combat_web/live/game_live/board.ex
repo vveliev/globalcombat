@@ -15,7 +15,10 @@ defmodule GlobalCombatWeb.GameLive.Board do
   use GlobalCombatWeb, :html
 
   alias GlobalCombatWeb.GameLive.GameOver
+  alias GlobalCombatWeb.GameLive.Hud
   alias GlobalCombatWeb.GameLive.WorldMap
+
+  import GlobalCombatWeb.GameLive.ViewHelpers, only: [my_player: 1]
 
   attr :game_id, :integer, required: true
   attr :view, :map, required: true
@@ -57,6 +60,7 @@ defmodule GlobalCombatWeb.GameLive.Board do
         interactive={!@view.ended}
         replay_steps={@replay_steps}
         game_id={@game_id}
+        unassigned={Hud.gesture_pool(@view, my_player(@view))}
       />
       <figcaption
         :if={@view.ended && @winner}

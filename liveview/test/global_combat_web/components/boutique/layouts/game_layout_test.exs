@@ -161,6 +161,32 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayoutTest do
       assert LazyHTML.text(drawer) =~ "Roster"
     end
 
+    test "stage turns on the HUD (data-hud) even with no dock, as for a viewer without a seat" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <GameLayout.game_layout stage>
+          <:board>Board</:board>
+          <:players>Roster</:players>
+        </GameLayout.game_layout>
+        """)
+
+      document = LazyHTML.from_fragment(html)
+
+      assert document |> LazyHTML.query("div[data-hud]") |> Enum.count() == 1
+      assert document |> LazyHTML.query(~s([aria-label="Actions"])) |> Enum.empty?()
+
+      html =
+        rendered_to_string(~H"""
+        <GameLayout.game_layout>
+          <:board>Board</:board>
+        </GameLayout.game_layout>
+        """)
+
+      assert html |> LazyHTML.from_fragment() |> LazyHTML.query("[data-hud]") |> Enum.empty?()
+    end
+
     test "without stage, the dock slot is ignored entirely — output matches today's shape" do
       assigns = %{}
 

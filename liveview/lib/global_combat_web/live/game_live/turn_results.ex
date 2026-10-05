@@ -40,14 +40,29 @@ defmodule GlobalCombatWeb.GameLive.TurnResults do
       class="flex items-center gap-[var(--space-2)]"
     >
       <span :if={@steps != []} class="flex items-center gap-[var(--space-2)]">
-        <Button.button id="turn-replay-play" type="button" data-replay-play>
-          Turn {resolved_turn(@turn)} results ▶
+        <Button.button id="turn-replay-play" type="button" data-replay-play class="hud-chip">
+          <span class="lg:hidden">▶ Replay</span>
+          <span class="hidden lg:inline">Turn {resolved_turn(@turn)} results ▶</span>
         </Button.button>
-        <Button.button id="turn-replay-back" type="button" intent="neutral" data-replay-back>
-          ◀ Step
+        <Button.button
+          id="turn-replay-back"
+          type="button"
+          intent="neutral"
+          data-replay-back
+          class="hud-chip"
+          aria-label="Previous step"
+        >
+          ◀
         </Button.button>
-        <Button.button id="turn-replay-forward" type="button" intent="neutral" data-replay-forward>
-          Step ▶
+        <Button.button
+          id="turn-replay-forward"
+          type="button"
+          intent="neutral"
+          data-replay-forward
+          class="hud-chip"
+          aria-label="Next step"
+        >
+          ▶
         </Button.button>
       </span>
       <span id="turn-replay-announce" class="sr-only"></span>

@@ -34,7 +34,9 @@ defmodule GlobalCombatWeb.GameLive do
   use GlobalCombatWeb, :live_view
 
   import GlobalCombatWeb.Components.SiteChrome, only: [site_chrome: 1, sidebar_links: 1]
-  import GlobalCombatWeb.GameLive.ViewHelpers, only: [find_area: 2, my_player: 1]
+
+  import GlobalCombatWeb.GameLive.ViewHelpers,
+    only: [find_area: 2, my_player: 1, order_limit: 3, order_queued_to?: 2, parse_amount: 1]
 
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombatWeb.Components.Boutique.Button
@@ -43,11 +45,14 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.GameLive.Chat
   alias GlobalCombatWeb.GameLive.Dock
   alias GlobalCombatWeb.GameLive.GameOver
+  alias GlobalCombatWeb.GameLive.Hud
   alias GlobalCombatWeb.GameLive.Lobby
   alias GlobalCombatWeb.GameLive.PlayersExtras
   alias GlobalCombatWeb.GameLive.PlayersList
   alias GlobalCombatWeb.GameLive.Replay
   alias GlobalCombatWeb.GameLive.StatusBar
+
+  @end_turn_arm_ms 3_000
 
   @impl true
   def mount(%{"id" => id_param}, _session, socket) do
@@ -75,6 +80,9 @@ defmodule GlobalCombatWeb.GameLive do
        |> assign(:selected_area, nil)
        |> assign(:target_area, nil)
        |> assign(:order_amount, "")
+       |> assign(:assign_history, [])
+       |> assign(:end_turn_armed, false)
+       |> assign(:end_turn_timer, nil)
        |> assign(:lens, :owner)
        |> refresh_view()}
     else
@@ -99,6 +107,11 @@ defmodule GlobalCombatWeb.GameLive do
         # showing "Assign new armies" over a board with no more turns to take.
         socket |> assign(status: :playing, view: view) |> clear_selection()
 
+      {:playing, view} ->
+        socket
+        |> assign(status: :playing, view: view)
+        |> update(:assign_history, &Hud.reconcile_history(&1, view))
+
       {status, view} ->
         assign(socket, status: status, view: view)
     end
@@ -118,7 +131,9 @@ defmodule GlobalCombatWeb.GameLive do
     # actually resolving invalidates a pending selection (orders don't survive
     # `run_turn`'s `clear_commands/1`, and area ownership can only change there).
     socket =
-      if playing_turn(socket.assigns) != previous_turn, do: clear_selection(socket), else: socket
+      if playing_turn(socket.assigns) != previous_turn,
+        do: socket |> clear_selection() |> disarm_end_turn(),
+        else: socket
 
     {:noreply, socket}
   end
@@ -154,6 +169,8 @@ defmodule GlobalCombatWeb.GameLive do
     body = if text in [nil, ""], do: title, else: "#{title} — #{text}"
     {:noreply, put_flash(socket, :info, body)}
   end
+
+  def handle_info(:disarm_end_turn, socket), do: {:noreply, disarm_end_turn(socket)}
 
   defp playing_turn(%{status: :playing, view: view}), do: view.turn
   defp playing_turn(_assigns), do: nil
@@ -262,7 +279,17 @@ defmodule GlobalCombatWeb.GameLive do
       Games.set_done(socket.assigns.game_id, account.id)
     end
 
-    {:noreply, socket}
+    {:noreply, disarm_end_turn(socket)}
+  end
+
+  # Ending a turn with reinforcements still unplaced throws them away, so the
+  # HUD's End Turn button sends this first instead of `done`: it arms the
+  # button ("3 unplaced · tap again") for a few seconds, during which the
+  # button's click is `done`.
+  def handle_event("arm_end_turn", _params, socket) do
+    socket = disarm_end_turn(socket)
+    timer = Process.send_after(self(), :disarm_end_turn, @end_turn_arm_ms)
+    {:noreply, assign(socket, end_turn_armed: true, end_turn_timer: timer)}
   end
 
   def handle_event("force_turn", _params, socket) do
@@ -339,8 +366,9 @@ defmodule GlobalCombatWeb.GameLive do
     with {:ok, account} <- require_account(socket),
          source when not is_nil(source) <- socket.assigns.selected_area,
          amount when amount >= 0 <- parse_amount(amount_str) do
-      submit_order(socket, account, source, socket.assigns.target_area, amount)
-      {:noreply, clear_selection(socket)}
+      target = socket.assigns.target_area
+      submit_order(socket, account, source, target, amount)
+      {:noreply, socket |> remember_assign(source, target, amount) |> clear_selection()}
     else
       _ -> {:noreply, socket}
     end
@@ -358,10 +386,189 @@ defmodule GlobalCombatWeb.GameLive do
 
   def handle_event("cancel_order", _params, socket), do: {:noreply, clear_selection(socket)}
 
+  # Tap-to-place from the map (`.MapViewport`): a tap on an own territory while
+  # reinforcements are unplaced queues one there, a hold queues five
+  # (`Hud.placement/4` decides). Each placement is remembered so the dock's
+  # Undo can take back the latest one, and the local view is adjusted straight
+  # away so the HUD responds before the server's `:reload` replaces it.
+  def handle_event(
+        "quick_assign",
+        %{"area" => area_str} = params,
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    with {:ok, account} <- require_account(socket),
+         {:ok, area} <- parse_int(area_str),
+         {:ok, requested} <- parse_placement(Map.get(params, "amount", 1)),
+         {:ok, amount} <- Hud.placement(view, my_player(view), area, requested) do
+      Games.assign(socket.assigns.game_id, account.id, area, amount)
+
+      {:noreply,
+       socket
+       |> disarm_end_turn()
+       |> update(:assign_history, &[{area, amount} | &1])
+       |> assign(:view, Hud.adjust_assigned(view, area, amount))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("quick_assign", _params, socket), do: {:noreply, socket}
+
+  # The placement bar's −1: takes one army back off this territory, the same
+  # way Undo takes back a whole placement (`Hud.undo_plan/3`).
+  def handle_event(
+        "unplace_one",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    with {:ok, account} <- require_account(socket),
+         {:ok, area} <- parse_int(area_str),
+         {:ok, plan} <- Hud.undo_plan(view, my_player(view), {area, 1}),
+         true <- plan.undone > 0 do
+      apply_undo(socket, account, plan)
+      {:noreply, assign(socket, :view, Hud.adjust_assigned(view, plan.area, -plan.undone))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("unplace_one", _params, socket), do: {:noreply, socket}
+
+  # A phone tap on the map (`.MapViewport`): selects one of your territories
+  # (the placement bar opens on it) or targets an enemy neighbour of the
+  # selected one, as `Hud.tap_plan/3` decides — a tap never places armies by
+  # itself. From `lg` up, and from the keyboard, `select_area` keeps the
+  # classic click-a-source, click-a-target flow.
+  def handle_event(
+        "tap_area",
+        %{"area" => area_str},
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    selected = socket.assigns.selected_area
+
+    with {:ok, number} <- parse_int(area_str) do
+      case Hud.tap_plan(view, selected, number) do
+        {:select, ^selected} ->
+          {:noreply, socket}
+
+        {:select, number} ->
+          {:noreply,
+           assign(socket,
+             selected_area: number,
+             target_area: nil,
+             order_amount: to_string(Hud.gesture_pool(view, my_player(view)) || 0)
+           )}
+
+        {:target, number} ->
+          source = find_area(view, socket.assigns.selected_area)
+
+          amount =
+            if order_queued_to?(source, number),
+              do: source.order.amount,
+              else: Hud.spare_armies(source)
+
+          {:noreply, assign(socket, target_area: number, order_amount: to_string(amount))}
+
+        :clear ->
+          {:noreply, clear_selection(socket)}
+
+        :none ->
+          {:noreply, socket}
+      end
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("tap_area", _params, socket), do: {:noreply, socket}
+
+  # Takes back the latest placement, as `Hud.undo_plan/3` lays out.
+  def handle_event(
+        "undo_assign",
+        _params,
+        %{
+          assigns: %{
+            status: :playing,
+            view: %{ended: false} = view,
+            assign_history: [latest | rest]
+          }
+        } = socket
+      ) do
+    socket = assign(socket, :assign_history, rest)
+
+    with {:ok, account} <- require_account(socket),
+         {:ok, plan} <- Hud.undo_plan(view, my_player(view), latest) do
+      apply_undo(socket, account, plan)
+
+      {:noreply, assign(socket, :view, Hud.adjust_assigned(view, plan.area, -plan.undone))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("undo_assign", _params, socket), do: {:noreply, socket}
+
+  # Drag-to-order from the map (`.MapViewport`): releasing a drag from an own
+  # territory's army token over a neighbour opens the order panel on that
+  # pair, having queued, reopened or only drafted the order as
+  # `Hud.drag_plan/4` decides.
+  def handle_event(
+        "drag_order",
+        %{"from" => from_str, "to" => to_str},
+        %{assigns: %{status: :playing, view: %{ended: false} = view}} = socket
+      ) do
+    with {:ok, account} <- require_account(socket),
+         {:ok, from} <- parse_int(from_str),
+         {:ok, to} <- parse_int(to_str),
+         plan when plan != :error <- Hud.drag_plan(view, my_player(view), from, to) do
+      socket = assign(socket, selected_area: from, target_area: to)
+
+      case plan do
+        {:queue, order} ->
+          submit_order(socket, account, from, to, order.amount)
+
+          {:noreply,
+           assign(socket,
+             order_amount: to_string(order.amount),
+             view: Hud.put_order(view, from, order)
+           )}
+
+        {_reopen_or_draft, amount} ->
+          {:noreply, assign(socket, :order_amount, to_string(amount))}
+      end
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("drag_order", _params, socket), do: {:noreply, socket}
+
+  # The engine has no "cancel order": an order cut to zero armies does
+  # nothing when the turn resolves, and the board draws no arrow for it.
+  # Only ever removes the order the panel is actually showing — the one
+  # queued from the selected area to the selected target.
+  def handle_event("remove_order", _params, %{assigns: %{status: :playing}} = socket) do
+    %{view: view, selected_area: source, target_area: target} = socket.assigns
+
+    with {:ok, account} <- require_account(socket),
+         %{} = area <- source && find_area(view, source),
+         true <- order_queued_to?(area, target) do
+      submit_order(socket, account, source, target, 0)
+      {:noreply, clear_selection(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("remove_order", _params, socket), do: {:noreply, socket}
+
   # The amount field, stepper and Max only ever rewrite the draft `order_amount`;
   # nothing reaches the game server until `submit_order`, which validates as before.
   # `change_amount` keeps the draft in step with what was typed, so a step or Max
   # after typing starts from the typed number rather than the prefill.
+  def handle_event("change_amount", %{"_target" => ["amount_range"]} = params, socket),
+    do: {:noreply, assign(socket, :order_amount, Map.get(params, "amount_range", ""))}
+
   def handle_event("change_amount", %{"amount" => amount_str}, socket),
     do: {:noreply, assign(socket, :order_amount, amount_str)}
 
@@ -394,6 +601,10 @@ defmodule GlobalCombatWeb.GameLive do
       _ -> {:noreply, socket}
     end
   end
+
+  # The phone HUD's one-button lens control steps through the same three.
+  def handle_event("cycle_lens", _params, socket),
+    do: {:noreply, update(socket, :lens, &Hud.next_lens/1)}
 
   defp handle_area_click(socket, area) do
     view = socket.assigns.view
@@ -441,31 +652,48 @@ defmodule GlobalCombatWeb.GameLive do
     end
   end
 
-  # Assign mode tops out at the viewer's unassigned pool; transfer and attack at
-  # the source's whole stack (the engine clamps to armies - 1 when it resolves).
   defp max_order_amount(%{status: :playing, selected_area: selected} = assigns)
-       when not is_nil(selected) do
-    view = assigns.view
-
-    case {find_area(view, selected), assigns.target_area, my_player(view)} do
-      {nil, _target, _me} -> nil
-      {_source, nil, nil} -> nil
-      {_source, nil, me} -> me.unassigned_armies
-      {source, _target, _me} -> source.armies
-    end
-  end
+       when not is_nil(selected),
+       do: order_limit(assigns.view, selected, assigns.target_area)
 
   defp max_order_amount(_assigns), do: nil
 
-  defp parse_amount(amount_str) do
-    case Integer.parse(String.trim(to_string(amount_str))) do
-      {amount, _} when amount >= 0 -> amount
-      _ -> -1
-    end
-  end
-
   defp clear_selection(socket),
     do: assign(socket, selected_area: nil, target_area: nil, order_amount: "")
+
+  defp disarm_end_turn(socket) do
+    if timer = socket.assigns.end_turn_timer, do: Process.cancel_timer(timer)
+    assign(socket, end_turn_armed: false, end_turn_timer: nil)
+  end
+
+  # An Assign from the order panel joins the Undo history like a tap does
+  # (`Hud.reconcile_history/2` trims it to what the server really queued).
+  defp remember_assign(socket, source, nil, amount) when amount > 0,
+    do: update(socket, :assign_history, &[{source, amount} | &1])
+
+  defp remember_assign(socket, _source, _target, _amount), do: socket
+
+  # Carries out a `Hud.undo_plan/3`: the engine can only clear an area's whole
+  # assignment, so clear it, re-queue what stays, and put back the area's
+  # order at what it can still send.
+  defp apply_undo(socket, account, plan) do
+    game_id = socket.assigns.game_id
+    Games.unassign(game_id, account.id, plan.area)
+    if plan.keep > 0, do: Games.assign(game_id, account.id, plan.area, plan.keep)
+
+    with {target, amount} <- plan.order,
+         do: submit_order(socket, account, plan.area, target, amount)
+  end
+
+  defp parse_placement("all"), do: {:ok, :all}
+  defp parse_placement(value), do: parse_int(value)
+
+  defp parse_int(value) do
+    case Integer.parse(to_string(value)) do
+      {n, ""} -> {:ok, n}
+      _ -> :error
+    end
+  end
 
   defp require_account(socket) do
     case socket.assigns.current_account do
@@ -570,6 +798,7 @@ defmodule GlobalCombatWeb.GameLive do
               status={@status}
               view={@view}
               lens={@lens}
+              stage={@stage}
               replay_steps={assigns[:replay_steps] || []}
               headline={assigns[:headline]}
               outcome={assigns[:outcome]}
@@ -615,6 +844,8 @@ defmodule GlobalCombatWeb.GameLive do
               selected_area={@selected_area}
               target_area={@target_area}
               order_amount={@order_amount}
+              assign_history={@assign_history}
+              end_turn_armed={@end_turn_armed}
             />
           </:dock>
 

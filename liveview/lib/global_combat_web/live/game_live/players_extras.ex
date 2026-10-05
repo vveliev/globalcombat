@@ -1,24 +1,36 @@
 defmodule GlobalCombatWeb.GameLive.PlayersExtras do
   @moduledoc """
   The in-play cards between the roster and chat in the players drawer/rail
-  (`docs/mobile-battle-mode.md` §4.3): region bonuses, the viewer's queued orders, and the last
-  turn's results (`GameLive.TurnResults`). Only rendered while the game is playing.
+  (`docs/mobile-battle-mode.md` §4.3): the viewer's army and income breakdown, region bonuses,
+  the viewer's queued orders, and the last turn's results (`GameLive.TurnResults`). Only
+  rendered while the game is playing.
   """
 
   use GlobalCombatWeb, :html
 
   alias GlobalCombat.Engine.MapInfo
   alias GlobalCombatWeb.Components.Boutique.Card
+  alias GlobalCombatWeb.GameLive.Hud
   alias GlobalCombatWeb.GameLive.TurnResults
   alias GlobalCombatWeb.GameLive.WorldMap
+
+  import GlobalCombatWeb.GameLive.ViewHelpers, only: [my_player: 1]
 
   attr :view, :map, required: true
   attr :replay_steps, :list, required: true
 
   def players_extras(assigns) do
-    assigns = assign(assigns, :my_orders, my_orders(assigns.view))
+    me = assigns.view.viewer_number && my_player(assigns.view)
+
+    assigns =
+      assign(assigns,
+        my_orders: my_orders(assigns.view),
+        income: me && !me.eliminated && Hud.income(assigns.view, me),
+        unplaced: me && me.unassigned_armies
+      )
 
     ~H"""
+    <.income_card :if={!@view.ended && @income} income={@income} unplaced={@unplaced} />
     <.region_bonuses :if={!@view.ended} map_name={@view.map_name} />
     <.your_orders_card :if={@my_orders != []} orders={@my_orders} />
     <TurnResults.turn_results :if={@replay_steps != []} turn={@view.turn} steps={@replay_steps} />
@@ -37,9 +49,55 @@ defmodule GlobalCombatWeb.GameLive.PlayersExtras do
   defp my_orders(view) do
     area_names = WorldMap.area_names(view.areas)
 
-    for area <- view.areas, area.order do
+    # A removed order is one cut to zero armies (`remove_order`) — not listed.
+    for area <- view.areas, WorldMap.queued_order?(area) do
       WorldMap.order_label(area.name, area.order, Map.fetch!(area_names, area.order.target))
     end
+  end
+
+  # Where the viewer's armies stand: on the board, still to place this turn,
+  # and what next turn brings, worked out the way the engine does it
+  # (`Hud.income/2`) so the player can see why — territories, then each region
+  # held outright, then the game's minimum if that is what applies.
+  attr :income, :map, required: true
+  attr :unplaced, :integer, required: true
+
+  defp income_card(assigns) do
+    ~H"""
+    <Card.card id="income-breakdown" class="min-w-[16rem]">
+      <:header>Your armies</:header>
+      <dl class="income-list">
+        <div>
+          <dt>On the board and in hand</dt>
+          <dd class="tabular-nums">{@income.armies}</dd>
+        </div>
+        <div>
+          <dt>Left to place this turn</dt>
+          <dd class="tabular-nums">{@unplaced}</dd>
+        </div>
+        <div class="income-total">
+          <dt>Next turn</dt>
+          <dd class="tabular-nums">+{@income.total}</dd>
+        </div>
+        <div>
+          <dt>{@income.territories} territories ÷ 2</dt>
+          <dd class="tabular-nums">+{@income.base}</dd>
+        </div>
+        <div :for={bonus <- @income.bonuses}>
+          <dt>{bonus.name} held</dt>
+          <dd class="tabular-nums">+{bonus.bonus}</dd>
+        </div>
+        <div :if={@income.bonuses == []}>
+          <dt>Region bonuses</dt>
+          <dd>none held yet</dd>
+        </div>
+        <div :if={@income.total == @income.minimum and @income.minimum > 0}>
+          <dt>Game minimum applies</dt>
+          <dd class="tabular-nums">{@income.minimum}</dd>
+        </div>
+      </dl>
+    </Card.card>
+    """
   end
 
   attr :orders, :list, required: true
