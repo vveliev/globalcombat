@@ -733,11 +733,16 @@ defmodule GlobalCombat.Games.Server do
   # direction: reuse the engine equivalent rather than reimplementing elimination here).
   # Doesn't advance games.turn/last_turn_time: this isn't a turn resolving, just a seat
   # dropping out mid-turn, so `run_turn/2`'s clock-advance machinery doesn't apply.
+  #
+  # The quitter is eliminated (and the game may end) exactly as if a turn had done it, so the
+  # same results and tourney bookkeeping runs (`Game.EliminatePlayer` fires `OnEliminated` and,
+  # via `End()`, `OnEnd` whichever path eliminated the player).
   defp eliminate_and_broadcast(state, player_number) do
-    engine = Engine.eliminate_player(state.engine, player_number)
+    old_engine = state.engine
+    engine = Engine.eliminate_player(old_engine, player_number)
     state = %{state | engine: engine}
     persist_snapshot(state)
-    if engine.ended, do: GamesDb.finish_game(state.game_id)
+    settle_results(state, old_engine)
     GamePubSub.broadcast_reload(state.game_id)
     state
   end
@@ -970,9 +975,31 @@ defmodule GlobalCombat.Games.Server do
 
     GamesDb.persist_turn(state.game_id, build_wire(state), TurnLog.encode(turn_log))
 
+    settle_results(state, old_engine)
+
+    # `engine.turn` has already advanced past the turn that just ran; name the one that ran,
+    # matching the board's "Turn N results" label.
+    for {number, account_id} <- notifiable_accounts(state) do
+      GamePubSub.broadcast_notification(
+        account_id,
+        "Turn #{engine.turn - 1} Run",
+        player_turn_summary(engine, number),
+        "/Game-#{state.game_id}/"
+      )
+    end
+
+    GamePubSub.broadcast_reload(state.game_id)
+    state
+  end
+
+  # The end-of-turn bookkeeping shared by `run_turn/2` and a mid-turn quit
+  # (`eliminate_and_broadcast/2`): per-player results for anyone eliminated since
+  # `old_engine`, and, once the game has ended, the finished flag plus tourney advancement.
+  defp settle_results(state, old_engine) do
+    engine = state.engine
     record_game_results(old_engine, engine)
 
-    if engine.ended do
+    if engine.ended and not old_engine.ended do
       GamesDb.finish_game(state.game_id)
 
       # Wires the seam `Tourneys.finish_game/2`'s moduledoc documents but nothing
@@ -985,17 +1012,7 @@ defmodule GlobalCombat.Games.Server do
       Tourneys.finish_game(state.game_id, tourney_results(engine))
     end
 
-    for {number, account_id} <- notifiable_accounts(state) do
-      GamePubSub.broadcast_notification(
-        account_id,
-        "Turn #{engine.turn} Run",
-        player_turn_summary(engine, number),
-        "/Game-#{state.game_id}/"
-      )
-    end
-
-    GamePubSub.broadcast_reload(state.game_id)
-    state
+    :ok
   end
 
   # Port of `GameServer.OnEliminated`/`OnEnd`'s non-training DB writes. `Engine.Game`

@@ -467,8 +467,9 @@ defmodule GlobalCombat.Games.LiveTest do
       Games.set_done(game_id, 101)
       Games.set_done(game_id, 102)
 
-      assert_receive {:notification, "Turn 2 Run", _summary, "/Game-" <> _}
-      assert_receive {:notification, "Turn 2 Run", _summary, "/Game-" <> _}
+      # Names the turn that just ran (1), not the one now in play.
+      assert_receive {:notification, "Turn 1 Run", _summary, "/Game-" <> _}
+      assert_receive {:notification, "Turn 1 Run", _summary, "/Game-" <> _}
     end
 
     test "an account that isn't seated in the game can't mark anyone done", %{game_id: game_id} do
