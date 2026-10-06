@@ -346,8 +346,9 @@ defmodule GlobalCombatWeb.GameLiveTest do
     render_click(alice_view, "done")
     render_click(bob_view, "done")
 
-    assert wait_for(alice_view, "Turn 2 Run") =~ "Turn 2 Run"
-    assert wait_for(bob_view, "Turn 2 Run") =~ "Turn 2 Run"
+    # Names the turn that just ran (1), not the one now in play.
+    assert wait_for(alice_view, "Turn 1 Run") =~ "Turn 1 Run"
+    assert wait_for(bob_view, "Turn 1 Run") =~ "Turn 1 Run"
   end
 
   test "each territory carries an accessible name giving the area, its owner and its armies (WCAG 1.1.1)",

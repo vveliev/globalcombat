@@ -18,26 +18,7 @@ defmodule GlobalCombat.Games.ServerTest do
 
   describe "engine.ended wires into Tourneys.finish_game/2" do
     test "a tourney game ending through the live Server advances the winner into the next round" do
-      {:ok, tourney} =
-        Tourneys.create_tourney(%{
-          "name" => "Finish Game Cup #{System.unique_integer([:positive])}",
-          "initial_games" => 2,
-          "game_size" => 2,
-          "winners" => 1,
-          "auto_start" => true
-        })
-
-      {tourney, :started} =
-        Enum.reduce(for(_ <- 1..4, do: account_fixture()), {tourney, nil}, fn account,
-                                                                              {tourney, _} ->
-          {:ok, outcome} = Tourneys.join_tournament(tourney, account.id)
-          {Tourneys.get_tourney!(tourney.id), outcome}
-        end)
-
-      [round_one_game | _] =
-        tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 1))
-
-      [loser, winner] = round_one_game.game.game_players
+      {tourney, round_one_game, loser, winner} = started_tourney_round_one()
 
       end_game_through_server(round_one_game.game_id,
         winner_account_id: winner.account_id,
@@ -59,6 +40,90 @@ defmodule GlobalCombat.Games.ServerTest do
       persisted_game = GamesDb.get_game!(round_one_game.game_id)
       assert persisted_game.status == :finished
     end
+
+    test "a tourney game ended by a quit advances the winner just as a turn would" do
+      {tourney, round_one_game, loser, winner} = started_tourney_round_one()
+
+      rig_two_player_engine(round_one_game.game_id, winner.account_id, loser.account_id,
+        loser_areas: 1
+      )
+
+      assert :ok = Games.quit(round_one_game.game_id, loser.account_id)
+
+      assert [round_two_game] =
+               tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 2))
+
+      seated = round_two_game.game.game_players |> Enum.map(& &1.account_id) |> MapSet.new()
+      assert MapSet.member?(seated, winner.account_id)
+      refute MapSet.member?(seated, loser.account_id)
+      assert GamesDb.get_game!(round_one_game.game_id).status == :finished
+    end
+  end
+
+  describe "a quit that ends the game settles it like a turn would" do
+    test "the remaining player is credited the win and the quitter the game played" do
+      alice = account_fixture()
+      bob = account_fixture()
+      game_id = Games.create_game(%{map_name: :original, max_players: 2})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert :ok = Games.quit(game_id, bob.id)
+
+      alice_after = Accounts.get_account_including_disabled(alice.id)
+      bob_after = Accounts.get_account_including_disabled(bob.id)
+      assert {alice_after.wins, alice_after.games} == {alice.wins + 1, alice.games + 1}
+      assert {bob_after.wins, bob_after.games} == {bob.wins, bob.games + 1}
+      assert GamesDb.get_game!(game_id).status == :finished
+    end
+
+    test "a quit that leaves the game running records only the quitter's game" do
+      [alice, bob, carl] = for _ <- 1..3, do: account_fixture()
+      game_id = Games.create_game(%{map_name: :original, max_players: 3})
+
+      for {account, n} <- Enum.with_index([alice, bob, carl], 1),
+          do: {:ok, ^n} = Games.join(game_id, account.id, account.name)
+
+      :ok = Games.start_game(game_id, alice.id)
+
+      assert :ok = Games.quit(game_id, bob.id)
+
+      assert Accounts.get_account_including_disabled(bob.id).games == bob.games + 1
+
+      for account <- [alice, carl] do
+        after_quit = Accounts.get_account_including_disabled(account.id)
+        assert {after_quit.wins, after_quit.games} == {account.wins, account.games}
+      end
+
+      refute GamesDb.get_game!(game_id).status == :finished
+    end
+  end
+
+  # A four-player, two-games-per-round bracket that auto-starts on the fourth join; returns the
+  # tourney, one round-one game and its two seats.
+  defp started_tourney_round_one do
+    {:ok, tourney} =
+      Tourneys.create_tourney(%{
+        "name" => "Finish Game Cup #{System.unique_integer([:positive])}",
+        "initial_games" => 2,
+        "game_size" => 2,
+        "winners" => 1,
+        "auto_start" => true
+      })
+
+    {tourney, :started} =
+      Enum.reduce(for(_ <- 1..4, do: account_fixture()), {tourney, nil}, fn account,
+                                                                            {tourney, _} ->
+        {:ok, outcome} = Tourneys.join_tournament(tourney, account.id)
+        {Tourneys.get_tourney!(tourney.id), outcome}
+      end)
+
+    [round_one_game | _] =
+      tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 1))
+
+    [loser, winner] = round_one_game.game.game_players
+    {tourney, round_one_game, loser, winner}
   end
 
   # Rigs a 2-player engine one turn away from ending (the loser already at 0 areas) inside the
@@ -67,21 +132,38 @@ defmodule GlobalCombat.Games.ServerTest do
   # more turns of combat RNG this doesn't need to reproduce to prove the bracket-advancement
   # wiring itself.
   defp end_game_through_server(game_id, winner_account_id: winner_id, loser_account_id: loser_id) do
+    rig_two_player_engine(game_id, winner_id, loser_id, loser_areas: 0)
+
+    :ok = Server.set_done(game_id, winner_id)
+    # Synchronizes on the cast above: a GenServer processes messages from the same sender in
+    # the order they were sent, so this call only returns once `set_done`'s `run_turn/2` (and
+    # therefore the `Tourneys.finish_game/2` call under test) has already completed.
+    assert {:playing, view} = Server.player_view(game_id, winner_id)
+    assert view.turn == 4
+  end
+
+  # Puts a two-player `:playing` engine into `game_id`'s Server. With `loser_areas: 0` the next
+  # turn ends the game; with `loser_areas: 1` the loser still holds a territory (so only their
+  # quitting ends it).
+  defp rig_two_player_engine(game_id, winner_id, loser_id, loser_areas: loser_areas) do
+    loser_owned =
+      if loser_areas > 0, do: %{2 => %Area{number: 2, owner_number: 2, armies: 1}}, else: %{}
+
     engine = %Engine{
       map_name: :original,
       rng: DotnetRandom.new(1),
       turn: 3,
       minimum_armies: 3,
-      areas: %{1 => %Area{number: 1, owner_number: 1, armies: 5}},
+      areas: Map.merge(%{1 => %Area{number: 1, owner_number: 1, armies: 5}}, loser_owned),
       players: %{
         1 => %Player{number: 1, account_id: winner_id, name: "winner", areas: 1, armies: 5},
         2 => %Player{
           number: 2,
           account_id: loser_id,
           name: "loser",
-          areas: 0,
-          armies: 0,
-          done: true
+          areas: loser_areas,
+          armies: loser_areas,
+          done: loser_areas == 0
         }
       }
     }
@@ -100,12 +182,7 @@ defmodule GlobalCombat.Games.ServerTest do
       }
     end)
 
-    :ok = Server.set_done(game_id, winner_id)
-    # Synchronizes on the cast above: a GenServer processes messages from the same sender in
-    # the order they were sent, so this call only returns once `set_done`'s `run_turn/2` (and
-    # therefore the `Tourneys.finish_game/2` call under test) has already completed.
-    assert {:playing, view} = Server.player_view(game_id, winner_id)
-    assert view.turn == 4
+    :ok
   end
 
   describe "training mode: the Computer opponent takes its turn on its own" do
