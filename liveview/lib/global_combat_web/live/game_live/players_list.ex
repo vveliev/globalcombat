@@ -44,6 +44,7 @@ defmodule GlobalCombatWeb.GameLive.PlayersList do
             aria-hidden="true"
           />
           <span class={["truncate", p.number == @viewer_number && "font-semibold"]}>{p.name}</span>
+          <span :if={p.number == @viewer_number} class="shrink-0 text-text-muted">(You)</span>
         </span>
         <span :if={@ended} class="flex items-center gap-[var(--space-2)]">
           <span :if={p.place == 1} aria-hidden="true">🏆</span>

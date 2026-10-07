@@ -9,6 +9,7 @@ defmodule GlobalCombatWeb.Components.Layouts.RootHtmlTest do
 
     for selector <- [
           ~s{head link[rel="manifest"][href="/manifest.webmanifest"]},
+          ~s{head link[rel="apple-touch-icon"][href="/images/apple-touch-icon.png"]},
           ~s{head meta[name="apple-mobile-web-app-capable"][content="yes"]},
           ~s{head meta[name="apple-mobile-web-app-status-bar-style"][content="black-translucent"]},
           ~s{head meta[name="theme-color"][content="#416180"][media="(prefers-color-scheme: light)"]},

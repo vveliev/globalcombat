@@ -82,6 +82,16 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "Turn 2") =~ "Turn 2"
   end
 
+  test "the roster marks the viewer's own seat with (You), not only bold", %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+    assert has_element?(alice_view, "#player-list li", "Alice")
+    assert has_element?(alice_view, "#player-list li:nth-child(1)", "(You)")
+    refute has_element?(alice_view, "#player-list li:nth-child(2)", "(You)")
+    assert has_element?(bob_view, "#player-list li:nth-child(2)", "(You)")
+  end
+
   describe "end of game" do
     test "the winner sees Victory, full standings, and a primary Play again action",
          %{conn: conn1} do
