@@ -57,13 +57,14 @@ defmodule GlobalCombatWeb.AccountRegistrationControllerTest do
   end
 
   describe "registration end to end" do
-    test "register button keeps its btn styling alongside the layout class", %{conn: conn} do
+    test "register button is a styled, touch-sized submit button", %{conn: conn} do
       html = conn |> get(~p"/account/register") |> html_response(200)
 
       doc = LazyHTML.from_fragment(html)
       button = LazyHTML.query(doc, "form button")
-      assert LazyHTML.attribute(button, "class") |> hd() =~ ~r/\bbtn\b/
-      assert LazyHTML.attribute(button, "class") |> hd() =~ "btn-primary"
+      assert LazyHTML.attribute(button, "type") == ["submit"]
+      assert LazyHTML.attribute(button, "class") |> hd() =~ "bg-primary"
+      assert LazyHTML.attribute(button, "class") |> hd() =~ "min-h-[var(--size-touch-target)]"
       assert LazyHTML.text(button) =~ "Register"
     end
 
@@ -74,10 +75,19 @@ defmodule GlobalCombatWeb.AccountRegistrationControllerTest do
 
       # 1. load the form, as the browser does (sets session + CSRF)
       conn = get(conn, ~p"/account/register")
-      assert html_response(conn, 200) =~ "Register"
+      form = conn |> html_response(200) |> LazyHTML.from_document() |> LazyHTML.query("form")
 
-      # 2. submit it
-      conn = post(conn, ~p"/account/register", account: attrs)
+      # 2. fill in and submit the inputs the form actually renders, so a field that lost its
+      #    `name` (and would be dropped from a real browser submit) fails here
+      params =
+        fill_form(form, %{
+          "account[name]" => attrs["name"],
+          "account[email]" => attrs["email"],
+          "account[password]" => attrs["password"],
+          "account[password_confirmation]" => attrs["password_confirmation"]
+        })
+
+      conn = post(conn, LazyHTML.attribute(form, "action") |> hd(), params)
       assert redirected_to(conn) == ~p"/"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Welcome"
 
@@ -93,5 +103,26 @@ defmodule GlobalCombatWeb.AccountRegistrationControllerTest do
       assert {:ok, _} =
                GlobalCombat.Accounts.authenticate_account(attrs["name"], attrs["password"])
     end
+  end
+
+  # Builds the POST body from the form's own named inputs: hidden inputs (CSRF) keep their
+  # rendered values, visible ones take `values`; every key in `values` must exist as a field.
+  defp fill_form(form, values) do
+    names =
+      form
+      |> LazyHTML.query("input[name]")
+      |> Enum.map(fn input -> {hd(LazyHTML.attribute(input, "name")), input} end)
+
+    for key <- Map.keys(values) do
+      assert List.keymember?(names, key, 0), "form has no input named #{key}"
+    end
+
+    body =
+      Enum.map_join(names, "&", fn {name, input} ->
+        value = Map.get(values, name) || LazyHTML.attribute(input, "value") |> List.first() || ""
+        URI.encode_www_form(name) <> "=" <> URI.encode_www_form(value)
+      end)
+
+    Plug.Conn.Query.decode(body)
   end
 end

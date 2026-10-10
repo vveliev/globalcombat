@@ -1,33 +1,84 @@
-<div class="mx-auto max-w-sm px-4 py-16">
-  <h1 class="text-2xl font-semibold mb-6">Register</h1>
-
+<.auth_card
+  title="Register"
+  kicker="Join Global Combat"
+  lede="Create an account to start playing."
+  current_account={@current_account}
+  current_path={assigns[:current_path]}
+>
   <.form
     :let={f}
     for={@changeset}
     as={:account}
     action={~p"/account/register"}
     method="post"
-    class="flex flex-col gap-4"
+    class="flex flex-col gap-[var(--space-4)]"
   >
-    <.input field={f[:name]} type="text" label="Login name" required autofocus />
-    <.input field={f[:email]} type="email" label="Email address" required />
-    <.input field={f[:password]} type="password" label="Password" required />
-    <.input field={f[:password_confirmation]} type="password" label="Confirm password" required />
-    <.button variant="primary" class="mt-2">Register</.button>
+    <Input.input
+      field={f[:name]}
+      type="text"
+      label="Login name"
+      autocomplete="username"
+      autocapitalize="none"
+      spellcheck="false"
+      maxlength="30"
+      required
+    />
+    <Input.input
+      field={f[:email]}
+      type="email"
+      label="Email address"
+      autocomplete="email"
+      inputmode="email"
+      required
+    />
+    <Input.input
+      field={f[:password]}
+      type="password"
+      value=""
+      label="Password"
+      autocomplete="new-password"
+      minlength="5"
+      aria-describedby="password-hint"
+      required
+    />
+    <p id="password-hint" class="-mt-[var(--space-3)] text-xs text-text-muted">
+      At least 5 characters.
+    </p>
+    <Input.input
+      field={f[:password_confirmation]}
+      type="password"
+      value=""
+      label="Confirm password"
+      autocomplete="new-password"
+      required
+    />
+    <Button.button
+      type="submit"
+      class="w-full min-h-[var(--size-touch-target)] touch-manipulation"
+    >
+      Register
+    </Button.button>
   </.form>
 
-  <div class="mt-6 text-sm">
-    <.link navigate={~p"/account/log-on"}>Already have an account? Log on</.link>
-  </div>
+  <:footer>
+    <p>
+      Already have an account?
+      <.link navigate={~p"/account/log-on"} class="font-semibold text-primary hover:underline">
+        Log on
+      </.link>
+    </p>
+  </:footer>
 
-  <div class="mt-10 pt-6 border-t border-border text-sm text-text-muted">
-    <h2 class="font-semibold text-text mb-2">Code of Conduct</h2>
-    <ul class="list-disc list-inside flex flex-col gap-1">
-      <li>Don't play with multiple accounts, that's just lame.</li>
-      <li>Be respectful and don't abuse fellow players.</li>
-      <li>
-        If you break these rules your account will be disabled and your IP address will be banned.
-      </li>
-    </ul>
-  </div>
-</div>
+  <:aside>
+    <section class="px-[var(--space-1)] text-sm text-text-muted">
+      <h2 class="font-semibold text-text mb-[var(--space-2)]">Code of Conduct</h2>
+      <ul class="list-disc list-inside flex flex-col gap-[var(--space-1)]">
+        <li>Don't play with multiple accounts, that's just lame.</li>
+        <li>Be respectful and don't abuse fellow players.</li>
+        <li>
+          If you break these rules your account will be disabled and your IP address will be banned.
+        </li>
+      </ul>
+    </section>
+  </:aside>
+</.auth_card>

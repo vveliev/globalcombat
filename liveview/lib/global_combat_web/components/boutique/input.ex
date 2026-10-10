@@ -20,12 +20,18 @@ defmodule GlobalCombatWeb.Components.Boutique.Input do
       ~w(autocomplete disabled form max maxlength min minlength pattern placeholder readonly required step)
 
   def input(assigns) do
+    # With a `field`, only forward the id/name/value that were actually given: passing them as
+    # `nil` stops CoreComponents.input/1 filling them in from the field (its `assign_new`),
+    # which left field-driven inputs with no `name`, so the browser dropped them from the
+    # submit. Without a field, CoreComponents needs all three keys, nil or not.
+    given = Map.take(assigns, [:id, :name, :value])
+    given = if assigns.field, do: Map.reject(given, fn {_k, v} -> is_nil(v) end), else: given
+    assigns = assign(assigns, :given, given)
+
     ~H"""
     <GlobalCombatWeb.CoreComponents.input
-      id={@id}
-      name={@name}
+      {@given}
       label={@label}
-      value={@value}
       type={@type}
       field={@field}
       errors={@errors}
