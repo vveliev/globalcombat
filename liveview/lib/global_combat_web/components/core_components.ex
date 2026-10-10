@@ -103,10 +103,10 @@ defmodule GlobalCombatWeb.CoreComponents do
   def button(%{rest: rest} = assigns) do
     variants = %{"primary" => "btn-primary", nil => "btn-primary btn-soft"}
 
+    # A caller's `class` adds to the button styling; it must not replace it, or e.g.
+    # `class="mt-2"` leaves a bare, unstyled button that reads as not tappable.
     assigns =
-      assign_new(assigns, :class, fn ->
-        ["btn", Map.fetch!(variants, assigns[:variant])]
-      end)
+      assign(assigns, :class, ["btn", Map.fetch!(variants, assigns[:variant]), assigns[:class]])
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
       ~H"""
