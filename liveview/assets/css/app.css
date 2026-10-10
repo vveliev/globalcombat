@@ -385,7 +385,8 @@
 
 /* Region bonus legend: a printed-board style box drawn into the sea in the
    board's bottom-left corner. Sizes are SVG user units, so it pans and zooms
-   with the board like the rest of the art. */
+   with the board like the rest of the art. The phone HUD hides it in favour
+   of `.hud-bonuses`, a card in the HUD layer. */
 .world-map-legend {
   pointer-events: none;
   user-select: none;
@@ -1397,9 +1398,97 @@
   }
 }
 
+/* The phone HUD's region bonus card (StatusBar's `bonus_layer/1`): part of
+   the HUD layer, hung under the status strip's top-left corner like the "⋯"
+   menu hangs under its right, so it stays put and readable while the board
+   pans and zooms beneath it. The SVG legend drawn into the board's sea is
+   hidden here; from lg up that legend is the one shown and this card isn't. */
+.hud-bonuses {
+  display: none;
+}
+
+@media (width < 64rem) {
+  [data-hud] .world-map-legend {
+    display: none;
+  }
+
+  [data-hud] .hud-bonuses {
+    position: absolute;
+    top: 100%;
+    left: var(--space-3);
+    z-index: 5;
+    display: block;
+    margin-top: var(--space-2);
+    border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-surface) 86%, transparent);
+    backdrop-filter: blur(var(--blur-strip));
+    -webkit-backdrop-filter: blur(var(--blur-strip));
+    box-shadow: var(--shadow-md);
+    font-size: var(--text-xs);
+    pointer-events: auto;
+  }
+
+  [data-hud] .hud-bonuses-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-height: var(--size-touch-target);
+    padding: 0 var(--space-3);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    list-style: none;
+    cursor: pointer;
+  }
+
+  [data-hud] .hud-bonuses-toggle::-webkit-details-marker {
+    display: none;
+  }
+
+  [data-hud] .hud-bonuses-toggle:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
+  }
+
+  [data-hud] .hud-bonuses-chevron {
+    transition: transform 0.15s ease;
+  }
+
+  [data-hud] .hud-bonuses[open] .hud-bonuses-chevron {
+    transform: rotate(180deg);
+  }
+
+  [data-hud] .hud-bonuses-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: 0;
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border-top: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
+    font-size: var(--text-sm);
+  }
+
+  [data-hud] .hud-bonuses-list > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+
+  [data-hud] .hud-bonuses-list dd {
+    margin: 0;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-primary);
+  }
+}
+
 /* Phones held sideways: little height to spare, so the placement bar becomes
    a column down the right edge, the coach line stays on one line, and the
-   map's own bonus legend steps aside (the drawer still lists the bonuses). */
+   HUD's bonus card steps aside (the drawer still lists the bonuses). */
 @media (width < 64rem) and (orientation: landscape) and (max-height: 32rem) {
   [data-hud] #order-panel.order-panel--assign {
     position: fixed;
@@ -1426,7 +1515,7 @@
     text-overflow: ellipsis;
   }
 
-  [data-hud] .world-map-legend {
+  [data-hud] .hud-bonuses {
     display: none;
   }
 }

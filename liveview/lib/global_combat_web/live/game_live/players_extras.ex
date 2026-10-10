@@ -119,10 +119,11 @@ defmodule GlobalCombatWeb.GameLive.PlayersExtras do
   # doesn't need a matching edit here.
   #
   # The map itself draws these bonuses as a legend in its bottom-left sea
-  # (`WorldMap.legend/1`), like a printed board. That legend is SVG art that
-  # shrinks with the board, too small to read below `md:`, so there this
-  # list stays visible in the players drawer (`players_extras/1`); from `md:`
-  # up it is screen-reader only, since the legend is aria-hidden.
+  # (`WorldMap.legend/1`), like a printed board; the phone HUD swaps that for
+  # a card in its own layer (`StatusBar.bonus_layer/1`), which steps aside on a
+  # phone held sideways. Below `md:` this list stays visible in the players
+  # drawer (`players_extras/1`); from `md:` up it is screen-reader only, since
+  # the legend is aria-hidden.
   attr :map_name, :atom, required: true
 
   defp region_bonuses(assigns) do
