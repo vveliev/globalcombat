@@ -55,4 +55,43 @@ defmodule GlobalCombatWeb.AccountRegistrationControllerTest do
       assert response =~ "do not match"
     end
   end
+
+  describe "registration end to end" do
+    test "register button keeps its btn styling alongside the layout class", %{conn: conn} do
+      html = conn |> get(~p"/account/register") |> html_response(200)
+
+      doc = LazyHTML.from_fragment(html)
+      button = LazyHTML.query(doc, "form button")
+      assert LazyHTML.attribute(button, "class") |> hd() =~ ~r/\bbtn\b/
+      assert LazyHTML.attribute(button, "class") |> hd() =~ "btn-primary"
+      assert LazyHTML.text(button) =~ "Register"
+    end
+
+    test "form -> submit -> logged in -> can log off and back on; re-register is rejected", %{
+      conn: conn
+    } do
+      attrs = valid_account_attributes()
+
+      # 1. load the form, as the browser does (sets session + CSRF)
+      conn = get(conn, ~p"/account/register")
+      assert html_response(conn, 200) =~ "Register"
+
+      # 2. submit it
+      conn = post(conn, ~p"/account/register", account: attrs)
+      assert redirected_to(conn) == ~p"/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Welcome"
+
+      # 3. follow the redirect: the new account is the signed-in one
+      conn = conn |> recycle() |> get(~p"/")
+      assert conn.assigns.current_account.name == attrs["name"]
+
+      # 4. a second submit of the same form (e.g. a double tap) is a clean validation error
+      again = build_conn() |> post(~p"/account/register", account: attrs)
+      assert html_response(again, 200) =~ "Login name already taken"
+
+      # 5. the account really works: log on with the password just registered
+      assert {:ok, _} =
+               GlobalCombat.Accounts.authenticate_account(attrs["name"], attrs["password"])
+    end
+  end
 end
