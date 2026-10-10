@@ -282,8 +282,7 @@ defmodule GlobalCombatWeb.GameLive.StatusBar do
       phx-mounted={JS.ignore_attributes(["open"])}
     >
       <summary class="hud-bonuses-toggle">
-        Region bonuses
-        <.icon name="hero-chevron-down" class="hud-bonuses-chevron size-4" />
+        Region bonuses <.icon name="hero-chevron-down" class="hud-bonuses-chevron size-4" />
       </summary>
       <dl class="hud-bonuses-list">
         <div :for={row <- @rows} data-region={row.number}>
