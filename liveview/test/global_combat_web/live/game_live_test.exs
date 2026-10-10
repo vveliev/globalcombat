@@ -1218,6 +1218,35 @@ defmodule GlobalCombatWeb.GameLiveTest do
       assert has_element?(alice_view, "#hud-more #lens-cycle")
     end
 
+    test "on a phone the region bonuses sit in the HUD layer over the map, not in its art",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      # A collapsible card in the status strip, open by default (CSS shows it
+      # below lg only, where the SVG legend is hidden instead).
+      assert has_element?(alice_view, ".game-status details#hud-bonuses[open]")
+      assert has_element?(alice_view, "#hud-bonuses summary", "Region bonuses")
+
+      names_by_bonus =
+        GlobalCombat.Engine.MapInfo.regions(:original)
+        |> Enum.sort_by(&elem(&1, 3), :desc)
+        |> Enum.map(&elem(&1, 1))
+
+      rows =
+        alice_view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#hud-bonuses dt")
+        |> Enum.map(&LazyHTML.text/1)
+
+      assert rows == names_by_bonus
+
+      for {number, _name, _num_areas, bonus} <- GlobalCombat.Engine.MapInfo.regions(:original) do
+        assert has_element?(alice_view, "#hud-bonuses [data-region='#{number}'] dd", "+#{bonus}")
+      end
+    end
+
     test "the turn pill and the drawer show the army total, what's left to place, and next turn's income",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()

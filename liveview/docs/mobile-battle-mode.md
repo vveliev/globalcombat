@@ -108,7 +108,7 @@ New attr `immersive :boolean, default: false`. When true, the topbar and sidebar
 | `order_panel/1` | rail column beside the map | `:dock` |
 | Turn controls (End Turn, Waiting, Force Turn) | below the board table | `:dock`, rendered only when no area is selected |
 | Quit button | turn controls | below `lg` only: `:players` (drawer), bottom, `intent="danger"`, `lg:hidden`; above `lg` it stays in `#turn-controls` (hidden below `lg`), since above `lg` nothing changes (§2) |
-| `region_bonuses/1` | rail column beside the map | a legend drawn into the map's bottom-left sea (`WorldMap.legend/1`); the list stays in `:players` (drawer) below `md`, screen-reader only from `md` up |
+| `region_bonuses/1` | rail column beside the map | a legend drawn into the map's bottom-left sea (`WorldMap.legend/1`) from `lg` up; below `lg` a collapsible card in the HUD layer under the turn pill (`StatusBar.bonus_layer/1`), so it doesn't pan or zoom with the board; the list stays in `:players` (drawer) below `md`, screen-reader only from `md` up |
 | `your_orders_card/1`, `turn_results/1` | rail column beside the map | `:players`, after the roster and before chat |
 | `board_table/1` (sr-only) | board | board (unchanged) |
 | Replay controls | status strip | status strip (unchanged; compact button labels below `lg`) |
@@ -325,6 +325,6 @@ focus when it opens (which had scrolled it to the chat box on load).
 The viewBox always takes the stage's aspect ratio, so nothing letterboxes:
 "fit" is the whole board (a phone held sideways shows all of it), and a phone
 held upright starts zoomed to fill its height around the viewer's biggest group
-of bordering territories. Sideways, the map's own bonus legend steps aside for
-the HUD (the drawer still lists the bonuses).
+of bordering territories. Sideways, the HUD's bonus card steps aside (the
+drawer still lists the bonuses).
 Turning the phone between the two starts over from that home view.

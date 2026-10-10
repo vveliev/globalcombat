@@ -124,6 +124,7 @@ defmodule GlobalCombatWeb.GameLive.StatusBar do
         <.icon name="hero-arrows-pointing-out" class="fullscreen-toggle-icon size-5" />
       </button>
     </div>
+    <.bonus_layer :if={@stage} map_name={@view.map_name} />
     <script :type={Phoenix.LiveView.ColocatedHook} name=".Fullscreen">
       // iOS Safari has no Fullscreen API for arbitrary elements
       // (`document.fullscreenEnabled` is false there) — the button stays
@@ -258,6 +259,39 @@ defmodule GlobalCombatWeb.GameLive.StatusBar do
     <span :if={@view.ended} id="game-over-announce" class="sr-only">
       {@headline}<span :if={@outcome}>{" " <> @outcome}</span>
     </span>
+    """
+  end
+
+  # Phone HUD only: the region bonus legend as a card in the HUD layer, under
+  # the turn pill, instead of the SVG legend drawn into the map's sea — that
+  # one pans and zooms with the board, so on a phone it rendered too small to
+  # read and slid off screen once zoomed. `app.css` shows this below `lg` (and
+  # hides the SVG legend there); from `lg` up the board's own legend stays.
+  # Open by default; `ignore_attributes` keeps a player's collapse across
+  # patches.
+  attr :map_name, :atom, required: true
+
+  defp bonus_layer(assigns) do
+    assigns = assign(assigns, :rows, WorldMap.legend(assigns.map_name).rows)
+
+    ~H"""
+    <details
+      id="hud-bonuses"
+      class="hud-bonuses"
+      open
+      phx-mounted={JS.ignore_attributes(["open"])}
+    >
+      <summary class="hud-bonuses-toggle">
+        Region bonuses
+        <.icon name="hero-chevron-down" class="hud-bonuses-chevron size-4" />
+      </summary>
+      <dl class="hud-bonuses-list">
+        <div :for={row <- @rows} data-region={row.number}>
+          <dt>{row.name}</dt>
+          <dd>+{row.bonus}</dd>
+        </div>
+      </dl>
+    </details>
     """
   end
 

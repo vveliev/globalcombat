@@ -1972,7 +1972,9 @@ defmodule GlobalCombatWeb.GameLive.WorldMap do
   # art. `{x, y}` is the box's top-left, checked clear of every territory and
   # sea lane on the world map; elements draws it smaller because that board
   # renders ~1.5x larger per SVG unit. Decorative and aria-hidden —
-  # `GameLive`'s `region_bonuses/1` carries the same numbers accessibly.
+  # `GameLive`'s `region_bonuses/1` carries the same numbers accessibly. The
+  # phone HUD hides it and shows these rows as a card in its own layer
+  # instead (`StatusBar.bonus_layer/1`), where they don't shrink with the board.
   @legend_width 150
   @legend_height 152
   @legend_placement %{original: {8, 320, 1}, elements: {142, 375, 0.62}}
