@@ -1,8 +1,18 @@
-<div class="mx-auto max-w-sm px-4 py-16">
-  <h1 class="text-2xl font-semibold mb-6">Log On</h1>
-
-  <p :if={@error_message} id="login-error" role="alert" class="alert alert-error mb-4">
-    {@error_message}
+<.auth_card
+  title="Log On"
+  kicker="Welcome back"
+  lede="Log on with your login name or email address."
+  current_account={@current_account}
+  current_path={assigns[:current_path]}
+>
+  <p
+    :if={@error_message}
+    id="login-error"
+    role="alert"
+    class="flex items-start gap-[var(--space-2)] rounded-[var(--radius-sm)] border border-danger px-[var(--space-3)] py-[var(--space-2)] text-sm text-danger"
+  >
+    <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+    <span>{@error_message}</span>
   </p>
 
   <.form
@@ -11,30 +21,49 @@
     as={:account}
     action={~p"/account/log-on"}
     method="post"
-    class="flex flex-col gap-4"
+    class="flex flex-col gap-[var(--space-4)]"
   >
-    <.input
+    <Input.input
       field={f[:login]}
       type="text"
       label="Login name or email"
+      autocomplete="username"
+      autocapitalize="none"
+      spellcheck="false"
       required
-      autofocus
       aria-invalid={@error_message && "true"}
       aria-describedby={@error_message && "login-error"}
     />
-    <.input
+    <Input.input
       field={f[:password]}
       type="password"
+      value=""
       label="Password"
+      autocomplete="current-password"
       required
       aria-invalid={@error_message && "true"}
       aria-describedby={@error_message && "login-error"}
     />
-    <.button variant="primary" class="mt-2">Log On</.button>
+    <.link
+      navigate={~p"/account/reset-password"}
+      class="self-end -mt-[var(--space-2)] text-sm text-primary hover:underline"
+    >
+      Forgot your password?
+    </.link>
+    <Button.button
+      type="submit"
+      class="w-full min-h-[var(--size-touch-target)] touch-manipulation"
+    >
+      Log On
+    </Button.button>
   </.form>
 
-  <div class="mt-6 text-sm flex flex-col gap-2">
-    <.link navigate={~p"/account/reset-password"}>Forgot your password?</.link>
-    <.link navigate={~p"/account/register"}>Need an account? Register</.link>
-  </div>
-</div>
+  <:footer>
+    <p>
+      New to Global Combat?
+      <.link navigate={~p"/account/register"} class="font-semibold text-primary hover:underline">
+        Create an account
+      </.link>
+    </p>
+  </:footer>
+</.auth_card>
