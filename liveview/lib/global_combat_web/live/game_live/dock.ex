@@ -51,6 +51,10 @@ defmodule GlobalCombatWeb.GameLive.Dock do
     required: true,
     doc: "End Turn was tapped once with armies unplaced; the next tap ends the turn"
 
+  attr :quit_armed, :boolean,
+    default: false,
+    doc: "Quit was tapped once; the next tap within a few seconds forfeits"
+
   def dock(assigns) do
     me = assigns.view.viewer_number && my_player(assigns.view)
 
@@ -130,11 +134,11 @@ defmodule GlobalCombatWeb.GameLive.Dock do
         <Button.button
           :if={!@me.eliminated}
           id="turn-controls-quit"
-          intent="neutral"
-          class="max-lg:hidden"
-          phx-click="quit"
+          intent={if @quit_armed, do: "danger", else: "neutral"}
+          class={["max-lg:hidden", @quit_armed && "is-armed"]}
+          phx-click={if @quit_armed, do: "quit", else: "arm_quit"}
         >
-          Quit
+          {if @quit_armed, do: "Tap again to forfeit", else: "Quit"}
         </Button.button>
         <span :if={@me.done} class="turn-waiting">Waiting on other players…</span>
       </div>
@@ -153,7 +157,10 @@ defmodule GlobalCombatWeb.GameLive.Dock do
   attr :order_amount, :string, required: true
 
   # A slider and quick picks (1 · Half · Max) sit beside the exact number, so a
-  # thumb can set an amount without the keyboard. Opened on an order that is
+  # thumb can set an amount without the keyboard. Each pick carries its value in
+  # `data-amount`/`data-amount-delta` as well as the `phx-click`: app.js writes it
+  # into the number/range inputs on click, so a submit that lands before the
+  # server's diff does still sends the picked amount, not the stale one. Opened on an order that is
   # already queued (a drag, or tapping its arrow) it edits that order: the
   # primary button updates it and Remove takes it off the board. A territory
   # carries one order a turn, so when a different one is already queued from
@@ -307,6 +314,7 @@ defmodule GlobalCombatWeb.GameLive.Dock do
             intent="neutral"
             phx-click="step_amount"
             phx-value-delta="-1"
+            data-amount-delta="-1"
             aria-label="One army fewer"
           >
             −
@@ -316,6 +324,7 @@ defmodule GlobalCombatWeb.GameLive.Dock do
             intent="neutral"
             phx-click="step_amount"
             phx-value-delta="1"
+            data-amount-delta="1"
             aria-label="One army more"
           >
             +
@@ -327,6 +336,7 @@ defmodule GlobalCombatWeb.GameLive.Dock do
             intent="neutral"
             phx-click="change_amount"
             phx-value-amount="1"
+            data-amount="1"
           >
             1
           </Button.button>
@@ -337,11 +347,18 @@ defmodule GlobalCombatWeb.GameLive.Dock do
             intent="neutral"
             phx-click="change_amount"
             phx-value-amount={@half}
+            data-amount={@half}
             aria-label={"Half: #{@half}"}
           >
             ½
           </Button.button>
-          <Button.button id="order-pick-max" type="button" intent="neutral" phx-click="max_amount">
+          <Button.button
+            id="order-pick-max"
+            type="button"
+            intent="neutral"
+            phx-click="max_amount"
+            data-amount={@limit}
+          >
             Max
           </Button.button>
         </div>

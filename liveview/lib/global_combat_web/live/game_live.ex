@@ -53,6 +53,7 @@ defmodule GlobalCombatWeb.GameLive do
   alias GlobalCombatWeb.GameLive.StatusBar
 
   @end_turn_arm_ms 3_000
+  @quit_arm_ms 4_000
 
   @impl true
   def mount(%{"id" => id_param}, _session, socket) do
@@ -83,6 +84,8 @@ defmodule GlobalCombatWeb.GameLive do
        |> assign(:assign_history, [])
        |> assign(:end_turn_armed, false)
        |> assign(:end_turn_timer, nil)
+       |> assign(:quit_armed, false)
+       |> assign(:quit_timer, nil)
        |> assign(:lens, :owner)
        |> refresh_view()}
     else
@@ -171,6 +174,7 @@ defmodule GlobalCombatWeb.GameLive do
   end
 
   def handle_info(:disarm_end_turn, socket), do: {:noreply, disarm_end_turn(socket)}
+  def handle_info(:disarm_quit, socket), do: {:noreply, disarm_quit(socket)}
 
   defp playing_turn(%{status: :playing, view: view}), do: view.turn
   defp playing_turn(_assigns), do: nil
@@ -227,7 +231,19 @@ defmodule GlobalCombatWeb.GameLive do
     end
   end
 
+  # Quitting mid-play forfeits the game and cannot be undone, so the Quit buttons
+  # (dock, phone drawer, lobby) send this first: it arms them ("tap again to
+  # forfeit") for a few seconds, during which their click is `quit` — the same
+  # two-tap pattern End Turn uses for unplaced armies.
+  def handle_event("arm_quit", _params, socket) do
+    socket = disarm_quit(socket)
+    timer = Process.send_after(self(), :disarm_quit, @quit_arm_ms)
+    {:noreply, assign(socket, quit_armed: true, quit_timer: timer)}
+  end
+
   def handle_event("quit", _params, socket) do
+    socket = disarm_quit(socket)
+
     case require_account(socket) do
       {:ok, account} ->
         case Games.quit(socket.assigns.game_id, account.id) do
@@ -666,6 +682,11 @@ defmodule GlobalCombatWeb.GameLive do
     assign(socket, end_turn_armed: false, end_turn_timer: nil)
   end
 
+  defp disarm_quit(socket) do
+    if timer = socket.assigns.quit_timer, do: Process.cancel_timer(timer)
+    assign(socket, quit_armed: false, quit_timer: nil)
+  end
+
   # An Assign from the order panel joins the Undo history like a tap does
   # (`Hud.reconcile_history/2` trims it to what the server really queued).
   defp remember_assign(socket, source, nil, amount) when amount > 0,
@@ -817,7 +838,12 @@ defmodule GlobalCombatWeb.GameLive do
               <Layouts.flash_group flash={@flash} />
               <%= case @status do %>
                 <% :lobby -> %>
-                  <Lobby.lobby game_id={@game_id} view={@view} invite_login={@invite_login} />
+                  <Lobby.lobby
+                    game_id={@game_id}
+                    view={@view}
+                    invite_login={@invite_login}
+                    quit_armed={@quit_armed}
+                  />
                 <% :playing -> %>
                   <Board.board
                     game_id={@game_id}
@@ -846,6 +872,7 @@ defmodule GlobalCombatWeb.GameLive do
               order_amount={@order_amount}
               assign_history={@assign_history}
               end_turn_armed={@end_turn_armed}
+              quit_armed={@quit_armed}
             />
           </:dock>
 
@@ -878,10 +905,10 @@ defmodule GlobalCombatWeb.GameLive do
               }
               id="quit-button"
               intent="danger"
-              phx-click="quit"
-              class="mt-[var(--space-4)] lg:hidden"
+              phx-click={if @quit_armed, do: "quit", else: "arm_quit"}
+              class={["mt-[var(--space-4)] lg:hidden", @quit_armed && "is-armed"]}
             >
-              Quit
+              {if @quit_armed, do: "Tap again to forfeit", else: "Quit"}
             </Button.button>
             <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] border-t border-border pt-[var(--space-4)] text-sm lg:hidden">
               <.sidebar_links

@@ -16,6 +16,10 @@ defmodule GlobalCombatWeb.GameLive.Lobby do
   attr :view, :map, required: true
   attr :invite_login, :string, required: true, doc: "the invite box's current value"
 
+  attr :quit_armed, :boolean,
+    default: false,
+    doc: "Quit was tapped once; the next tap within a few seconds leaves the lobby"
+
   def lobby(assigns) do
     ~H"""
     <div id="lobby" class="flex flex-col gap-[var(--space-4)]">
@@ -46,10 +50,11 @@ defmodule GlobalCombatWeb.GameLive.Lobby do
         <Button.button
           :if={@view.viewer_number != nil}
           id="lobby-quit"
-          intent="neutral"
-          phx-click="quit"
+          intent={if @quit_armed, do: "danger", else: "neutral"}
+          class={@quit_armed && "is-armed"}
+          phx-click={if @quit_armed, do: "quit", else: "arm_quit"}
         >
-          Quit
+          {if @quit_armed, do: "Tap again to leave", else: "Quit"}
         </Button.button>
       </div>
       <form

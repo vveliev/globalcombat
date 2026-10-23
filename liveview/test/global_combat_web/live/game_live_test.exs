@@ -294,6 +294,17 @@ defmodule GlobalCombatWeb.GameLiveTest do
     assert wait_for(bob_view, "good luck!") =~ "Alice"
   end
 
+  test "sending a chat message also resets the form client-side so it cannot be sent twice",
+       %{conn: conn1} do
+    conn2 = Phoenix.ConnTest.build_conn()
+    %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+    # The submit is a JS command: push `send_chat`, then dispatch `gc:reset-form` on the
+    # form (app.js calls `form.reset()`), since LiveView never patches a focused input.
+    assert has_element?(alice_view, ~s(#chat-form[phx-submit*="send_chat"]))
+    assert has_element?(alice_view, ~s(#chat-form[phx-submit*="gc:reset-form"]))
+  end
+
   test "the chat input carries a label and stays inside the players rail (WCAG 3.3.2)",
        %{conn: conn1} do
     conn2 = Phoenix.ConnTest.build_conn()
@@ -732,6 +743,21 @@ defmodule GlobalCombatWeb.GameLiveTest do
              )
 
       assert has_element?(alice_view, ~s(#order-stepper button[phx-click="max_amount"]), "Max")
+    end
+
+    test "the quick picks carry their value as data-amount so app.js can mirror it into the inputs before a quick submit",
+         %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view} = start_two_player_game(conn1, conn2)
+
+      # 25 armies to place: Half is 12, Max is the whole pool.
+      render_click(alice_view, "select_area", %{"area" => "1"})
+
+      assert has_element?(alice_view, ~s(#order-stepper [data-amount-delta="-1"]))
+      assert has_element?(alice_view, ~s(#order-stepper [data-amount-delta="1"]))
+      assert has_element?(alice_view, ~s(#order-pick-one[data-amount="1"]))
+      assert has_element?(alice_view, ~s(#order-pick-half[data-amount="12"]))
+      assert has_element?(alice_view, ~s(#order-pick-max[data-amount="25"]))
     end
 
     test "step_amount moves the draft by the delta and never below zero, without touching the game",
@@ -1384,6 +1410,38 @@ defmodule GlobalCombatWeb.GameLiveTest do
              )
     end
 
+    test "Quit arms first and forfeits only on a second tap within the window", %{conn: conn1} do
+      conn2 = Phoenix.ConnTest.build_conn()
+      %{alice_view: alice_view, bob_view: bob_view} = start_two_player_game(conn1, conn2)
+
+      assert has_element?(alice_view, ~s(#turn-controls-quit[phx-click="arm_quit"]), "Quit")
+      assert has_element?(alice_view, ~s(#quit-button[phx-click="arm_quit"]), "Quit")
+
+      alice_view |> element("#turn-controls-quit") |> render_click()
+
+      assert has_element?(
+               alice_view,
+               ~s(#turn-controls-quit.is-armed[phx-click="quit"]),
+               "Tap again to forfeit"
+             )
+
+      assert has_element?(alice_view, ~s(#quit-button.is-armed[phx-click="quit"]))
+      # Alice is still seated: arming alone changed nothing in the game.
+      refute has_element?(bob_view, "#game-over")
+
+      # The arming lapses on its own.
+      send(alice_view.pid, :disarm_quit)
+      assert has_element?(alice_view, ~s(#turn-controls-quit[phx-click="arm_quit"]), "Quit")
+      refute has_element?(alice_view, "#turn-controls-quit.is-armed")
+
+      # Two taps inside the window forfeit.
+      alice_view |> element("#turn-controls-quit") |> render_click()
+      alice_view |> element("#turn-controls-quit") |> render_click()
+
+      refute has_element?(alice_view, "#turn-controls-quit")
+      refute has_element?(alice_view, "#quit-button")
+    end
+
     test "a spectator viewing a live game does not crash the dock (no seated player, nothing selected)",
          %{conn: conn1} do
       conn2 = Phoenix.ConnTest.build_conn()
@@ -1929,6 +1987,28 @@ defmodule GlobalCombatWeb.GameLiveTest do
 
       assert {:error, :not_host} = Games.kick(game_id, bob.id, 1)
       assert has_element?(bob_view, "#lobby-players li", "Player 1: Alice")
+    end
+
+    test "the lobby's Quit arms on the first click and leaves on the second", %{conn: conn} do
+      alice = account_fixture(%{"name" => "Alice"})
+      bob = account_fixture(%{"name" => "Bob"})
+
+      game_id = Games.create_game(%{max_players: 4})
+      {:ok, 1} = Games.join(game_id, alice.id, alice.name)
+      {:ok, 2} = Games.join(game_id, bob.id, bob.name)
+
+      {:ok, view, _html} = conn |> log_in_account(alice) |> live(~p"/Game-#{game_id}")
+
+      assert has_element?(view, ~s(#lobby-quit[phx-click="arm_quit"]), "Quit")
+
+      view |> element("#lobby-quit") |> render_click()
+      assert has_element?(view, ~s(#lobby-quit.is-armed[phx-click="quit"]), "Tap again to leave")
+      assert {:lobby, %{players: [_, _]}} = Games.player_view(game_id, bob.id)
+
+      view |> element("#lobby-quit") |> render_click()
+      assert has_element?(view, ~s(button[phx-click="join"]))
+      assert {:lobby, lobby_view} = Games.player_view(game_id, bob.id)
+      assert Enum.map(lobby_view.players, & &1.name) == ["Bob"]
     end
 
     test "a player quitting the lobby leaves and can rejoin as a fresh Join click", %{conn: conn} do
