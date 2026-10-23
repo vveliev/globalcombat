@@ -42,6 +42,36 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 
+// `JS.dispatch("gc:reset-form", to: "#some-form")` from a phx-submit: clear the form
+// the moment it is sent. LiveView leaves the focused input's value alone when it
+// patches, so a server-side blank form by itself does not empty the box.
+window.addEventListener("gc:reset-form", e => {
+  if (e.target instanceof HTMLFormElement) e.target.reset()
+})
+
+// The order panel's quick picks (1 · Half · Max · ±1) are server events that
+// rewrite the draft amount, but the submit reads the inputs in the DOM. Mirror the
+// pick into the inputs synchronously so a quick Assign/Attack after a pick sends
+// the picked amount even when the server's diff has not landed yet.
+document.addEventListener("click", e => {
+  const pick = e.target.closest("#order-stepper [data-amount], #order-stepper [data-amount-delta]")
+  if (!pick) return
+  const form = pick.closest("form")
+  const number = form && form.querySelector("#order-amount")
+  if (!number) return
+  const range = form.querySelector("#order-amount-range")
+  let amount
+  if (pick.dataset.amount !== undefined) {
+    amount = parseInt(pick.dataset.amount, 10)
+  } else {
+    amount = (parseInt(number.value, 10) || 0) + parseInt(pick.dataset.amountDelta, 10)
+  }
+  if (Number.isNaN(amount)) return
+  amount = Math.max(amount, 0)
+  number.value = String(amount)
+  if (range) range.value = String(Math.min(amount, parseInt(range.max, 10) || amount))
+})
+
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session

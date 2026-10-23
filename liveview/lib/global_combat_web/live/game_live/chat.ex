@@ -3,6 +3,10 @@ defmodule GlobalCombatWeb.GameLive.Chat do
   The game's chat box in the players drawer/rail: a send form for logged-in viewers (the
   `send_chat` event `GameLive` handles) above the newest-first message log, which is a polite
   live region so incoming messages are announced without interrupting.
+
+  Submitting also dispatches `gc:reset-form` on the form (handled in `app.js`) so the
+  message box empties at once: LiveView never patches the value of the focused input, so
+  the server's blank `chat_form` alone leaves the sent text in place to be sent twice.
   """
 
   use GlobalCombatWeb, :html
@@ -21,7 +25,7 @@ defmodule GlobalCombatWeb.GameLive.Chat do
         :if={@logged_in}
         for={@chat_form}
         id="chat-form"
-        phx-submit="send_chat"
+        phx-submit={JS.push("send_chat") |> JS.dispatch("gc:reset-form", to: "#chat-form")}
         class="flex flex-col gap-[var(--space-2)]"
       >
         <Input.input
