@@ -46,9 +46,12 @@ defmodule GlobalCombatWeb.AccountContactControllerTest do
       end)
     end
 
-    test "rejects a blank subject", %{conn: conn} do
+    test "rejects a blank subject and keeps the typed message", %{conn: conn} do
       conn = post(conn, ~p"/account/contact", %{"subject" => "  ", "comments" => "Hello"})
-      assert html_response(conn, 200) =~ "Subject cannot be empty."
+      html = html_response(conn, 200)
+      assert html =~ "Subject cannot be empty."
+      assert html =~ ~s(role="alert")
+      assert html =~ "Hello</textarea>"
     end
 
     test "rejects a blank message", %{conn: conn} do

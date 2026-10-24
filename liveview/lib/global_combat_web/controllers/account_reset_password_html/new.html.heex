@@ -1,9 +1,14 @@
-<div class="mx-auto max-w-sm px-4 py-16">
-  <h1 class="text-2xl font-semibold mb-6">Lost Password</h1>
-
-  <p :if={@error_message} id="login-error" role="alert" class="alert alert-error mb-4">
+<.auth_card
+  title="Lost Password"
+  kicker="Account recovery"
+  lede="Enter your login name or email address and we'll email you a new password."
+  current_account={@current_account}
+  current_path={assigns[:current_path]}
+  flash={@flash}
+>
+  <.inline_message :if={@error_message} id="login-error" intent="danger">
     {@error_message}
-  </p>
+  </.inline_message>
 
   <.form
     :let={f}
@@ -11,21 +16,34 @@
     as={:account}
     action={~p"/account/reset-password"}
     method="post"
-    class="flex flex-col gap-4"
+    class="flex flex-col gap-[var(--space-4)]"
   >
-    <.input
+    <Input.input
       field={f[:login]}
       type="text"
-      label="Login name or email address"
-      required
+      label="Login name or email"
+      autocomplete="username"
+      autocapitalize="none"
+      spellcheck="false"
       autofocus
+      required
       aria-invalid={@error_message && "true"}
       aria-describedby={@error_message && "login-error"}
     />
-    <.button variant="primary" class="mt-2">Email me a new password</.button>
+    <Button.button
+      type="submit"
+      class="w-full min-h-[var(--size-touch-target)] touch-manipulation"
+    >
+      Email me a new password
+    </Button.button>
   </.form>
 
-  <div class="mt-6 text-sm">
-    <.link navigate={~p"/account/log-on"}>Back to log on</.link>
-  </div>
-</div>
+  <:footer>
+    <p>
+      Remembered it?
+      <.link navigate={~p"/account/log-on"} class="font-semibold text-primary hover:underline">
+        Back to log on
+      </.link>
+    </p>
+  </:footer>
+</.auth_card>

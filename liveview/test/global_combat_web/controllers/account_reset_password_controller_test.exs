@@ -22,6 +22,10 @@ defmodule GlobalCombatWeb.AccountResetPasswordControllerTest do
       assert redirected_to(conn) == ~p"/account/log-on"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "A new password was sent"
 
+      # The chrome shows no flash of its own, so the Log On card has to surface it.
+      conn = get(recycle(conn), ~p"/account/log-on")
+      assert html_response(conn, 200) =~ "A new password was sent to your email."
+
       assert_email_sent(fn email ->
         assert email.subject == "Global Combat Password Reset"
         assert email.text_body =~ "Login Name: #{account.name}"

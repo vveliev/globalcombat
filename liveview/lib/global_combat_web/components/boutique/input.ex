@@ -17,7 +17,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Input do
 
   attr :rest, :global,
     include:
-      ~w(autocomplete disabled form max maxlength min minlength pattern placeholder readonly required step)
+      ~w(autocomplete autofocus disabled form max maxlength min minlength pattern placeholder readonly required rows step)
 
   def input(assigns) do
     # With a `field`, only forward the id/name/value that were actually given: passing them as
