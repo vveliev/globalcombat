@@ -79,7 +79,7 @@ defmodule GlobalCombat.Games.PlayerView do
 
   `last_turn_log.turn` is checked against `engine.turn` before any of the above runs at all: a
   log whose stamped turn doesn't match the state it's paired with (a rehydrate that landed one
-  half of `GlobalCombat.Games.persist_turn/3`'s atomic pair without the other would still be a
+  half of `GlobalCombat.Games.persist_turn/4`'s atomic pair without the other would still be a
   bug, but this is a second, structural line of defense against it; a game rehydrated before the
   `last_turn_events` column existed, decoding to `turn: nil`, hits the same path) drops the whole
   log rather than risk a plausible-looking but wrong replay.

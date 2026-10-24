@@ -936,10 +936,11 @@ defmodule GlobalCombat.Games.Server do
   end
 
   # `advance_clock: true` (the default — every self-triggered run: all-players-done, force_turn)
-  # advances games.turn/prev_turn_time/last_turn_time itself, mirroring what
+  # advances games.prev_turn_time/last_turn_time itself, mirroring what
   # GlobalCombat.Games.Scheduling.claim_turn/2 would have done had the scheduler gotten there
   # first. `advance_clock: false` is only passed from the {:run_scheduled_turn, _} handler, whose
   # caller already advanced those columns via an actual claim_turn/2 call before handing off —
+  # games.turn isn't one of them either way: persist_turn/4 writes it from the engine —
   # see GlobalCombat.Games.advance_turn/4's moduledoc for why running it again here would be a
   # double-advance, not idempotent.
   #
@@ -973,7 +974,7 @@ defmodule GlobalCombat.Games.Server do
         state
       end
 
-    GamesDb.persist_turn(state.game_id, build_wire(state), TurnLog.encode(turn_log))
+    GamesDb.persist_turn(state.game_id, build_wire(state), TurnLog.encode(turn_log), engine.turn)
 
     settle_results(state, old_engine)
 
@@ -1069,7 +1070,7 @@ defmodule GlobalCombat.Games.Server do
   end
 
   defp persist_snapshot(state) do
-    GamesDb.persist_serialized(state.game_id, build_wire(state))
+    GamesDb.persist_serialized(state.game_id, build_wire(state), state.engine.turn)
   end
 
   defp build_wire(state) do

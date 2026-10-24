@@ -117,7 +117,7 @@ defmodule GlobalCombat.GamesTest do
     end
   end
 
-  describe "persist_serialized/2" do
+  describe "persist_serialized/3" do
     test "overwrites serialized for the given game_id only" do
       game = game_fixture()
       other = game_fixture()
@@ -127,9 +127,17 @@ defmodule GlobalCombat.GamesTest do
       assert Games.get_game!(game.id).serialized == "new-blob"
       assert Games.get_game!(other.id).serialized != "new-blob"
     end
+
+    test "writes the snapshot's turn alongside it when given one" do
+      game = game_fixture(%{db_turn: 1})
+
+      assert :ok = Games.persist_serialized(game.id, "new-blob", 4)
+
+      assert %{serialized: "new-blob", turn: 4} = Games.get_game!(game.id)
+    end
   end
 
-  describe "persist_turn/3" do
+  describe "persist_turn/4" do
     test "overwrites serialized and last_turn_events on the given row together, in one statement" do
       # A single `UPDATE ... SET serialized = ?, last_turn_events = ?` can't land one column
       # without the other the way two separate `persist_serialized/2` + a hypothetical
@@ -137,11 +145,12 @@ defmodule GlobalCombat.GamesTest do
       game = game_fixture()
       other = game_fixture()
 
-      assert :ok = Games.persist_turn(game.id, "new-blob", "new-events")
+      assert :ok = Games.persist_turn(game.id, "new-blob", "new-events", 5)
 
       updated = Games.get_game!(game.id)
       assert updated.serialized == "new-blob"
       assert updated.last_turn_events == "new-events"
+      assert updated.turn == 5
 
       untouched = Games.get_game!(other.id)
       assert untouched.serialized != "new-blob"
