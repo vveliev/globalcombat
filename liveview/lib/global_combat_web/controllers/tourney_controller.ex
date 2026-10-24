@@ -16,7 +16,7 @@ defmodule GlobalCombatWeb.TourneyController do
   def index(conn, params) do
     case Tourneys.get_tourney(conn.assigns.legacy_id) do
       nil ->
-        conn |> put_status(:not_found) |> text("Not Found")
+        GlobalCombatWeb.ErrorHTML.not_found(conn)
 
       tourney ->
         admin? = admin?(conn)
@@ -90,7 +90,7 @@ defmodule GlobalCombatWeb.TourneyController do
 
       render_index(conn, Tourneys.get_tourney!(tourney.id), message)
     else
-      nil -> conn |> put_status(:not_found) |> text("Not Found")
+      nil -> GlobalCombatWeb.ErrorHTML.not_found(conn)
       _ -> redirect(conn, to: "/")
     end
   end
@@ -107,7 +107,7 @@ defmodule GlobalCombatWeb.TourneyController do
 
       render_index(conn, Tourneys.get_tourney!(tourney.id), message)
     else
-      nil -> conn |> put_status(:not_found) |> text("Not Found")
+      nil -> GlobalCombatWeb.ErrorHTML.not_found(conn)
       _ -> redirect(conn, to: "/")
     end
   end

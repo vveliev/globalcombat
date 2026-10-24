@@ -1,50 +1,77 @@
-<div class="mx-auto max-w-sm px-4 py-16">
-  <h1 class="text-2xl font-semibold mb-6">Account Settings</h1>
+<.site_chrome current_account={@current_account} current_path={assigns[:current_path]}>
+  <div class="mx-auto w-full max-w-md py-[var(--space-6)] sm:py-[var(--space-8)] flex flex-col gap-[var(--space-5)]">
+    <header class="flex flex-col gap-[var(--space-2)]">
+      <Kicker.kicker>Account</Kicker.kicker>
+      <h1 class="heading-3">Account Settings</h1>
+      <p class="text-sm text-text-muted">Signed in as {@current_account.name}.</p>
+    </header>
 
-  <p
-    :if={@result_message}
-    id="result-message"
-    role={if @result_error?, do: "alert", else: "status"}
-    class="alert alert-info mb-4"
-  >
-    {@result_message}
-  </p>
+    <Card.card>
+      <:header>Change password</:header>
+      <div class="flex flex-col gap-[var(--space-5)]">
+        <.inline_message
+          :if={@result_message}
+          id="result-message"
+          intent={if @result_error?, do: "danger", else: "success"}
+        >
+          {@result_message}
+        </.inline_message>
 
-  <.form
-    :let={f}
-    for={%{}}
-    as={:password}
-    action={~p"/account/settings/password"}
-    method="put"
-    class="flex flex-col gap-4"
-  >
-    <.input
-      field={f[:old_password]}
-      type="password"
-      name="old_password"
-      label="Current password"
-      required
-      aria-invalid={@result_error? && "true"}
-      aria-describedby={@result_error? && "result-message"}
-    />
-    <.input
-      field={f[:new_password]}
-      type="password"
-      name="new_password"
-      label="New password"
-      required
-      aria-invalid={@result_error? && "true"}
-      aria-describedby={@result_error? && "result-message"}
-    />
-    <.input
-      field={f[:new_password_confirmation]}
-      type="password"
-      name="new_password_confirmation"
-      label="Confirm new password"
-      required
-      aria-invalid={@result_error? && "true"}
-      aria-describedby={@result_error? && "result-message"}
-    />
-    <.button variant="primary" class="mt-2">Change Password</.button>
-  </.form>
-</div>
+        <.form
+          :let={f}
+          for={%{}}
+          as={:password}
+          action={~p"/account/settings/password"}
+          method="put"
+          class="flex flex-col gap-[var(--space-4)]"
+        >
+          <Input.input
+            field={f[:old_password]}
+            type="password"
+            name="old_password"
+            value=""
+            label="Current password"
+            autocomplete="current-password"
+            required
+            aria-invalid={@result_error? && "true"}
+            aria-describedby={@result_error? && "result-message"}
+          />
+          <Input.input
+            field={f[:new_password]}
+            type="password"
+            name="new_password"
+            value=""
+            label="New password"
+            autocomplete="new-password"
+            minlength="5"
+            required
+            aria-invalid={@result_error? && "true"}
+            aria-describedby={
+              if @result_error?, do: "new-password-hint result-message", else: "new-password-hint"
+            }
+          />
+          <p id="new-password-hint" class="-mt-[var(--space-3)] text-xs text-text-muted">
+            At least 5 characters.
+          </p>
+          <Input.input
+            field={f[:new_password_confirmation]}
+            type="password"
+            name="new_password_confirmation"
+            value=""
+            label="Confirm new password"
+            autocomplete="new-password"
+            required
+            aria-invalid={@result_error? && "true"}
+            aria-describedby={@result_error? && "result-message"}
+          />
+          <Button.button
+            type="submit"
+            class="w-full min-h-[var(--size-touch-target)] touch-manipulation"
+          >
+            Change Password
+          </Button.button>
+        </.form>
+      </div>
+    </Card.card>
+  </div>
+</.site_chrome>

@@ -17,6 +17,9 @@ config :global_combat, GlobalCombatWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
     formats: [html: GlobalCombatWeb.ErrorHTML, json: GlobalCombatWeb.ErrorJSON],
+    # The HTML error pages render inside the site chrome, which needs the root
+    # layout for its stylesheet and scripts (see GlobalCombatWeb.ErrorHTML).
+    root_layout: {GlobalCombatWeb.Layouts, :root},
     layout: false
   ],
   pubsub_server: GlobalCombat.PubSub,

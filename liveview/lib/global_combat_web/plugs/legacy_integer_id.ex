@@ -26,7 +26,7 @@ defmodule GlobalCombatWeb.Plugs.LegacyIntegerId do
       {:ok, id_param} ->
         case Integer.parse(id_param) do
           {id, ""} -> assign(conn, :legacy_id, id)
-          _ -> conn |> send_resp(404, "Not Found") |> halt()
+          _ -> GlobalCombatWeb.ErrorHTML.not_found(conn)
         end
     end
   end
