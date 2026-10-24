@@ -36,11 +36,16 @@ defmodule GlobalCombat.Games.Scheduling do
   end
 
   @doc """
-  Atomically claims `game`'s current turn slot: advances `turn`/`prev_turn_time`/
-  `last_turn_time` in one conditional `UPDATE`, guarded on `last_turn_time` still matching what
-  `game` was read with. Returns `{:ok, claimed_game}` on the winning claim (exactly one row
+  Atomically claims `game`'s current turn slot: advances `prev_turn_time`/`last_turn_time` in
+  one conditional `UPDATE`, guarded on `last_turn_time` still matching what `game` was read with. Returns `{:ok, claimed_game}` on the winning claim (exactly one row
   affected) or `{:error, :already_claimed}` if another sweep already claimed this game's turn
   first (zero rows affected — `game` was stale).
+
+  `turn` is left alone: it is written only together with the engine snapshot it describes
+  (`GlobalCombat.Games.persist_turn/4`, `persist_serialized/3`). Bumping it here let the column
+  run ahead of the board whenever a claim's resolution didn't land in the snapshot the live
+  `GlobalCombat.Games.Server` keeps writing — for example a second node claiming the turn and
+  resolving it offline, which that Server's next order then overwrites.
 
   Only the clock bookkeeping happens here; running the actual turn (the engine + persisting its
   resulting state) is the caller's job via a separate step, so a claim failure downstream
@@ -54,14 +59,11 @@ defmodule GlobalCombat.Games.Scheduling do
       from(g in Game,
         where: g.id == ^game.id and g.last_turn_time == ^game.last_turn_time
       )
-      |> Repo.update_all(
-        set: [prev_turn_time: game.last_turn_time, last_turn_time: now, turn: game.turn + 1]
-      )
+      |> Repo.update_all(set: [prev_turn_time: game.last_turn_time, last_turn_time: now])
 
     case count do
       1 ->
-        {:ok,
-         %{game | prev_turn_time: game.last_turn_time, last_turn_time: now, turn: game.turn + 1}}
+        {:ok, %{game | prev_turn_time: game.last_turn_time, last_turn_time: now}}
 
       0 ->
         {:error, :already_claimed}

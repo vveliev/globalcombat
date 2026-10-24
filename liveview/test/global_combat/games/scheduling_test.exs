@@ -51,7 +51,7 @@ defmodule GlobalCombat.Games.SchedulingTest do
   end
 
   describe "claim_turn/2" do
-    test "advances turn/prev_turn_time/last_turn_time and reports the winning claim" do
+    test "advances prev_turn_time/last_turn_time, leaves turn to the engine, and reports the winning claim" do
       last_turn_time = minutes_ago(10)
 
       game =
@@ -65,12 +65,12 @@ defmodule GlobalCombat.Games.SchedulingTest do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
       assert {:ok, claimed} = Scheduling.claim_turn(game, now)
 
-      assert claimed.turn == 4
+      assert claimed.turn == 3
       assert claimed.prev_turn_time == last_turn_time
       assert claimed.last_turn_time == now
 
       reloaded = Repo.get!(GlobalCombat.Games.Game, game.id)
-      assert reloaded.turn == 4
+      assert reloaded.turn == 3
       assert reloaded.prev_turn_time == last_turn_time
       assert reloaded.last_turn_time == now
     end
@@ -87,7 +87,7 @@ defmodule GlobalCombat.Games.SchedulingTest do
 
       assert {:ok, claimed} = Scheduling.claim_turn(game, minutes_ago(6))
       assert {:ok, reclaimed} = Scheduling.claim_turn(claimed, minutes_ago(1))
-      assert reclaimed.turn == claimed.turn + 1
+      assert reclaimed.prev_turn_time == claimed.last_turn_time
     end
   end
 

@@ -2,7 +2,7 @@ defmodule GlobalCombat.Games.LiveResolver do
   @moduledoc """
   Production `GlobalCombat.Games.TurnScheduler.Resolver` — the bridge the scheduler's
   own moduledoc says doesn't exist yet. `GlobalCombat.Games.TurnScheduler` has already claimed
-  `game`'s turn slot (advanced `turn`/`prev_turn_time`/`last_turn_time`) by the time
+  `game`'s turn slot (advanced `prev_turn_time`/`last_turn_time`) by the time
   `resolve_turn/1` runs; this module's only job is making the actual `GlobalCombat.Engine.Game`
   turn happen and land back in `games.serialized`:
 
@@ -63,7 +63,12 @@ defmodule GlobalCombat.Games.LiveResolver do
         is_fogged: Map.fetch!(wire, :IsFogged)
       )
 
-    GamesDb.persist_turn(game.id, GrpcHost.Game.encode(resolved_wire), TurnLog.encode(turn_log))
+    GamesDb.persist_turn(
+      game.id,
+      GrpcHost.Game.encode(resolved_wire),
+      TurnLog.encode(turn_log),
+      engine.turn
+    )
 
     if engine.ended, do: GamesDb.finish_game(game.id)
 

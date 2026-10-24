@@ -26,10 +26,12 @@ defmodule GlobalCombat.Games.TurnSchedulerTest do
     scheduler = start_scheduler(resolver: SpyResolver)
     assert :ok = TurnScheduler.sweep_now(scheduler)
 
-    assert_receive {:resolved, %Game{id: id, turn: 2}}
+    assert_receive {:resolved, %Game{id: id, turn: 1}}
     assert id == game.id
 
-    assert %{turn: 2} = Repo.get!(Game, game.id)
+    # The claim only moves the clock; the resolver's snapshot write moves `turn`.
+    assert %{turn: 1, prev_turn_time: prev} = Repo.get!(Game, game.id)
+    assert prev == game.last_turn_time
   end
 
   test "leaves a game alone whose turn window has not elapsed" do
@@ -65,7 +67,8 @@ defmodule GlobalCombat.Games.TurnSchedulerTest do
     assert log =~ "resolver failed for game #{game.id}"
     assert Process.alive?(scheduler)
 
-    assert %{turn: 2} = Repo.get!(Game, game.id)
+    assert %{turn: 1, prev_turn_time: prev} = Repo.get!(Game, game.id)
+    assert prev == game.last_turn_time
   end
 
   defp minutes_ago(n) do

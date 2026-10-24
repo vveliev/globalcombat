@@ -59,15 +59,20 @@ defmodule GlobalCombat.Games do
   (`GlobalCombat.Games.Server`'s `persist_lobby/1`/`apply_order/2`/`eliminate_and_broadcast/2`)
   calls this so `games.serialized` always holds the live board's latest snapshot for boot-time
   rehydration/offline resolution to read back. Turn resolution itself goes through
-  `persist_turn/3` instead, which also stamps `last_turn_events` — see its moduledoc. A plain
+  `persist_turn/4` instead, which also stamps `last_turn_events` — see its moduledoc. A plain
   `update_all` by id rather than a fetch-then-update: the caller (`Games.Server`) is the sole
   writer for its own `game_id` by construction (one GenServer per game,
   `GlobalCombat.Games.TurnScheduler`'s live-process resolve path also routes through it rather
   than writing directly), so there is no concurrent writer to race.
+
+  Pass the snapshot's engine `turn` for a started game so `games.turn` always names the turn
+  `serialized` holds; a lobby snapshot has no turn and leaves the column alone.
   """
-  def persist_serialized(game_id, serialized) do
+  def persist_serialized(game_id, serialized, turn \\ nil) do
+    set = if turn, do: [serialized: serialized, turn: turn], else: [serialized: serialized]
+
     from(g in Game, where: g.id == ^game_id)
-    |> Repo.update_all(set: [serialized: serialized])
+    |> Repo.update_all(set: set)
 
     :ok
   end
@@ -79,11 +84,12 @@ defmodule GlobalCombat.Games do
   relative to the state it describes. A single `UPDATE ... SET serialized = ?, last_turn_events
   = ?` on one row lands both columns or neither — unlike two separate `update_all` calls, which
   could persist one and crash before the other. `turn_log` is a
-  `GlobalCombat.Games.TurnLog.encode/1`-produced blob.
+  `GlobalCombat.Games.TurnLog.encode/1`-produced blob. `turn` is the resolved engine's turn,
+  written in the same statement so `games.turn` can't disagree with the snapshot.
   """
-  def persist_turn(game_id, serialized, turn_log) do
+  def persist_turn(game_id, serialized, turn_log, turn) do
     from(g in Game, where: g.id == ^game_id)
-    |> Repo.update_all(set: [serialized: serialized, last_turn_events: turn_log])
+    |> Repo.update_all(set: [serialized: serialized, last_turn_events: turn_log, turn: turn])
 
     :ok
   end
@@ -92,8 +98,9 @@ defmodule GlobalCombat.Games do
   Advances `games.turn`/`prev_turn_time`/`last_turn_time` for a turn `GlobalCombat.Games.Server`
   ran on its own initiative (a player forcing the turn, or every seat marking done) rather than
   one `GlobalCombat.Games.TurnScheduler` already claimed via `GlobalCombat.Games.Scheduling.
-  claim_turn/2` — that path already advanced these columns before handing off to the resolver, so
-  `Games.Server` must not double-advance them there. Same reasoning as `persist_serialized/2` for
+  claim_turn/2` — that path already advanced the clock columns before handing off to the resolver,
+  so `Games.Server` must not double-advance them there. (`turn` is the engine's own value, the same
+  one `persist_turn/4` writes, so setting it here is a no-op repeat, not an advance.) Same reasoning as `persist_serialized/2` for
   why this is a plain `update_all`, not an optimistically-locked claim: `Games.Server` is the
   sole writer of its own game's clock columns outside a scheduler claim.
   """

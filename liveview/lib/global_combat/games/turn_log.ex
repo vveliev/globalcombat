@@ -5,7 +5,7 @@ defmodule GlobalCombat.Games.TurnLog do
   rule needs (`before_owners` -- see its moduledoc's "Turn-resolution event visibility" section), and
   the `turn` number they both belong to.
 
-  Stamping `turn` isn't just informational: `GlobalCombat.Games.persist_turn/3` writes
+  Stamping `turn` isn't just informational: `GlobalCombat.Games.persist_turn/4` writes
   `games.serialized` and `games.last_turn_events` in one statement so the pair can't land as two
   independently-crashable writes, but `PlayerView.build/3` still checks this `turn` against the
   engine's own current `turn` before trusting the log at all -- a second, structural line of
@@ -38,7 +38,7 @@ defmodule GlobalCombat.Games.TurnLog do
   def encode(%__MODULE__{} = log), do: :erlang.term_to_binary(log)
 
   @doc """
-  Decodes a `GlobalCombat.Games.persist_turn/3`-written blob back into a `%TurnLog{}`. `nil`
+  Decodes a `GlobalCombat.Games.persist_turn/4`-written blob back into a `%TurnLog{}`. `nil`
   covers both a game rehydrated before this column existed and one no turn has resolved for
   since -- decodes to the empty log (`turn: nil`, which `PlayerView.build/3` treats the same as
   any other turn mismatch: nothing to show).
