@@ -87,11 +87,11 @@ defmodule GlobalCombatWeb.HomeController do
     id = conn.assigns[:legacy_id]
 
     if is_nil(id) or id <= 0 do
-      send_resp(conn, 404, "Not Found")
+      GlobalCombatWeb.ErrorHTML.not_found(conn)
     else
       case Accounts.get_account_including_disabled(id) do
         nil ->
-          send_resp(conn, 404, "Not Found")
+          GlobalCombatWeb.ErrorHTML.not_found(conn)
 
         account ->
           render_player_info(conn, account, id, params)
