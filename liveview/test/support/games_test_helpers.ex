@@ -7,9 +7,11 @@ defmodule GlobalCombat.GamesTestHelpers do
 
   import ExUnit.Assertions
 
+  alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Registry, as: GamesRegistry
   alias GlobalCombat.Games.Server
   alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
+  alias GlobalCombat.Games.TurnLog
 
   @doc """
   Terminates `game_id`'s `Games.Server` and returns once its Registry entry is gone.
@@ -44,5 +46,20 @@ defmodule GlobalCombat.GamesTestHelpers do
     _ = :sys.get_state(Server.via(game_id))
     _ = :sys.get_state(view.pid)
     view
+  end
+
+  @doc """
+  The attack and transfer events `seat` issued in `game_id`'s last resolved turn, read from the
+  persisted `games.last_turn_events` log. An event's source area is matched against the log's
+  `before_owners`, so captures made during the turn don't hide who ordered them.
+  """
+  def seat_moves(game_id, seat) do
+    log = TurnLog.decode(GamesDb.get_game!(game_id).last_turn_events)
+
+    Enum.filter(log.events, fn
+      {:transfer, from, _to, _amount} -> log.before_owners[from] == seat
+      {:attack, from, _to, _amount, _al, _dl, _captured?} -> log.before_owners[from] == seat
+      _event -> false
+    end)
   end
 end

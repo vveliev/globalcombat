@@ -6,6 +6,7 @@ defmodule GlobalCombat.Games.LiveTest do
   import GlobalCombat.AccountsFixtures
   import GlobalCombat.GamesTestHelpers
 
+  alias GlobalCombat.Accounts
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Live, as: Games
   alias GlobalCombat.Games.PubSub, as: GamePubSub
@@ -528,6 +529,24 @@ defmodule GlobalCombat.Games.LiveTest do
 
       assert Games.game_exists?(game_id)
       assert {:lobby, %{players: [%{name: "Alice"}]}} = Games.player_view(game_id, 101)
+    end
+
+    # Playtest 2026-10-23 saw training turns resolve with no Computer moves and suspected the
+    # wire snapshot dropped its queued orders. It carries them (Command/Target/Amount per area):
+    # each turn here runs on a Server rehydrated from that snapshot alone.
+    test "a training game's Computer still plays every turn when its Server keeps being rehydrated" do
+      game_id = Games.create_game(%{map_name: :elements, is_fogged: true, is_training: true})
+      {:ok, 1} = Games.join(game_id, 101, "Alice")
+      {:ok, 2} = Games.join(game_id, Accounts.computer_account_id(), Accounts.computer_name())
+      :ok = Games.start_game(game_id, 101)
+
+      for turn <- 2..4 do
+        kill_server!(game_id)
+
+        :ok = Games.set_done(game_id, 101)
+        assert {:playing, %{turn: ^turn}} = Games.player_view(game_id, 101)
+        assert seat_moves(game_id, 2) != []
+      end
     end
 
     test "a game id with no games row at all reports not found" do
