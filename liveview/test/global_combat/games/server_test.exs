@@ -628,10 +628,9 @@ defmodule GlobalCombat.Games.ServerTest do
   end
 
   # Starts a Server under the test supervisor rather than GamesSupervisor, to exercise
-  # rehydrate_from: below the DynamicSupervisor layer. `:temporary` so kill_server!/1's deliberate
-  # kill isn't undone by the test supervisor restarting the (normally :transient) child.
+  # rehydrate_from: below the DynamicSupervisor layer.
   defp start_server!(opts) do
-    start_supervised!(Supervisor.child_spec({Server, opts}, restart: :temporary))
+    start_supervised!({Server, opts})
   end
 
   # Unlike GlobalCombat.Games.LiveTest's same-named helper, this file's Server processes are

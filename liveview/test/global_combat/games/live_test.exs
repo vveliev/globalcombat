@@ -509,6 +509,45 @@ defmodule GlobalCombat.Games.LiveTest do
       assert view.turn == 2
     end
 
+    test "a Server crashed mid-game comes back from games.serialized, not the opts it was created with",
+         %{game_id: game_id} do
+      Games.join(game_id, 101, "Alice")
+      Games.join(game_id, 102, "Bob")
+      :ok = Games.start_game(game_id, 101)
+      :ok = Games.set_done(game_id, 101)
+      :ok = Games.set_done(game_id, 102)
+      {:playing, %{turn: 2}} = Games.player_view(game_id, 101)
+
+      crash_server!(game_id)
+
+      assert {:playing, view} = Games.player_view(game_id, 101)
+      assert view.turn == 2
+      assert Enum.map(view.players, & &1.name) |> Enum.sort() == ["Alice", "Bob"]
+    end
+
+    test "a rehydrated Server that crashes comes back from the latest snapshot, not the one it was rehydrated from",
+         %{game_id: game_id} do
+      Games.join(game_id, 101, "Alice")
+      Games.join(game_id, 102, "Bob")
+      :ok = Games.start_game(game_id, 101)
+
+      # Rehydrated at turn 1, then played on to turn 3.
+      kill_server!(game_id)
+      {:playing, %{turn: 1}} = Games.player_view(game_id, 101)
+
+      for _ <- 1..2 do
+        :ok = Games.set_done(game_id, 101)
+        :ok = Games.set_done(game_id, 102)
+      end
+
+      {:playing, %{turn: 3}} = Games.player_view(game_id, 101)
+
+      crash_server!(game_id)
+
+      assert {:playing, view} = Games.player_view(game_id, 101)
+      assert view.turn == 3
+    end
+
     test "a game with no Server and no persisted state (created, never joined) still reports not found" do
       # A lobby is snapshotted on its first join (see LobbyPersistenceTest), so the only row with
       # nothing to rehydrate from is one nobody ever joined.
