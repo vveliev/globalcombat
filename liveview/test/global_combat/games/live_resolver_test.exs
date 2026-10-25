@@ -1,6 +1,8 @@
 defmodule GlobalCombat.Games.LiveResolverTest do
   use GlobalCombat.DataCase, async: true
 
+  import GlobalCombat.GamesTestHelpers
+
   alias GlobalCombat.Accounts
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
@@ -79,6 +81,25 @@ defmodule GlobalCombat.Games.LiveResolverTest do
       assert computer.unassigned_armies == 0
       assert Engine.area!(engine, 2).assigned_armies > 0
       refute Engine.player!(engine, 1).done
+    end
+
+    # The second and third turns resolve orders the Computer queued during the previous offline
+    # run, which only ever lived in the persisted snapshot.
+    test "in a training game with no live Server, the Computer's snapshot-only orders resolve" do
+      game_id =
+        GamesLive.create_game(%{map_name: :elements, is_fogged: true, is_training: true})
+
+      {:ok, 1} = GamesLive.join(game_id, 101, "Alice")
+      {:ok, 2} = GamesLive.join(game_id, Accounts.computer_account_id(), Accounts.computer_name())
+      :ok = GamesLive.start_game(game_id, 101)
+      kill_server!(game_id)
+
+      for _turn <- 1..3 do
+        assert :ok = LiveResolver.resolve_turn(GamesDb.get_game!(game_id))
+        assert seat_moves(game_id, 2) != []
+      end
+
+      refute Server.alive?(game_id)
     end
 
     test "errors instead of raising when there's no persisted state to rehydrate from" do
