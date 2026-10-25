@@ -65,13 +65,18 @@ defmodule GlobalCombat.Games.Server do
 
   # --- client API --------------------------------------------------------
 
+  # `:temporary`, not `:transient`: a supervisor restart replays the opts this child was first
+  # started with — `Games.Live.create_game/1`'s empty-lobby opts, or a `rehydrate_from:` snapshot
+  # that may be many turns stale — so a crashed game came back as the wrong game. Left down
+  # instead, the next access (`Games.Supervisor.ensure_started/1`) or scheduled claim
+  # (`Games.LiveResolver`'s offline path) works from the current `games` row.
   def child_spec(opts) do
     game_id = Keyword.fetch!(opts, :game_id)
 
     %{
       id: {__MODULE__, game_id},
       start: {__MODULE__, :start_link, [opts]},
-      restart: :transient
+      restart: :temporary
     }
   end
 

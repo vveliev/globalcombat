@@ -33,7 +33,7 @@ defmodule GlobalCombat.Games.Supervisor do
   `games.serialized` snapshot if none is currently registered. Unlike `rehydrate_active_games/0`
   (which only ever runs once, at application boot), this is meant to be called from
   `GlobalCombat.Games.Live` on every player action/page load — so a game whose process died
-  *after* boot (a crash this DynamicSupervisor didn't restart with fresh state, a deploy without
+  *after* boot (a crash — Servers are `:temporary`, so this DynamicSupervisor never restarts one — a deploy without
   a full node restart, a concurrent dev-server restart) gets transparently rehydrated the next
   time a player reaches it, instead of being permanently "not found" despite valid DB state.
 

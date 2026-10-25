@@ -27,6 +27,29 @@ defmodule GlobalCombat.GamesTestHelpers do
     wait_until_deregistered(game_id)
   end
 
+  @doc """
+  Crashes `game_id`'s `Games.Server` with an untrappable `:kill` — unlike `kill_server!/1`'s
+  `terminate_child/2`, the DynamicSupervisor sees an abnormal exit and applies the child's own
+  restart strategy. Returns once the supervisor has handled the exit (and any restart it
+  decided on), and the dead pid is no longer registered.
+  """
+  def crash_server!(game_id) do
+    [{pid, _}] = Registry.lookup(GamesRegistry, game_id)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+    # The supervisor's restart (if any) runs inside its own :EXIT handling, so once it has
+    # answered a call that exit has been dealt with.
+    _ = :sys.get_state(GamesSupervisor)
+    wait_until_not_registered(game_id, pid)
+  end
+
+  defp wait_until_not_registered(game_id, pid) do
+    if match?([{^pid, _}], Registry.lookup(GamesRegistry, game_id)) do
+      wait_until_not_registered(game_id, pid)
+    end
+  end
+
   @doc "Spins (no sleep) until `game_id` has no Registry entry."
   def wait_until_deregistered(game_id) do
     unless Registry.lookup(GamesRegistry, game_id) == [] do
