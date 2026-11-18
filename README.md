@@ -18,7 +18,7 @@ See https://github.com/Bryan-Legend/globalcombat/issues/11 if you'd be intereste
 
 The `liveview/` directory holds the Elixir / Phoenix LiveView port of the game. The
 only local dependency is Docker; the compose stack builds the Phoenix app, the
-`.NET` gRPC engine host, and a MySQL instance loaded with the checked-in schemas.
+`.NET` gRPC engine host, and a Postgres 18 instance the app migrates on boot.
 
 ```bash
 make dev
@@ -33,7 +33,7 @@ account:
 
 Create a game with **Training Mode** checked to play against the Computer opponent
 without a second person. Ports are pinned to the `11400` block (`11400` web, `11410`
-gRPC engine, `11434` MySQL, loopback only) -- see the header of `docker-compose.yml`.
+gRPC engine, `11434` Postgres, loopback only) -- see the header of `docker-compose.yml`.
 
 One stack at a time: the compose project name and subnet are fixed, so the stack is
 shared by every checkout of this repo on the machine. Running `make dev` from a second

@@ -17,22 +17,19 @@
 #   docker compose -f docker-compose.prod.yml up -d
 
 services:
-  mysql:
-    image: mysql:8.0
-    # Same driver constraint as dev (MyXQL requires mysql_native_password) —
-    # not a security posture. Unlike dev, this does NOT set
-    # MYSQL_ALLOW_EMPTY_PASSWORD; MYSQL_ROOT_PASSWORD/MYSQL_PASSWORD come from
-    # the fleet's injected .env (docs/launch.md §2.3).
-    command: --default-authentication-plugin=mysql_native_password
+  postgres:
+    image: postgres:18
+    # Credentials come from the fleet's injected .env (docs/launch.md §2.3);
+    # POSTGRES_USER owns POSTGRES_DB and is the role the app connects as.
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-global_combat_prod}
-      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-global_combat_prod}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
-      - mysql-data:/var/lib/mysql
+      # See docker-compose.yml: 18+ images keep data under /var/lib/postgresql/18/docker.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -54,7 +51,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     networks: [gc-internal]
 
@@ -72,7 +69,7 @@ services:
       GRPC_PORT: "5251"
       MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
       grpc-host:
         condition: service_started
@@ -80,7 +77,7 @@ services:
     networks: [gc-internal, gc-proxy]
 
 volumes:
-  mysql-data:
+  postgres-data:
 
 networks:
   gc-internal: {}

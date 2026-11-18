@@ -2,12 +2,12 @@ import Config
 
 # Configure your database
 # Ports follow the fleet's block scheme (the fleet's port registry): this
-# project owns block 11400 — 11400 web, 11410 gRPC engine, 11434 mysql.
+# project owns block 11400 — 11400 web, 11410 gRPC engine, 11434 postgres.
 config :global_combat, GlobalCombat.Repo,
-  username: System.get_env("MYSQL_USER", "root"),
-  password: System.get_env("MYSQL_PASSWORD", ""),
-  hostname: System.get_env("MYSQL_HOST", "localhost"),
-  port: String.to_integer(System.get_env("MYSQL_PORT", "11434")),
+  username: System.get_env("PGUSER", "postgres"),
+  password: System.get_env("PGPASSWORD", "postgres"),
+  hostname: System.get_env("PGHOST", "localhost"),
+  port: String.to_integer(System.get_env("PGPORT", "11434")),
   database: "global_combat_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,

@@ -3,7 +3,7 @@ defmodule GlobalCombat.Games.TurnScheduler.SpyResolver do
   Test-only `GlobalCombat.Games.TurnScheduler.Resolver` — records `resolve_turn/1` calls by
   sending `{:resolved, game}` to whatever pid was `register/3`'d for that game's id, so async
   tests can assert on scheduler behavior without any shared, test-global process state (each
-  game id -> pid mapping is independent, and MySQL `AUTO_INCREMENT` ids don't collide across
+  game id -> pid mapping is independent, and sequence-assigned ids don't collide across
   concurrent sandboxed test transactions).
   """
 

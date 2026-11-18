@@ -11,11 +11,17 @@ defmodule GlobalCombat.Repo.Migrations.CreateAccounts do
   #     data — flagged for Dev, not dropped from the live DB, just not modeled here.
   #   - session_id / session_exp: commented out in Account.Load; session identity lives in
   #     the auth session, not these columns.
+  #
+  # `name`/`email` are `citext`: the legacy MySQL columns used a case-insensitive collation, so
+  # logging in as `bob` found `Bob`, and the unique indexes rejected `Bob` once `bob` existed.
+  # Plain Postgres `varchar` would silently make both case-sensitive.
   def change do
+    execute "CREATE EXTENSION IF NOT EXISTS citext", ""
+
     create table(:account) do
-      add :name, :string, null: false
+      add :name, :citext, null: false
       add :password, :text, null: false
-      add :email, :string, null: false
+      add :email, :citext, null: false
 
       add :info_visible, :boolean, null: false, default: true
       add :wins, :integer, null: false, default: 0

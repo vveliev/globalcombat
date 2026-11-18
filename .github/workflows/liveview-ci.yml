@@ -27,15 +27,16 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      mysql:
-        image: mysql:8.4
+      postgres:
+        image: postgres:18
         env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         ports:
-          # host 11434 matches config/test.exs's MYSQL_PORT default (fleet's 11400 port block)
-          - 11434:3306
+          # host 11434 matches config/test.exs's PGPORT default (fleet's 11400 port block)
+          - 11434:5432
         options: >-
-          --health-cmd="mysqladmin ping -h localhost"
+          --health-cmd="pg_isready -U postgres"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -72,10 +73,10 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
-      - name: Wait for MySQL
+      - name: Wait for Postgres
         run: |
           for i in $(seq 1 30); do
-            mysqladmin ping -h 127.0.0.1 -P 11434 -u root --silent && break
+            pg_isready -h 127.0.0.1 -p 11434 -U postgres -q && break
             sleep 2
           done
 

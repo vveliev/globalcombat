@@ -108,17 +108,17 @@ defmodule GlobalCombat.Accounts do
     admin_used = Keyword.get(opts, :admin_used, false)
 
     Repo.transaction(fn ->
-      # MySQL has no `UPDATE ... RETURNING`, so update_all can't select the updated row —
-      # apply the same increment/set locally to the struct we already hold instead of re-reading.
+      # Apply the same increment/set locally to the struct we already hold instead of
+      # re-reading (written when the DB was MySQL, which had no `UPDATE ... RETURNING`).
       {1, nil} =
         from(a in Account, where: a.id == ^account.id)
         |> Repo.update_all(inc: [num_logins: 1], set: [last_on: now])
 
       account = %{account | num_logins: account.num_logins + 1, last_on: now}
 
-      # `conflict_target` isn't supported by the MyXQL adapter (MySQL's `INSERT IGNORE` has no
-      # column-targeted form) — `on_conflict: :nothing` alone maps to `INSERT IGNORE`, which is
-      # exactly the legacy `insert ignore into account_login (...)` this ports.
+      # `ON CONFLICT (account_id, logged_in_at) DO NOTHING` — the legacy
+      # `insert ignore into account_login (...)`, scoped to the de-dup index so any other
+      # constraint violation still raises instead of being swallowed.
       %AccountLogin{}
       |> AccountLogin.changeset(%{
         account_id: account.id,
@@ -127,7 +127,7 @@ defmodule GlobalCombat.Accounts do
         browser: browser,
         adminused: admin_used
       })
-      |> Repo.insert(on_conflict: :nothing)
+      |> Repo.insert(on_conflict: :nothing, conflict_target: [:account_id, :logged_in_at])
 
       account
     end)
