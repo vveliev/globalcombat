@@ -51,8 +51,9 @@ services:
     environment:
       PGHOST: postgres
       PGPORT: "5432"
-      # The .NET engine, reached by service name on the container port. The
-      # 11410 mapping below is for reaching it from the host, not from here.
+      # The .NET engine (only with `--profile engine`), reached by service name
+      # on the container port. The 11410 mapping below is for reaching it from
+      # the host, not from here. The app itself never calls it.
       GRPC_HOST: grpc-host
       GRPC_PORT: "5251"
       # Binds 0.0.0.0 inside the container; the port mapping below is what
@@ -70,17 +71,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      grpc-host:
-        condition: service_started
     networks: [gc]
 
   # The .NET engine from the gRPC spike, serving GlobalCombat.Core over gRPC.
   # Plaintext HTTP/2 (h2c, no TLS) -- fine inside the compose network for a
   # spike, not a production posture.
   #
-  #   docker compose up -d grpc-host
-  #   docker compose run --rm web mix game_engine.resolve_turn
+  # Not part of the default stack: the web app resolves turns with the Elixir
+  # engine (GlobalCombat.Engine.Game) and never calls this. It exists for the
+  # differential harness, which compares the two engines turn by turn:
+  #
+  #   docker compose --profile engine up -d grpc-host
+  #   docker compose run --rm web mix game_engine.diff_harness --turns 50 --seed 42
   grpc-host:
+    profiles: [engine]
     build:
       context: .
       dockerfile: GlobalCombat.GrpcHost/Dockerfile
