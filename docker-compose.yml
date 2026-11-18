@@ -7,7 +7,7 @@
 #   11400  Phoenix / LiveView web        (+00)
 #   11402  Phoenix test endpoint         (+02)
 #   11410  .NET gRPC engine host         (+10)  — reserved, added by the gRPC spike
-#   11434  MySQL                         (+34)
+#   11434  Postgres                      (+34)
 #
 # The subnet follows 10.<block/100>.0.0/24, which keeps us out of Docker's
 # default 172.16/12 pool entirely — that pool hands out /16s in allocation
@@ -22,25 +22,23 @@
 name: globalcombat
 
 services:
-  mysql:
-    image: mysql:8.0
-    # MySQL 8's default caching_sha2_password closes the socket on MyXQL's
-    # empty-password root connection. The failure surfaces as an unexplained
-    # "socket closed", not an auth error, so it is pinned here deliberately.
-    command: --default-authentication-plugin=mysql_native_password
+  postgres:
+    image: postgres:18
     environment:
-      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      # Dev-only credentials; the port mapping below keeps this on loopback.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       # Bound to loopback: this is a dev database, not a service on the LAN.
-      - "127.0.0.1:11434:3306"
+      # 11434 keeps the slot the registry already reserves for this project's DB.
+      - "127.0.0.1:11434:5432"
     volumes:
-      - mysql-data:/var/lib/mysql
-      # The two schemas checked into the repo. DDL only — there is no data
-      # dump, so this gives you empty tables of the right shape, nothing more.
-      - ./globalcombat MySql Schema.sql:/docker-entrypoint-initdb.d/10-globalcombat.sql:ro
-      - ./gc_games MySql Schema.sql:/docker-entrypoint-initdb.d/20-gc_games.sql:ro
+      # Postgres 18+ images keep data in a versioned subdirectory
+      # (/var/lib/postgresql/18/docker), so the volume mounts the parent; mounting
+      # the old /var/lib/postgresql/data path makes the 18 image refuse to start.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-uroot"]
+      test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -51,10 +49,11 @@ services:
       context: ./liveview
       dockerfile: Dockerfile.dev
     environment:
-      MYSQL_HOST: mysql
-      MYSQL_PORT: "3306"
-      # The .NET engine, reached by service name on the container port. The
-      # 11410 mapping below is for reaching it from the host, not from here.
+      PGHOST: postgres
+      PGPORT: "5432"
+      # The .NET engine (only with `--profile engine`), reached by service name
+      # on the container port. The 11410 mapping below is for reaching it from
+      # the host, not from here. The app itself never calls it.
       GRPC_HOST: grpc-host
       GRPC_PORT: "5251"
       # Binds 0.0.0.0 inside the container; the port mapping below is what
@@ -70,19 +69,22 @@ services:
       - /app/deps
       - /app/_build
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
-      grpc-host:
-        condition: service_started
     networks: [gc]
 
   # The .NET engine from the gRPC spike, serving GlobalCombat.Core over gRPC.
   # Plaintext HTTP/2 (h2c, no TLS) -- fine inside the compose network for a
   # spike, not a production posture.
   #
-  #   docker compose up -d grpc-host
-  #   docker compose run --rm web mix game_engine.resolve_turn
+  # Not part of the default stack: the web app resolves turns with the Elixir
+  # engine (GlobalCombat.Engine.Game) and never calls this. It exists for the
+  # differential harness, which compares the two engines turn by turn:
+  #
+  #   docker compose --profile engine up -d grpc-host
+  #   docker compose run --rm web mix game_engine.diff_harness --turns 50 --seed 42
   grpc-host:
+    profiles: [engine]
     build:
       context: .
       dockerfile: GlobalCombat.GrpcHost/Dockerfile
@@ -95,7 +97,7 @@ services:
     networks: [gc]
 
 volumes:
-  mysql-data:
+  postgres-data:
 
 networks:
   gc:

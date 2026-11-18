@@ -120,22 +120,23 @@ the cross-company fleet boundary). The mailer-provider decision is a small open 
 
 Per this launch's scope: this is a **fresh database**, not a migration. No dump exists, there's no
 data to import, and `docs/schema-map.md` is the authoritative shape — 13 tables, one
-MySQL 8/MariaDB-compatible `Ecto.Repo`, already merged as Ecto migrations on `main`
+Postgres `Ecto.Repo` (Postgres 18; originally MySQL 8, switched before launch), already merged as Ecto migrations on `main`
 (`liveview/priv/repo/migrations/`).
 
-**Decision: a single small MySQL instance on the same fleet host as the app** (not a managed
+**Decision: a single small Postgres 18 instance on the same fleet host as the app** (not a managed
 cloud DB service) — consistent with §2.1's fleet-hosting decision and proportionate to scale: 13
 tables, no historical data, a project restarting from zero players. Sizing:
 
 - Start at the smallest instance size the fleet's Docker host comfortably runs alongside the app
   container (this is a resource-allocation call for whoever provisions the host, not a fixed
   number here — the schema is tiny; there's nothing to benchmark yet against zero traffic).
-- Persistent volume for `/var/lib/mysql`, same pattern as `docker-compose.yml`'s `mysql-data`
+- Persistent volume for `/var/lib/postgresql`, same pattern as `docker-compose.yml`'s `postgres-data`
   volume, but with a real backup job — the dev compose file has none, deliberately, because dev
   data is disposable and prod data (new players' accounts, from day one) is not.
-- `mysql_native_password` auth plugin, matching dev, only because MyXQL requires it — this is a
-  driver constraint, not a security posture; it does not need a passwordless root user in prod
-  (dev's `MYSQL_ALLOW_EMPTY_PASSWORD` does not carry over).
+- A dedicated `POSTGRES_USER`/`POSTGRES_PASSWORD` from the secrets manager (§2.3); dev's fixed
+  `postgres`/`postgres` credentials do not carry over. The first migration runs
+  `CREATE EXTENSION citext`, so the migrating role needs that privilege (the image's
+  `POSTGRES_USER` has it).
 
 **Owner: vveliev** — provisioning a fleet host resource is the same cross-company boundary as
 §2.1. **Migrations owner:** whoever runs the release ships `mix ecto.migrate` as a release step
@@ -145,7 +146,7 @@ priv/repo/seeds.exs` — seeds are dev-only fixtures, not something a real launc
 
 **Backup/rotation ownership:** vveliev, as part of the same fleet-provisioning action — this is a
 day-2 operational concern, not new to this launch, and this doc does not invent a new backup
-tool; it uses whatever the fleet already runs for its other MySQL-backed projects, if anything
+tool; it uses whatever the fleet already runs for its other Postgres-backed projects, if anything
 exists, or flags that as a gap (see Gaps) if it doesn't.
 
 ## 4. Rollback
@@ -187,7 +188,7 @@ cleanly, with no player-facing system left half-up.
 | Production release Dockerfiles + `phx.gen.release` | **Done** — PR #34 (merged to `main`) | Shipped `Dockerfile.prod` for both services, `bin/server`/`bin/migrate` overlays, `docker-compose.prod.yml` |
 | Secrets wired into fleet deploy mechanism | vveliev | Not yet provisioned |
 | Mailer provider decision | Follow-up issue (new) | Blocks password-reset emails only, not launch |
-| MySQL instance sizing + backup job | vveliev | Provision alongside app host |
+| Postgres instance sizing + backup job | vveliev | Provision alongside app host |
 | Migration execution (`mix ecto.migrate`) on deploy | Release-owner (same as Dockerfiles) | `bin/migrate` shipped in PR #34, ready to run once a host exists |
 | Rollback execution during the 14-day window | vveliev | On call for the window |
 
@@ -220,5 +221,5 @@ further an agent can provision toward a live URL until the fleet host exists.
   deployability, so it does not block this plan, but it should land before or shortly after
   launch — turns not resolving on schedule is a player-facing correctness issue once real users
   are playing.
-- **Fleet backup tooling for MySQL is unconfirmed** — this doc assumes vveliev's fleet has a
+- **Fleet backup tooling for Postgres is unconfirmed** — this doc assumes vveliev's fleet has a
   answer for this already (from other projects) but that isn't verified here.
