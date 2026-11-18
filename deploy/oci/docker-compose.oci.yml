@@ -3,8 +3,8 @@
 # docker-compose.prod.yml expects an existing reverse proxy on an external
 # network. On a single OCI Ampere A1 VM there is none, so this overlay adds
 # Caddy as that proxy: it terminates TLS (Let's Encrypt, automatic renewal)
-# and is the only container that publishes host ports. MySQL and the gRPC
-# engine host stay on the private gc-internal network.
+# and is the only container that publishes host ports. MySQL stays on the
+# private gc-internal network.
 #
 # Run from the repo root (paths below resolve against it):
 #   docker compose -f docker-compose.prod.yml -f deploy/oci/docker-compose.oci.yml run --rm migrate
@@ -39,8 +39,6 @@ services:
     mem_limit: 4g
   web:
     mem_limit: 4g
-  grpc-host:
-    mem_limit: 2g
 
 volumes:
   caddy-data:

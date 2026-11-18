@@ -1,16 +1,16 @@
 # Deploying to Oracle Cloud Always Free
 
-Runs the production stack from `docker-compose.prod.yml` (the Phoenix/LiveView app, the .NET
-gRPC engine host and MySQL) on one free Ampere A1 VM, with Caddy in front for HTTPS. It's a
-concrete host for the "where it runs" question in `docs/launch.md` §2.1.
+Runs the production stack from `docker-compose.prod.yml` (the Phoenix/LiveView app and MySQL)
+on one free Ampere A1 VM, with Caddy in front for HTTPS. It's a concrete host for the "where it
+runs" question in `docs/launch.md` §2.1. No .NET runs in production: turns resolve in the Elixir
+engine.
 
 ```
-internet ──443──> Caddy ──gc-proxy──> web (Phoenix :4000) ──gc-internal──> grpc-host (:5251)
-                                                          └─gc-internal──> mysql (:3306)
+internet ──443──> Caddy ──gc-proxy──> web (Phoenix :4000) ──gc-internal──> mysql (:3306)
 ```
 
-Only Caddy publishes ports. MySQL, gRPC (plaintext h2c) and Phoenix are reachable only on
-the private Docker networks.
+Only Caddy publishes ports. MySQL and Phoenix are reachable only on the private Docker
+networks.
 
 ## What the free tier gives you
 
@@ -21,7 +21,7 @@ the private Docker networks.
 | Object Storage | 20 GB | nightly MySQL dumps (optional) |
 | Outbound data | 10 TB/month | plenty |
 
-All images (Elixir/OTP on Debian, .NET 10, MySQL 8.0, Caddy) publish arm64 builds, and the
+All images (Elixir/OTP on Debian, MySQL 8.0, Caddy) publish arm64 builds, and the
 images are built on the VM itself, so nothing needs cross-compiling.
 
 ## Before you start
@@ -111,7 +111,7 @@ gc logs -f caddy web
 ```
 
 Caddy logs `certificate obtained successfully` once DNS resolves, and then
-`https://$PHX_HOST` serves the game. The first build takes about 10 minutes on 4 OCPU.
+`https://$PHX_HOST` serves the game. The first build takes several minutes on 4 OCPU.
 
 ## Updating
 

@@ -9,10 +9,12 @@ database, and no in-flight games to preserve — the evidence was checked indepe
 Namecheap-parking IP). Every decision below is written against that reality: this is a fresh deployment of the Phoenix port,
 not a migration off something live.
 
-The app being launched: a Phoenix/LiveView web app (`liveview/`) plus a companion **`.NET` gRPC
-engine host** (`GlobalCombat.GrpcHost`) that Phoenix calls for turn resolution — this two-process
-shape was decided in `docs/adr/0001-game-state-transport-to-elixir.md` (ADR-0001) and is
-not renegotiated here. A single MySQL database backs both (`docs/schema-map.md`): 13
+The app being launched: a Phoenix/LiveView web app (`liveview/`) backed by MySQL. ADR-0001
+(`docs/adr/0001-game-state-transport-to-elixir.md`) originally paired it with a `.NET` gRPC
+engine host (`GlobalCombat.GrpcHost`) for turn resolution; turns now resolve in the Elixir port
+(`GlobalCombat.Engine`, called from `games/server.ex`), and the gRPC host survives only as the
+reference oracle for `mix game_engine.diff_harness` in dev/CI. **Production runs no `.NET`
+process.** A single MySQL database backs the app (`docs/schema-map.md`): 13
 tables, 126 columns, one already-scaffolded `Ecto.Repo`. As of this doc, the surfaces, engine,
 board, tournaments, accounts and legacy routes are all done on `main` (`c048b8c`), so there is
 a functionally complete app to plan hosting against. The realtime turn scheduler is still in the
@@ -81,14 +83,11 @@ Neither Dockerfile in the repo today is a production build:
 1. A production `liveview` image: `mix phx.gen.release`, multi-stage Dockerfile (build stage
    compiles + `mix assets.deploy` + `mix release`; runtime stage copies the release onto a slim
    Erlang runtime image, `MIX_ENV=prod`, `PHX_SERVER=true`).
-2. A production `GlobalCombat.GrpcHost` image: multi-stage `dotnet publish` (SDK image to build,
-   `mcr.microsoft.com/dotnet/aspnet:10.0` or similar to run), replacing `dotnet run`.
-3. TLS between Phoenix and the gRPC host: the current `grpc-host` service is deliberately
-   plaintext h2c inside the compose network, called out in `docker-compose.yml` itself as "fine
-   for a spike, not a production posture." Same-host deployment (§2.1 keeps both containers on
-   one fleet node behind one reverse proxy) makes this an acceptable initial posture — the gRPC
-   hop never leaves a private Docker network — but it should not be assumed to stay acceptable if
-   the two services are ever split across hosts.
+2. ~~A production `GlobalCombat.GrpcHost` image~~ and ~~TLS between Phoenix and the gRPC
+   host~~ — no longer needed: turn resolution moved into the Elixir engine, so
+   `docker-compose.prod.yml` runs no `grpc-host` service and there is no Phoenix→gRPC hop to
+   secure. (`GlobalCombat.GrpcHost/Dockerfile.prod` still exists but is unused by the
+   production stack.)
 
 **Owner: whoever picks up the child issue this doc creates** (see Gaps/Follow-ups). This is
 scoped as new work, not folded silently into "launch."
@@ -96,8 +95,7 @@ scoped as new work, not folded silently into "launch."
 ### 2.3 Config and secrets — what replaces `Secrets.json`/`appsettings.json`
 
 The Elixir side already reads its production config from environment variables, not a file —
-`liveview/config/runtime.exs` raises at boot if `DATABASE_URL` or `SECRET_KEY_BASE` are unset,
-and `GRPC_HOST`/`GRPC_PORT` are read the same way in `lib/global_combat/game_engine/client.ex`.
+`liveview/config/runtime.exs` raises at boot if `DATABASE_URL` or `SECRET_KEY_BASE` are unset.
 No new config-loading mechanism needs to be built; what's missing is *where the values come from*
 and *how they reach the container*.
 
@@ -112,7 +110,6 @@ secrets against it. The values needed:
 | `DATABASE_URL` | Phoenix (`runtime.exs`) | secrets manager, generated at DB provisioning (§3) |
 | `SECRET_KEY_BASE` | Phoenix (`runtime.exs`) | secrets manager, generated once via `mix phx.gen.secret` |
 | `PHX_HOST` | Phoenix (`runtime.exs`) | Whichever domain is live per §1 — not a secret, but must track DNS |
-| `GRPC_HOST` / `GRPC_PORT` | Phoenix → GrpcHost (`client.ex`) | Fleet-internal service name/port, not a secret |
 | `MAILGUN_API_KEY` / mailer config | Phoenix (account notifications — `accounts/notifier.ex`) | secrets manager; **mailer adapter itself is still unconfigured** — `runtime.exs` only has a commented example. Needs a decision on which transactional-email provider before password-reset emails work in prod. |
 
 **Owner: vveliev** for provisioning the secrets-manager items and wiring them into the fleet's
@@ -130,8 +127,8 @@ MySQL 8/MariaDB-compatible `Ecto.Repo`, already merged as Ecto migrations on `ma
 cloud DB service) — consistent with §2.1's fleet-hosting decision and proportionate to scale: 13
 tables, no historical data, a project restarting from zero players. Sizing:
 
-- Start at the smallest instance size the fleet's Docker host comfortably runs alongside the two
-  app containers (this is a resource-allocation call for whoever provisions the host, not a fixed
+- Start at the smallest instance size the fleet's Docker host comfortably runs alongside the app
+  container (this is a resource-allocation call for whoever provisions the host, not a fixed
   number here — the schema is tiny; there's nothing to benchmark yet against zero traffic).
 - Persistent volume for `/var/lib/mysql`, same pattern as `docker-compose.yml`'s `mysql-data`
   volume, but with a real backup job — the dev compose file has none, deliberately, because dev
@@ -159,8 +156,7 @@ cleanly, with no player-facing system left half-up.
 
 **Decision:**
 
-- **Mechanism:** stop the production compose stack (or fleet-equivalent) for both `web` and
-  `grpc-host`, and repoint DNS for whichever domain is live (§1) away from the host — back to
+- **Mechanism:** stop the production compose stack (or fleet-equivalent) for `web`, and repoint DNS for whichever domain is live (§1) away from the host — back to
   "nothing here" (a static holding page, or simply letting the domain go unresolved) rather than
   silently serving a half-configured app.
 - **Data:** since this is a brand-new database with no prior state to protect, a rollback does
@@ -169,8 +165,8 @@ cleanly, with no player-facing system left half-up.
   rollback reason was data-correctness related. Which of those two applies is a judgment call at
   rollback time, not a decision this doc can make in advance.
 - **Trigger conditions:** anything that would put player data or account security at risk (e.g. a
-  bug in the ADR-0002 rehash-on-login path, or a gRPC-boundary correctness bug like the one
-  the gRPC spike found for `AsReference` reference-equality — see `GlobalCombat.GrpcHost/Contracts.cs`) is an automatic rollback,
+  bug in the ADR-0002 rehash-on-login path, or a turn-resolution correctness bug in the Elixir
+  engine — the kind `mix game_engine.diff_harness` exists to catch against the .NET oracle) is an automatic rollback,
   not a judgment call. Anything else (UI bugs, missing features, performance issues under real
   load) is a judgment call for whoever is on point at launch — named below.
 - **Rollback window:** **14 days post-launch** of elevated readiness (someone actively monitoring
