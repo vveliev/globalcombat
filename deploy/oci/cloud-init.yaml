@@ -55,7 +55,7 @@ write_files:
     permissions: "0644"
     content: |
       [Unit]
-      Description=Global Combat MySQL backup
+      Description=Global Combat Postgres backup
       After=docker.service
       Requires=docker.service
 
@@ -68,7 +68,7 @@ write_files:
     permissions: "0644"
     content: |
       [Unit]
-      Description=Nightly Global Combat MySQL backup
+      Description=Nightly Global Combat Postgres backup
 
       [Timer]
       OnCalendar=*-*-* 03:15:00

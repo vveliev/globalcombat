@@ -1,15 +1,15 @@
 # Deploying to Oracle Cloud Always Free
 
-Runs the production stack from `docker-compose.prod.yml` (the Phoenix/LiveView app and MySQL)
+Runs the production stack from `docker-compose.prod.yml` (the Phoenix/LiveView app and Postgres)
 on one free Ampere A1 VM, with Caddy in front for HTTPS. It's a concrete host for the "where it
 runs" question in `docs/launch.md` §2.1. No .NET runs in production: turns resolve in the Elixir
 engine.
 
 ```
-internet ──443──> Caddy ──gc-proxy──> web (Phoenix :4000) ──gc-internal──> mysql (:3306)
+internet ──443──> Caddy ──gc-proxy──> web (Phoenix :4000) ──gc-internal──> postgres (:5432)
 ```
 
-Only Caddy publishes ports. MySQL and Phoenix are reachable only on the private Docker
+Only Caddy publishes ports. Postgres and Phoenix are reachable only on the private Docker
 networks.
 
 ## What the free tier gives you
@@ -18,10 +18,10 @@ networks.
 | --- | --- | --- |
 | Ampere A1 compute | 4 OCPU, 24 GB RAM total | 1 VM: 2–4 OCPU, 12–24 GB |
 | Block storage | 200 GB total | 50–100 GB boot volume |
-| Object Storage | 20 GB | nightly MySQL dumps (optional) |
+| Object Storage | 20 GB | nightly Postgres dumps (optional) |
 | Outbound data | 10 TB/month | plenty |
 
-All images (Elixir/OTP on Debian, MySQL 8.0, Caddy) publish arm64 builds, and the
+All images (Elixir/OTP on Debian, Postgres 18, Caddy) publish arm64 builds, and the
 images are built on the VM itself, so nothing needs cross-compiling.
 
 ## Before you start
@@ -91,13 +91,13 @@ chmod 600 .env
 
 Fill in:
 
-- `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`: generate each with `openssl rand -base64 32 | tr -d '/+='`.
-- `DATABASE_URL`: `ecto://MYSQL_USER:MYSQL_PASSWORD@mysql/global_combat_prod`.
+- `POSTGRES_USER`: for example `globalcombat`. `POSTGRES_PASSWORD`: generate with `openssl rand -base64 32 | tr -d '/+='`.
+- `DATABASE_URL`: `ecto://POSTGRES_USER:POSTGRES_PASSWORD@postgres/global_combat_prod`.
 - `SECRET_KEY_BASE`: `openssl rand -base64 64 | tr -d '\n'`.
 - `PHX_HOST`: your domain. `ACME_EMAIL`: your contact address. `PROXY_NETWORK=gc-proxy`.
 
 Keep a copy in a password manager. Losing `SECRET_KEY_BASE` logs everyone out, and losing
-the MySQL passwords locks you out of your own backups.
+the Postgres password locks you out of your own backups.
 
 ## 6. First deploy
 
@@ -125,8 +125,8 @@ gc up -d
 
 ## Backups
 
-`globalcombat-backup.timer` runs [`backup.sh`](backup.sh) nightly. It writes gzipped dumps to
-`/var/backups/globalcombat` and keeps 14 days. To store copies off the VM as well:
+`globalcombat-backup.timer` runs [`backup.sh`](backup.sh) nightly. It writes dumps to
+`/var/backups/globalcombat` (`pg_dump` custom format) and keeps 14 days. To store copies off the VM as well:
 
 1. Create a private bucket, for example `globalcombat-backups`, and enable versioning and a
    retention rule.
@@ -145,6 +145,6 @@ with `journalctl -u globalcombat-backup`. The restore command is in the header o
 - [ ] Account on PAYG with a $1 budget alert. MFA on the OCI console login.
 - [ ] `.env` is mode 600 and stored in a password manager. Nothing in git.
 - [ ] Unattended upgrades are on (cloud-init). Reboots happen automatically at 04:30 UTC when needed.
-- [ ] MySQL is never published: `gc ps` shows ports only on `caddy`.
+- [ ] Postgres is never published: `gc ps` shows ports only on `caddy`.
 - [ ] A restore from backup has been tested.
 - [ ] Images are rebuilt monthly (`gc build --pull`) to pick up base-image security fixes.

@@ -3,7 +3,7 @@
 # docker-compose.prod.yml expects an existing reverse proxy on an external
 # network. On a single OCI Ampere A1 VM there is none, so this overlay adds
 # Caddy as that proxy: it terminates TLS (Let's Encrypt, automatic renewal)
-# and is the only container that publishes host ports. MySQL stays on the
+# and is the only container that publishes host ports. Postgres stays on the
 # private gc-internal network.
 #
 # Run from the repo root (paths below resolve against it):
@@ -35,7 +35,7 @@ services:
 
   # Ampere A1 has 24 GB on the free shape; these caps keep one runaway
   # container from starving the others (and the SSH session you'd fix it from).
-  mysql:
+  postgres:
     mem_limit: 4g
   web:
     mem_limit: 4g

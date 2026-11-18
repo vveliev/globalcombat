@@ -9,12 +9,12 @@ database, and no in-flight games to preserve — the evidence was checked indepe
 Namecheap-parking IP). Every decision below is written against that reality: this is a fresh deployment of the Phoenix port,
 not a migration off something live.
 
-The app being launched: a Phoenix/LiveView web app (`liveview/`) backed by MySQL. ADR-0001
+The app being launched: a Phoenix/LiveView web app (`liveview/`) backed by Postgres. ADR-0001
 (`docs/adr/0001-game-state-transport-to-elixir.md`) originally paired it with a `.NET` gRPC
 engine host (`GlobalCombat.GrpcHost`) for turn resolution; turns now resolve in the Elixir port
 (`GlobalCombat.Engine`, called from `games/server.ex`), and the gRPC host survives only as the
 reference oracle for `mix game_engine.diff_harness` in dev/CI. **Production runs no `.NET`
-process.** A single MySQL database backs the app (`docs/schema-map.md`): 13
+process.** A single Postgres database backs the app (`docs/schema-map.md`): 13
 tables, 126 columns, one already-scaffolded `Ecto.Repo`. As of this doc, the surfaces, engine,
 board, tournaments, accounts and legacy routes are all done on `main` (`c048b8c`), so there is
 a functionally complete app to plan hosting against. The realtime turn scheduler is still in the
