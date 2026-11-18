@@ -1,0 +1,105 @@
+#cloud-config
+# First-boot setup for an OCI Always Free Ampere A1 VM running
+# Canonical Ubuntu 24.04 (aarch64). Paste into "Show advanced options ->
+# Management -> Cloud-init script" when creating the instance.
+#
+# What it does: OS updates + unattended security upgrades, Docker Engine from
+# Docker's apt repo, SSH key-only login, fail2ban, opens 80/443 in the image's
+# host firewall, clones the repo to /opt/globalcombat, creates the gc-proxy
+# network, and installs a nightly backup timer. It does NOT write secrets:
+# the .env is created by hand afterwards (deploy/oci/README.md, step 5).
+# Progress: `sudo tail -f /var/log/cloud-init-output.log`.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - unattended-upgrades
+  - fail2ban
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-globalcombat.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      MaxAuthTries 3
+
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+  - path: /etc/apt/apt.conf.d/52globalcombat-unattended
+    permissions: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+
+  # Rotate container logs so a chatty container can't fill the boot volume.
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "local",
+        "log-opts": { "max-size": "20m", "max-file": "5" }
+      }
+
+  - path: /etc/systemd/system/globalcombat-backup.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Global Combat MySQL backup
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/globalcombat
+      ExecStart=/opt/globalcombat/deploy/oci/backup.sh
+
+  - path: /etc/systemd/system/globalcombat-backup.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Nightly Global Combat MySQL backup
+
+      [Timer]
+      OnCalendar=*-*-* 03:15:00
+      RandomizedDelaySec=15m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+runcmd:
+  # Docker Engine + compose plugin from Docker's own repo (arm64 packages).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker ubuntu
+  - systemctl enable --now docker fail2ban
+
+  # OCI's Ubuntu images ship iptables rules that reject everything but SSH,
+  # independent of the VCN security list / NSG. Open HTTP(S) and persist.
+  - iptables -I INPUT 5 -p tcp -m multiport --dports 80,443 -m conntrack --ctstate NEW -j ACCEPT
+  - iptables -I INPUT 5 -p udp --dport 443 -j ACCEPT
+  - netfilter-persistent save
+
+  - systemctl restart ssh
+
+  - git clone https://github.com/vveliev/globalcombat.git /opt/globalcombat
+  - chown -R ubuntu:ubuntu /opt/globalcombat
+  - chmod +x /opt/globalcombat/deploy/oci/backup.sh
+  - docker network create gc-proxy
+  - systemctl daemon-reload
+  - systemctl enable --now globalcombat-backup.timer
