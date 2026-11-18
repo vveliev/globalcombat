@@ -6,7 +6,7 @@ defmodule GlobalCombat.Games.Live do
   `GlobalCombat.Games.PlayerView` can't be bypassed by a shortcut call from the web layer.
 
   Named `Games.Live` rather than `Games` because `GlobalCombat.Games` is already the
-  MySQL-backed persistence/listing facade for the `games`/`game_players` tables.
+  Ecto-backed persistence/listing facade for the `games`/`game_players` tables.
 
   `create_game/1` creates its `games` row here (a real `games.id`, not a bare
   `System.unique_integer/1`) and starts `GlobalCombat.Games.Server` against that same id, so a

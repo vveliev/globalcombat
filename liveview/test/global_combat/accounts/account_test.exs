@@ -10,7 +10,7 @@ defmodule GlobalCombat.Accounts.AccountTest do
   `update account set rating = rating + <RatingChange>` (the Elo math itself already has a
   bit-for-bit differential harness against the .NET engine, see
   `GlobalCombat.Engine.Game`/`GlobalCombat.Engine.Harness`). Both apps read the same
-  MySQL `account.rating` column with zero transformation, so they trivially agree on the
+  `account.rating` column with zero transformation, so they trivially agree on the
   number *by construction* — there is no independent Elixir-side computation to diverge. The
   one piece of display logic that genuinely reads `rating` and derives something from it is
   the `Rank` ladder, so that's what this test differentially verifies, the same way the engine

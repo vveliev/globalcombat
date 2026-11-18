@@ -19,8 +19,8 @@ end
 defmodule GlobalCombat.Games.TurnScheduler do
   @moduledoc """
   Supervised GenServer doing a periodic sweep for games due for a turn, per the scheduler's design
-  decision: not Oban, since this project runs on MySQL (myxql) and Oban's polling/notification
-  optimizations are Postgres-specific, while a plain sweep + `GlobalCombat.Games.Scheduling.
+  decision: not Oban (chosen while the project ran on MySQL, where Oban's polling/notification
+  optimizations were unavailable), while a plain sweep + `GlobalCombat.Games.Scheduling.
   claim_turn/2`'s conditional `UPDATE` is DB-engine-agnostic and needs no extra dependency.
 
   Every tick is a full re-evaluation of "which games are due" straight from the database — the

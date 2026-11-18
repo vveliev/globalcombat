@@ -43,9 +43,9 @@ defmodule GlobalCombat.Stats do
   defp daily_counts(schema, field, since) do
     schema
     |> where([r], field(r, ^field) > ^since)
-    |> group_by([r], fragment("DATE(?)", field(r, ^field)))
-    |> select([r], {fragment("DATE(?)", field(r, ^field)), count(r.id)})
-    |> order_by([r], asc: fragment("DATE(?)", field(r, ^field)))
+    |> group_by([r], fragment("?::date", field(r, ^field)))
+    |> select([r], {fragment("?::date", field(r, ^field)), count(r.id)})
+    |> order_by([r], asc: fragment("?::date", field(r, ^field)))
     |> Repo.all()
   end
 end
