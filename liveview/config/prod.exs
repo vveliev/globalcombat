@@ -15,7 +15,8 @@ config :global_combat, GlobalCombatWeb.Endpoint,
   force_ssl: [
     rewrite_on: [:x_forwarded_proto],
     exclude: [
-      # paths: ["/health"],
+      # kamal-proxy's health probe (GlobalCombatWeb.Plugs.HealthCheck) uses plain HTTP.
+      paths: ["/up"],
       hosts: ["localhost", "127.0.0.1"]
     ]
   ]

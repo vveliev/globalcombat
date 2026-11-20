@@ -3,7 +3,7 @@ defmodule GlobalCombat.MailerConfigTest do
 
   alias GlobalCombat.MailerConfig
 
-  describe "from_env/1 (docs/launch.md §2.3)" do
+  describe "from_env/1 (docs/launch.md §3)" do
     test "with no MAILGUN_API_KEY it falls back to the log-only adapter and warns" do
       decision = MailerConfig.from_env(%{})
 
@@ -11,6 +11,31 @@ defmodule GlobalCombat.MailerConfigTest do
       assert decision.from == MailerConfig.legacy_sender()
       assert decision.warning =~ "MAILGUN_API_KEY is not set"
       assert decision.warning =~ "NOT delivered"
+    end
+
+    test "treats empty values as unset, as Kamal and compose pass them when not provided" do
+      decision =
+        MailerConfig.from_env(%{
+          "MAILGUN_API_KEY" => "",
+          "MAILGUN_DOMAIN" => "",
+          "MAILER_FROM" => ""
+        })
+
+      assert decision.mailer[:adapter] == Swoosh.Adapters.Logger
+      assert decision.warning =~ "MAILGUN_API_KEY is not set"
+
+      assert_raise ArgumentError, ~r/MAILGUN_DOMAIN is required/, fn ->
+        MailerConfig.from_env(%{"MAILGUN_API_KEY" => "k", "MAILGUN_DOMAIN" => " "})
+      end
+
+      decision =
+        MailerConfig.from_env(%{
+          "MAILGUN_API_KEY" => "k",
+          "MAILGUN_DOMAIN" => "mg.example",
+          "MAILER_FROM" => ""
+        })
+
+      assert decision.from == {"Global Combat", "no-reply@mg.example"}
     end
 
     test "with a key and domain it configures Mailgun and a no-reply sender on that domain" do

@@ -1,0 +1,105 @@
+#cloud-config
+# First boot of the Oracle A1 VM (Ubuntu 24.04 aarch64). See docs/deploy/oracle-kamal.md.
+# Installs Docker, Tailscale, SSH hardening, fail2ban, unattended upgrades, opens
+# 80/443 in the host firewall, and sets up the nightly backup timer. The app is
+# deployed separately with Kamal. Progress: /var/log/cloud-init-output.log.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - unattended-upgrades
+  - fail2ban
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-globalcombat.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      MaxAuthTries 3
+
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+  - path: /etc/apt/apt.conf.d/52globalcombat-unattended
+    permissions: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+
+  # Rotate container logs so a chatty container can't fill the boot volume.
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "local",
+        "log-opts": { "max-size": "20m", "max-file": "5" }
+      }
+
+  - path: /etc/systemd/system/globalcombat-backup.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Global Combat Postgres backup
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/globalcombat/deploy/oci/backup.sh
+
+  - path: /etc/systemd/system/globalcombat-backup.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Nightly Global Combat Postgres backup
+
+      [Timer]
+      OnCalendar=*-*-* 03:15:00
+      RandomizedDelaySec=15m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+runcmd:
+  # Docker Engine + compose plugin from Docker's own repo (arm64 packages).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker ubuntu
+  - systemctl enable --now docker fail2ban
+
+  # OCI's Ubuntu images ship iptables rules that reject everything but SSH,
+  # independent of the VCN security list / NSG. Open HTTP(S) and persist.
+  - iptables -I INPUT 5 -p tcp -m multiport --dports 80,443 -m conntrack --ctstate NEW -j ACCEPT
+  - netfilter-persistent save
+
+  - systemctl restart ssh
+
+  # Tailscale from its signed apt repo. Not logged in here, since an auth key in
+  # cloud-init would sit in the instance metadata: run `sudo tailscale up` once
+  # over OCI Bastion (docs/deploy/oracle-kamal.md, step 3).
+  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list
+  - apt-get update
+  - apt-get install -y tailscale
+
+  # Root-owned: the backup timer runs this script as root.
+  - git clone https://github.com/vveliev/globalcombat.git /opt/globalcombat
+  - chmod +x /opt/globalcombat/deploy/oci/backup.sh
+  - install -d -m 0700 /etc/globalcombat
+  - systemctl daemon-reload
+  - systemctl enable --now globalcombat-backup.timer

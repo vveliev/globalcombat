@@ -115,7 +115,7 @@ if config_env() == :prod do
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
 
-  # ## Mailer (docs/launch.md §2.3)
+  # ## Mailer (docs/launch.md §3)
   #
   # Password reset and account notifications (`GlobalCombat.Accounts.Notifier`) go out through
   # Mailgun when its credentials are present. `MAILGUN_API_KEY` and `MAILGUN_DOMAIN` come from

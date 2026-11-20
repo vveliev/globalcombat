@@ -17,7 +17,7 @@ defmodule GlobalCombat.MixProject do
     ]
   end
 
-  # docs/launch.md §2.2: the production release artifact `mix phx.gen.release`
+  # docs/launch.md §2: the production release artifact `mix phx.gen.release`
   # would otherwise generate. `runtime.exs` already raises on boot without
   # DATABASE_URL/SECRET_KEY_BASE, so no extra release-time config is needed
   # beyond naming the release and including the migration/server overlays.

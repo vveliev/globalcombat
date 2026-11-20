@@ -1,16 +1,8 @@
-# Production stack for the Global Combat relaunch (docs/launch.md).
+# Production stack without Kamal: the same release image on any Docker host.
+# The launch deploy uses Kamal instead (config/deploy.yml, docs/adr/0004).
 #
-# This is the shape docs/launch.md §2.1-2.3 describes, not a finished
-# deployment: it still needs, from whoever provisions vveliev's fleet host
-# (§2.1, out of any agent's authority) —
-#
-#   - a `.env` file (not committed) populated from the secrets manager per the table in
-#     docs/launch.md §2.3
-#   - a real port block reserved in the fleet's port registry (do not
-#     reuse dev's 11400 block — see docker-compose.yml's header)
-#   - attachment to whatever reverse proxy the fleet already terminates TLS
-#     with; `PROXY_NETWORK` below is a placeholder name for that network,
-#     not a new proxy this file invents
+# Needs a `.env` from .env.production.example, and an existing reverse proxy
+# that terminates TLS on the external network named by PROXY_NETWORK.
 #
 # Migrations run as a one-shot step before `web` starts:
 #   docker compose -f docker-compose.prod.yml run --rm migrate
@@ -19,7 +11,6 @@
 services:
   postgres:
     image: postgres:18
-    # Credentials come from the fleet's injected .env (docs/launch.md §2.3);
     # POSTGRES_USER owns POSTGRES_DB and is the role the app connects as.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-global_combat_prod}
@@ -33,13 +24,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    restart: unless-stopped
-    networks: [gc-internal]
-
-  grpc-host:
-    build:
-      context: .
-      dockerfile: GlobalCombat.GrpcHost/Dockerfile.prod
     restart: unless-stopped
     networks: [gc-internal]
 
@@ -65,14 +49,12 @@ services:
       PHX_HOST: ${PHX_HOST:?PHX_HOST is required}
       PHX_SERVER: "true"
       PORT: "4000"
-      GRPC_HOST: grpc-host
-      GRPC_PORT: "5251"
       MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
+      MAILER_FROM: ${MAILER_FROM:-}
     depends_on:
       postgres:
         condition: service_healthy
-      grpc-host:
-        condition: service_started
     restart: unless-stopped
     networks: [gc-internal, gc-proxy]
 
@@ -81,10 +63,7 @@ volumes:
 
 networks:
   gc-internal: {}
-  # External network owned by the fleet's reverse proxy (docs/launch.md §2.1).
-  # Rename to match whatever that proxy actually calls it — this file does
-  # not create it (`external: true`), matching the plan's decision not to
-  # invent a new reverse-proxy convention.
+  # Owned by the reverse proxy; this file doesn't create it.
   gc-proxy:
     external: true
-    name: ${PROXY_NETWORK:?PROXY_NETWORK is required — name of the fleet's existing reverse-proxy network}
+    name: ${PROXY_NETWORK:?PROXY_NETWORK is required — the reverse proxy's Docker network}

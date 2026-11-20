@@ -1,0 +1,83 @@
+# Kamal 2 deploy to one Oracle Cloud A1 VM (docs/adr/0004-hosting-oracle-kamal.md).
+# Setup steps: docs/deploy/oracle-kamal.md.
+#
+# Read from your shell, not committed:
+#   KAMAL_HOST   the VM's Tailscale name (SSH isn't public)
+#   PHX_HOST     the public domain
+#   MAILGUN_DOMAIN, MAILER_FROM   optional, only with MAILGUN_API_KEY
+# Secrets: .kamal/secrets.
+
+service: globalcombat
+image: vveliev/globalcombat
+
+servers:
+  web:
+    hosts:
+      - <%= ENV.fetch("KAMAL_HOST") %>
+    # Migrate in the new container before it serves traffic. Fine on one server.
+    cmd: /bin/sh -c "/app/bin/migrate && exec /app/bin/server"
+    options:
+      memory: 4g
+
+proxy:
+  host: <%= ENV.fetch("PHX_HOST") %>
+  ssl: true
+  app_port: 4000
+  healthcheck:
+    # GlobalCombatWeb.Plugs.HealthCheck; excluded from force_ssl in config/prod.exs.
+    path: /up
+    interval: 3
+    timeout: 5
+
+# Migrations plus release boot can take longer than the 30s default.
+deploy_timeout: 90
+
+registry:
+  server: ghcr.io
+  username: vveliev
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: arm64
+  # Build natively on the Arm VM instead of emulating arm64 locally.
+  remote: ssh://ubuntu@<%= ENV.fetch("KAMAL_HOST") %>
+  # Builds liveview/ as it is on disk, so deploy from a clean checkout.
+  context: liveview
+  dockerfile: liveview/Dockerfile.prod
+
+ssh:
+  user: ubuntu
+
+env:
+  clear:
+    PHX_HOST: <%= ENV.fetch("PHX_HOST") %>
+    PHX_SERVER: "true"
+    PORT: "4000"
+    POOL_SIZE: "10"
+    MAILGUN_DOMAIN: "<%= ENV.fetch("MAILGUN_DOMAIN", "") %>"
+    MAILER_FROM: "<%= ENV.fetch("MAILER_FROM", "") %>"
+  secret:
+    - DATABASE_URL
+    - SECRET_KEY_BASE
+    - MAILGUN_API_KEY
+
+accessories:
+  # The app reaches it as globalcombat-postgres. No `port:`, so it's never published.
+  postgres:
+    image: postgres:18
+    host: <%= ENV.fetch("KAMAL_HOST") %>
+    env:
+      clear:
+        POSTGRES_DB: global_combat_prod
+      secret:
+        - POSTGRES_USER
+        - POSTGRES_PASSWORD
+    volumes:
+      # Postgres 18+ keeps data under /var/lib/postgresql/18/docker.
+      - globalcombat-postgres:/var/lib/postgresql
+    options:
+      memory: 4g
+
+# Old images kept for `kamal rollback`.
+retain_containers: 5

@@ -2,7 +2,7 @@
 #
 # Replaces the `mix game_engine.resolve_turn` dev-mode spike image (see
 # Dockerfile) with a real multi-stage `mix release` build, per
-# docs/launch.md §2.2. Runs the compiled release's `bin/server`
+# docs/launch.md §2. Runs the compiled release's `bin/server`
 # (rel/overlays/bin/server), not `mix phx.server`.
 #
 # Versions pinned to match Dockerfile.dev's `hexpm/elixir` tag so the release
