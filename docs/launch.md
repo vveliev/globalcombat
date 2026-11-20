@@ -1,225 +1,79 @@
-# Launch plan: globalcombat.com relaunch
+# Launch plan: Global Combat relaunch
 
 - Status: Proposed
-- Date: 2026-08-30
+- Date: 2026-08-30 (updated 2026-11-19)
 
-This is a launch plan, not a cutover plan. There is no running `.NET` site, no production
-database, and no in-flight games to preserve — the evidence was checked independently twice
-(matching `302` redirect to `Bryan-Legend/globalcombat`, connection timeout on HTTPS, and a
-Namecheap-parking IP). Every decision below is written against that reality: this is a fresh deployment of the Phoenix port,
-not a migration off something live.
+This is a fresh deployment of the Phoenix port, not a migration: no `.NET` site is running, and
+there's no production database or in-flight game to preserve.
 
-The app being launched: a Phoenix/LiveView web app (`liveview/`) backed by Postgres. ADR-0001
-(`docs/adr/0001-game-state-transport-to-elixir.md`) originally paired it with a `.NET` gRPC
-engine host (`GlobalCombat.GrpcHost`) for turn resolution; turns now resolve in the Elixir port
-(`GlobalCombat.Engine`, called from `games/server.ex`), and the gRPC host survives only as the
-reference oracle for `mix game_engine.diff_harness` in dev/CI. **Production runs no `.NET`
-process.** A single Postgres database backs the app (`docs/schema-map.md`): 13
-tables, 126 columns, one already-scaffolded `Ecto.Repo`. As of this doc, the surfaces, engine,
-board, tournaments, accounts and legacy routes are all done on `main` (`c048b8c`), so there is
-a functionally complete app to plan hosting against. The realtime turn scheduler is still in the
-backlog — it is a gameplay-timing feature, not a deployment
-blocker, and is called out in Gaps below rather than treated as launch-blocking.
+**What ships:** the Phoenix/LiveView app (`liveview/`) and one Postgres 18 database
+(`docs/schema-map.md`). Turns resolve in the Elixir engine (`GlobalCombat.Engine`), so
+production runs no `.NET` process. `GlobalCombat.GrpcHost` stays in the repo only as the
+reference oracle for `mix game_engine.diff_harness`.
 
 ## 1. Domain
 
-**Already answered when this launch was scoped — cited here, not re-litigated:** `globalcombat.com`
-is Namecheap-parked and 302s to the upstream author's GitHub repo. We do not control it. The
-README on `main` (written by the original author, Bryan Legend) confirms this is intentional on
-their end: the site was taken offline in 2026 and the repo open-sourced, with a note directing
-hosting interest to an issue on the upstream repo, not to this fork.
+`globalcombat.com` is parked by the upstream author and isn't ours.
 
-**Decision: do not block launch on reacquiring `globalcombat.com`.** Two tracks, run in
-parallel, owned by **vveliev** (repo/company owner — this is an external-account and possibly a
-purchase action, outside any agent's authority):
+- **Launch domain:** start on a domain vveliev controls, or a zero-cost interim one.
+- **`globalcombat.com`:** ask the upstream owner about transferring or repointing it, in
+  parallel. This isn't on the critical path. If it works out later, it's a DNS change only,
+  since the host comes from `PHX_HOST`.
 
-1. **Primary:** vveliev contacts the upstream owner (via the GitHub issue the README already
-   points to, or WHOIS/registrar contact for the domain) to ask about transferring or repointing
-   `globalcombat.com` to this fork's deployment. No response-time commitment exists from a third
-   party, so this cannot be the launch's critical path.
-2. **Launch domain:** vveliev registers an alternate domain (e.g. a `.com`/`.gg` variant such as
-   `playglobalcombat.com`, exact name is vveliev's call) or, if a zero-cost interim is preferred,
-   launches on the hosting provider's default subdomain first. Either way, DNS for whichever
-   domain is used points at the host chosen in §2, and TLS is issued for that name (Let's
-   Encrypt/ACME via the reverse proxy — see §2).
+## 2. Hosting
 
-If track 1 succeeds later, it becomes a DNS repoint, not a redeploy — nothing in §2–§4 depends on
-which domain answers, since `PHX_HOST` is already an environment variable
-(`liveview/config/runtime.exs:70`).
+One Oracle Cloud Always Free VM, deployed with Kamal: [ADR-0004](adr/0004-hosting-oracle-kamal.md).
+Setup steps are in [deploy/oracle-kamal.md](deploy/oracle-kamal.md).
 
-## 2. Hosting, releases, and config/secrets
+The release image is `liveview/Dockerfile.prod`, with `bin/server` and `bin/migrate`.
+`docker-compose.prod.yml` runs the same image without Kamal.
 
-### 2.1 Where it runs
+## 3. Config and secrets
 
-**Decision: deploy to vveliev's existing self-hosted fleet, not a cloud PaaS.** Evidence for
-this, not a preference: the dev stack (`docker-compose.yml`) already reserves a port block
-(`11400`) against the fleet-wide port registry and picks
-its Docker subnet specifically to avoid colliding with other projects on that same fleet. That
-registry and the fleet it describes live in a private infrastructure repo this project's agents
-cannot reach — so the actual host machine, reverse proxy, and
-TLS termination are **vveliev's action item**, not something this doc or an agent can provision
-directly.
+`liveview/config/runtime.exs` reads all production config from environment variables and
+refuses to boot without `DATABASE_URL` or `SECRET_KEY_BASE`. Kamal injects them from
+`.kamal/secrets`, which only references the deployer's environment or password manager.
 
-**Owner: vveliev.** Action: allocate a production host (or VM/container slot) on the fleet,
-reserve a production port block in `registry/PORTS.md` (do not reuse dev's `11400` — that
-convention exists precisely so prod and a concurrently-running dev stack don't collide), and
-front it with whatever reverse proxy the fleet already standardizes on for TLS (the fleet
-predates this project; this doc does not invent a new one).
+| Variable | Notes |
+| --- | --- |
+| `DATABASE_URL` | Must match the Postgres accessory's user and password |
+| `SECRET_KEY_BASE` | Generate once; rotating it logs everyone out |
+| `PHX_HOST` | The live domain |
+| `MAILGUN_API_KEY` | Optional. Without it, the app boots with emails going to the log only. |
 
-### 2.2 Releases — this is a real gap, not a paperwork step
+## 4. Database
 
-Neither Dockerfile in the repo today is a production build:
+- **Instance:** Postgres 18 on the same VM as a Kamal accessory, with a persistent volume. Its
+  port is never published.
+- **Credentials:** a dedicated user and password, not dev's `postgres`/`postgres`. The first
+  migration runs `CREATE EXTENSION citext`; the image's `POSTGRES_USER` is allowed to.
+- **Migrations:** run automatically by `bin/migrate` before each new container serves traffic.
+  Seeds are dev-only.
+- **Backups:** nightly `pg_dump`, plus off-VM copies in Object Storage. Both must be in place
+  before launch.
 
-- `liveview/Dockerfile` is explicitly commented as "Dev-mode image for the gRPC spike client
-  only ... Not the production release Dockerfile," runs `MIX_ENV=dev`, and its `CMD` runs a
-  one-off mix task, not the Phoenix server.
-- `GlobalCombat.GrpcHost/Dockerfile` runs `dotnet run` from the full SDK image with no
-  publish/multi-stage step — fine for the original gRPC spike, not a release artifact.
-- `mix.exs` has no `releases:` config and `phx.gen.release` has not been run (no `rel/`, no
-  `bin/server`), and `liveview-ci.yml` builds and tests but publishes nothing.
+## 5. Rollback
 
-**Decision:** before this plan can produce a running site, someone builds:
+- **Bad release:** `kamal rollback <version>` switches back to the previous image without
+  downtime.
+- **Pull the launch entirely:** `kamal app stop`, then point DNS away from the VM. Keep the
+  database volume so a second attempt resumes where it left off. Drop it only if the problem
+  was bad data.
+- **Automatic triggers:** anything that risks player data or account security, such as a bug in
+  the ADR-0002 rehash-on-login path or a turn-resolution bug. Anything else is a judgment call.
+- **Window:** 14 days of active monitoring after launch, with someone able to roll back within
+  the hour.
 
-1. A production `liveview` image: `mix phx.gen.release`, multi-stage Dockerfile (build stage
-   compiles + `mix assets.deploy` + `mix release`; runtime stage copies the release onto a slim
-   Erlang runtime image, `MIX_ENV=prod`, `PHX_SERVER=true`).
-2. ~~A production `GlobalCombat.GrpcHost` image~~ and ~~TLS between Phoenix and the gRPC
-   host~~ — no longer needed: turn resolution moved into the Elixir engine, so
-   `docker-compose.prod.yml` runs no `grpc-host` service and there is no Phoenix→gRPC hop to
-   secure. (`GlobalCombat.GrpcHost/Dockerfile.prod` still exists but is unused by the
-   production stack.)
+**Owner:** vveliev, the only person with DNS and cloud-account access.
 
-**Owner: whoever picks up the child issue this doc creates** (see Gaps/Follow-ups). This is
-scoped as new work, not folded silently into "launch."
+## Open items
 
-### 2.3 Config and secrets — what replaces `Secrets.json`/`appsettings.json`
-
-The Elixir side already reads its production config from environment variables, not a file —
-`liveview/config/runtime.exs` raises at boot if `DATABASE_URL` or `SECRET_KEY_BASE` are unset.
-No new config-loading mechanism needs to be built; what's missing is *where the values come from*
-and *how they reach the container*.
-
-**Decision:** environment variables, sourced from the secrets manager, injected via the fleet's compose
-stack (a production `docker-compose.yml`/`.env`, not committed with real values — same shape as
-the dev file, different content). This is not a new pattern for this org: the fleet already
-established its secrets manager as the source of truth for secrets, reconciling out-of-band board
-secrets against it. The values needed:
-
-| Variable | Consumed by | Source |
-|---|---|---|
-| `DATABASE_URL` | Phoenix (`runtime.exs`) | secrets manager, generated at DB provisioning (§3) |
-| `SECRET_KEY_BASE` | Phoenix (`runtime.exs`) | secrets manager, generated once via `mix phx.gen.secret` |
-| `PHX_HOST` | Phoenix (`runtime.exs`) | Whichever domain is live per §1 — not a secret, but must track DNS |
-| `MAILGUN_API_KEY` / mailer config | Phoenix (account notifications — `accounts/notifier.ex`) | secrets manager; **mailer adapter itself is still unconfigured** — `runtime.exs` only has a commented example. Needs a decision on which transactional-email provider before password-reset emails work in prod. |
-
-**Owner: vveliev** for provisioning the secrets-manager items and wiring them into the fleet's
-deployment mechanism (however it injects env vars today — outside this company's visibility per
-the cross-company fleet boundary). The mailer-provider decision is a small open sub-question; flagged in Gaps.
-
-## 3. Database provisioning
-
-Per this launch's scope: this is a **fresh database**, not a migration. No dump exists, there's no
-data to import, and `docs/schema-map.md` is the authoritative shape — 13 tables, one
-Postgres `Ecto.Repo` (Postgres 18; originally MySQL 8, switched before launch), already merged as Ecto migrations on `main`
-(`liveview/priv/repo/migrations/`).
-
-**Decision: a single small Postgres 18 instance on the same fleet host as the app** (not a managed
-cloud DB service) — consistent with §2.1's fleet-hosting decision and proportionate to scale: 13
-tables, no historical data, a project restarting from zero players. Sizing:
-
-- Start at the smallest instance size the fleet's Docker host comfortably runs alongside the app
-  container (this is a resource-allocation call for whoever provisions the host, not a fixed
-  number here — the schema is tiny; there's nothing to benchmark yet against zero traffic).
-- Persistent volume for `/var/lib/postgresql`, same pattern as `docker-compose.yml`'s `postgres-data`
-  volume, but with a real backup job — the dev compose file has none, deliberately, because dev
-  data is disposable and prod data (new players' accounts, from day one) is not.
-- A dedicated `POSTGRES_USER`/`POSTGRES_PASSWORD` from the secrets manager (§2.3); dev's fixed
-  `postgres`/`postgres` credentials do not carry over. The first migration runs
-  `CREATE EXTENSION citext`, so the migrating role needs that privilege (the image's
-  `POSTGRES_USER` has it).
-
-**Owner: vveliev** — provisioning a fleet host resource is the same cross-company boundary as
-§2.1. **Migrations owner:** whoever runs the release ships `mix ecto.migrate` as a release step
-or a one-shot job before the app's first boot; this is the same mechanism `mix.exs`'s
-`ecto.setup` alias already uses in dev (`ecto.create`, `ecto.migrate`), minus `run
-priv/repo/seeds.exs` — seeds are dev-only fixtures, not something a real launch runs.
-
-**Backup/rotation ownership:** vveliev, as part of the same fleet-provisioning action — this is a
-day-2 operational concern, not new to this launch, and this doc does not invent a new backup
-tool; it uses whatever the fleet already runs for its other Postgres-backed projects, if anything
-exists, or flags that as a gap (see Gaps) if it doesn't.
-
-## 4. Rollback
-
-There is nothing currently serving players, so — as this launch was scoped — "rollback"
-cannot mean failing back to a previous system. It means **pulling the new deployment back down**
-cleanly, with no player-facing system left half-up.
-
-**Decision:**
-
-- **Mechanism:** stop the production compose stack (or fleet-equivalent) for `web`, and repoint DNS for whichever domain is live (§1) away from the host — back to
-  "nothing here" (a static holding page, or simply letting the domain go unresolved) rather than
-  silently serving a half-configured app.
-- **Data:** since this is a brand-new database with no prior state to protect, a rollback does
-  not need a data-preservation plan — the DB can be stopped in place (not dropped) so a second
-  launch attempt resumes from wherever it left off, or dropped and re-migrated from scratch if the
-  rollback reason was data-correctness related. Which of those two applies is a judgment call at
-  rollback time, not a decision this doc can make in advance.
-- **Trigger conditions:** anything that would put player data or account security at risk (e.g. a
-  bug in the ADR-0002 rehash-on-login path, or a turn-resolution correctness bug in the Elixir
-  engine — the kind `mix game_engine.diff_harness` exists to catch against the .NET oracle) is an automatic rollback,
-  not a judgment call. Anything else (UI bugs, missing features, performance issues under real
-  load) is a judgment call for whoever is on point at launch — named below.
-- **Rollback window:** **14 days post-launch** of elevated readiness (someone actively monitoring
-  and able to execute the rollback mechanism above within the hour, not just on-call in the
-  generic sense). After 14 days with no rollback-triggering issue, the launch is considered
-  stable and reverts to normal operational monitoring. This window is a starting proposal, not
-  evidenced by prior launches of this project (there are none) — vveliev can shorten or extend it.
-
-**Owner: vveliev** (sole operator of the target fleet; also the only account with DNS control per
-§1).
-
-## Owners summary
-
-| Decision | Owner | Action |
-|---|---|---|
-| Domain (contact upstream / register alternate) | vveliev | Track 1 open, no fixed deadline. Track 2 decided: launch on hosting provider's default subdomain first (zero-cost interim) — see Status below |
-| Fleet host + port block + reverse proxy/TLS | vveliev | Not yet provisioned — vveliev will ping when ready to hand off details |
-| Production release Dockerfiles + `phx.gen.release` | **Done** — PR #34 (merged to `main`) | Shipped `Dockerfile.prod` for both services, `bin/server`/`bin/migrate` overlays, `docker-compose.prod.yml` |
-| Secrets wired into fleet deploy mechanism | vveliev | Not yet provisioned |
-| Mailer provider decision | Follow-up issue (new) | Blocks password-reset emails only, not launch |
-| Postgres instance sizing + backup job | vveliev | Provision alongside app host |
-| Migration execution (`mix ecto.migrate`) on deploy | Release-owner (same as Dockerfiles) | `bin/migrate` shipped in PR #34, ready to run once a host exists |
-| Rollback execution during the 14-day window | vveliev | On call for the window |
-
-## Status: release execution (2026-08-31)
-
-Per the launch decisions vveliev made:
-
-- **Domain:** launch on the hosting provider's default subdomain first (zero-cost interim per §1
-  track 2), not a fresh registration. Track 1 (contacting the upstream owner about
-  `globalcombat.com`) remains open with no fixed timeline.
-- **Fleet host:** not yet provisioned. vveliev will ping when ready to hand off the host/port/TLS
-  details from §2.1.
-- **Secrets:** not yet provisioned in the secrets manager.
-- **Go-live:** vveliev will run the actual deploy from the release artifacts in PR #34, not an
-  agent — the same cross-company fleet boundary noted in §2.1 (the infrastructure repo is
-  unreachable from this project's agents).
-
-This closes the in-repo portion of this plan (§2.2's Dockerfiles/release scaffolding). Everything
-else in the Owners summary above is an out-of-band action on vveliev's fleet; there is nothing
-further an agent can provision toward a live URL until the fleet host exists.
-
-## Gaps and follow-ups this doc surfaces but does not close
-
-- **No production release artifacts exist yet** (§2.2) — this is real work, not a config change.
-  A child issue should be filed to build both production Dockerfiles and wire
-  `mix phx.gen.release`.
-- **Mailer adapter is unconfigured** (§2.3) — password-reset and notification email
-  (`accounts/notifier.ex`) has no prod transport selected yet.
-- **The realtime turn scheduler** is still in the backlog. It affects gameplay timing, not
-  deployability, so it does not block this plan, but it should land before or shortly after
-  launch — turns not resolving on schedule is a player-facing correctness issue once real users
-  are playing.
-- **Fleet backup tooling for Postgres is unconfirmed** — this doc assumes vveliev's fleet has a
-  answer for this already (from other projects) but that isn't verified here.
+| Item | Owner | State |
+| --- | --- | --- |
+| Launch domain | vveliev | Not chosen |
+| Oracle account, VM and network (ADR-0004) | vveliev | Not provisioned |
+| Secrets in a password manager | vveliev | Not provisioned |
+| Off-VM backups and a tested restore | vveliev | Not set up |
+| Mail provider account | vveliev | Mailgun is wired in code; no account or key yet. Blocks password-reset emails only. |
+| Turn scheduler resolver | Engineering | `TurnScheduler` finds due games but has no resolver wired, so turns don't auto-advance yet. Needed soon after launch, not for launch. |
+| Login rate limiting | Engineering | None yet; worth adding before the site is public. |

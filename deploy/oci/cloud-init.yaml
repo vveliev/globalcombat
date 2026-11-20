@@ -1,14 +1,8 @@
 #cloud-config
-# First-boot setup for an OCI Always Free Ampere A1 VM running
-# Canonical Ubuntu 24.04 (aarch64). Paste into "Show advanced options ->
-# Management -> Cloud-init script" when creating the instance.
-#
-# What it does: OS updates + unattended security upgrades, Docker Engine from
-# Docker's apt repo, SSH key-only login, fail2ban, opens 80/443 in the image's
-# host firewall, clones the repo to /opt/globalcombat, creates the gc-proxy
-# network, and installs a nightly backup timer. It does NOT write secrets:
-# the .env is created by hand afterwards (deploy/oci/README.md, step 5).
-# Progress: `sudo tail -f /var/log/cloud-init-output.log`.
+# First boot of the Oracle A1 VM (Ubuntu 24.04 aarch64). See docs/deploy/oracle-kamal.md.
+# Installs Docker, Tailscale, SSH hardening, fail2ban, unattended upgrades, opens
+# 80/443 in the host firewall, and sets up the nightly backup timer. The app is
+# deployed separately with Kamal. Progress: /var/log/cloud-init-output.log.
 
 package_update: true
 package_upgrade: true
@@ -61,7 +55,6 @@ write_files:
 
       [Service]
       Type=oneshot
-      WorkingDirectory=/opt/globalcombat
       ExecStart=/opt/globalcombat/deploy/oci/backup.sh
 
   - path: /etc/systemd/system/globalcombat-backup.timer
@@ -92,14 +85,21 @@ runcmd:
   # OCI's Ubuntu images ship iptables rules that reject everything but SSH,
   # independent of the VCN security list / NSG. Open HTTP(S) and persist.
   - iptables -I INPUT 5 -p tcp -m multiport --dports 80,443 -m conntrack --ctstate NEW -j ACCEPT
-  - iptables -I INPUT 5 -p udp --dport 443 -j ACCEPT
   - netfilter-persistent save
 
   - systemctl restart ssh
 
+  # Tailscale from its signed apt repo. Not logged in here, since an auth key in
+  # cloud-init would sit in the instance metadata: run `sudo tailscale up` once
+  # over OCI Bastion (docs/deploy/oracle-kamal.md, step 3).
+  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list
+  - apt-get update
+  - apt-get install -y tailscale
+
+  # Root-owned: the backup timer runs this script as root.
   - git clone https://github.com/vveliev/globalcombat.git /opt/globalcombat
-  - chown -R ubuntu:ubuntu /opt/globalcombat
   - chmod +x /opt/globalcombat/deploy/oci/backup.sh
-  - docker network create gc-proxy
+  - install -d -m 0700 /etc/globalcombat
   - systemctl daemon-reload
   - systemctl enable --now globalcombat-backup.timer

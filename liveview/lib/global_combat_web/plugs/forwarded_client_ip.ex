@@ -1,7 +1,7 @@
 defmodule GlobalCombatWeb.Plugs.ForwardedClientIp do
   @moduledoc """
   Sets `conn.remote_ip` to the real client address when the app sits behind a
-  reverse proxy (Caddy in `deploy/oci/`), so login history (`Accounts.list_logins_for_ip/1`,
+  reverse proxy (kamal-proxy, `config/deploy.yml`), so login history (`Accounts.list_logins_for_ip/1`,
   the admin `/IpAddresses` page) records players rather than the proxy container.
 
   Trust rule: `X-Forwarded-For` is only honoured when the TCP peer is on a
@@ -14,8 +14,8 @@ defmodule GlobalCombatWeb.Plugs.ForwardedClientIp do
 
   This relies on Phoenix's port never being published straight to the internet:
   Docker's port forwarding makes every client look like the private bridge gateway,
-  which this plug would then trust. In `docker-compose.prod.yml` only the proxy
-  publishes ports.
+  which this plug would then trust. Under Kamal (and `docker-compose.prod.yml`) only
+  the proxy publishes ports.
   """
 
   @behaviour Plug

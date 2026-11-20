@@ -67,7 +67,7 @@ defmodule GlobalCombat.Accounts.Notifier do
     )
   end
 
-  # `MAILER_FROM` (config/runtime.exs via `GlobalCombat.MailerConfig`, docs/launch.md §2.3) when
+  # `MAILER_FROM` (config/runtime.exs via `GlobalCombat.MailerConfig`, docs/launch.md §3) when
   # a production mailer is configured; the legacy `AccountController.cs` address otherwise.
   defp sender do
     Application.get_env(:global_combat, :mailer_from, GlobalCombat.MailerConfig.legacy_sender())
