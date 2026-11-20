@@ -1,7 +1,7 @@
 defmodule GlobalCombat.MailerConfig do
   @moduledoc """
   Decides the production `GlobalCombat.Mailer` configuration from the environment
-  (docs/launch.md §2.3). Pulled out of `config/runtime.exs` so the decision is a plain function
+  (docs/launch.md §3). Pulled out of `config/runtime.exs` so the decision is a plain function
   with tests, rather than logic that only ever runs at release boot.
 
   Mailgun when `MAILGUN_API_KEY` is set (`MAILGUN_DOMAIN` is then required); otherwise the
@@ -31,7 +31,7 @@ defmodule GlobalCombat.MailerConfig do
   """
   @spec from_env(%{optional(String.t()) => String.t()}) :: decision()
   def from_env(env) when is_map(env) do
-    case Map.get(env, "MAILGUN_API_KEY") do
+    case present(env, "MAILGUN_API_KEY") do
       nil ->
         %{
           mailer: [adapter: Swoosh.Adapters.Logger, level: :warning],
@@ -39,20 +39,29 @@ defmodule GlobalCombat.MailerConfig do
           warning:
             "MAILGUN_API_KEY is not set: GlobalCombat.Mailer is using Swoosh.Adapters.Logger, so " <>
               "password-reset and notification email will be logged but NOT delivered " <>
-              "(docs/launch.md §2.3)."
+              "(docs/launch.md §3)."
         }
 
       api_key ->
         domain =
-          Map.get(env, "MAILGUN_DOMAIN") ||
+          present(env, "MAILGUN_DOMAIN") ||
             raise ArgumentError,
-                  "MAILGUN_DOMAIN is required when MAILGUN_API_KEY is set (docs/launch.md §2.3)"
+                  "MAILGUN_DOMAIN is required when MAILGUN_API_KEY is set (docs/launch.md §3)"
 
         %{
           mailer: [adapter: Swoosh.Adapters.Mailgun, api_key: api_key, domain: domain],
-          from: {"Global Combat", Map.get(env, "MAILER_FROM", "no-reply@#{domain}")},
+          from: {"Global Combat", present(env, "MAILER_FROM") || "no-reply@#{domain}"},
           warning: nil
         }
+    end
+  end
+
+  # Deploy tools pass unset optional variables as "" (compose's `${VAR:-}`, Kamal's
+  # secrets file), so blank means unset.
+  defp present(env, key) do
+    case env |> Map.get(key, "") |> String.trim() do
+      "" -> nil
+      value -> value
     end
   end
 end

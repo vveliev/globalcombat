@@ -18,6 +18,8 @@ defmodule GlobalCombatWeb.Endpoint do
   # Chat push — see `GlobalCombatWeb.UserSocket`'s moduledoc for the auth design.
   socket "/socket", GlobalCombatWeb.UserSocket, websocket: true
 
+  plug GlobalCombatWeb.Plugs.HealthCheck
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
