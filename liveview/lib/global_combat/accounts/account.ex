@@ -30,6 +30,8 @@ defmodule GlobalCombat.Accounts.Account do
     field :password, :string, redact: true
     field :password_confirmation, :string, virtual: true, redact: true
     field :email, :string
+    field :reset_token_hash, :string, redact: true
+    field :reset_token_expires_at, :utc_datetime
 
     field :info_visible, :boolean, default: true
     field :wins, :integer, default: 0
@@ -68,6 +70,8 @@ defmodule GlobalCombat.Accounts.Account do
     |> update_change(:name, &String.trim/1)
     |> update_change(:email, &String.trim/1)
     |> validate_length(:name, min: 1, max: 30)
+    # An `@` in a name would collide with that person's email in `get_account_by_login/1`.
+    |> validate_format(:name, ~r/^[^@\s]+$/, message: "cannot contain @ or spaces")
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+\.[^\s]+$/, message: "must be a valid email")
     |> validate_length(:email, max: 255)
     |> validate_length(:password, min: 5, max: 72, message: "must be at least five letters")
