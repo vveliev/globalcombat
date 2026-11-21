@@ -72,6 +72,46 @@ defmodule GlobalCombatWeb.GameCreateLiveTest do
     assert Enum.map(view_state.players, & &1.name) == [account.name, "Computer"]
   end
 
+  test "training + private still seats the Computer and the game stays out of the public list",
+       %{conn: conn} do
+    account = account_fixture()
+    {:ok, view, _html} = conn |> log_in_account(account) |> live(~p"/Create-Game")
+
+    assert {:error, {:live_redirect, %{to: "/Game-" <> game_id_str}}} =
+             view
+             |> form("form[phx-submit=create]", %{"is_training" => "true", "is_private" => "true"})
+             |> render_submit()
+
+    game_id = String.to_integer(game_id_str)
+    {:lobby, view_state} = Games.player_view(game_id, account.id)
+    assert Enum.map(view_state.players, & &1.name) == [account.name, "Computer"]
+    refute Enum.any?(GlobalCombat.Games.list_new_games(), &(&1.id == game_id))
+  end
+
+  test "values outside the form's options are rejected without creating a game", %{conn: conn} do
+    account = account_fixture()
+    {:ok, view, _html} = conn |> log_in_account(account) |> live(~p"/Create-Game")
+    valid = %{
+      "map_name" => "original",
+      "max_players" => "4",
+      "turn_length_minutes" => "60",
+      "minimum_armies" => "3"
+    }
+
+    for bad <- [
+          %{"turn_length_minutes" => "-5"},
+          %{"max_players" => "1"},
+          %{"minimum_armies" => "9"},
+          %{"map_name" => "nope"},
+          %{"max_players" => "abc"}
+        ] do
+      html = render_submit(view, "create", Map.merge(valid, bad))
+      assert html =~ "Invalid game settings."
+    end
+
+    assert GlobalCombat.Games.list_player_games(account.id) == []
+  end
+
   test "the sidebar marks New Game as the current page (LiveView handle_params hook)", %{
     conn: conn
   } do

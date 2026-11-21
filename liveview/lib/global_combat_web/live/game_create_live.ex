@@ -12,10 +12,8 @@ defmodule GlobalCombatWeb.GameCreateLive do
   `max_players` to 2, mirroring `GameController.Create`'s `if (model.IsTraining)` branches
   — without a second seat the lobby could never reach `Server.start_game/2`'s `>= 2` guard.
 
-  Private Invite Only is UI-only for now: `Server` records `is_private` on the lobby, but
-  nothing enforces it yet, since `GameController.Join`'s invite check depends on an invite
-  list this port hasn't built (`GameLive`'s moduledoc tracks `/Game-:id/Invite` as the same
-  pre-existing scope cut).
+  Private Invite Only is enforced by `Server`'s join check (invited accounts and the Computer
+  seat only) and keeps the game out of the public new-games list.
   """
 
   use GlobalCombatWeb, :live_view
@@ -52,28 +50,59 @@ defmodule GlobalCombatWeb.GameCreateLive do
   @impl true
   def handle_event("create", params, socket) do
     account = socket.assigns.current_account
+
+    case parse_settings(params) do
+      {:ok, settings} ->
+        game_id = Games.create_game(settings)
+        {:ok, 1} = Games.join(game_id, account.id, account.name)
+
+        if settings.is_training,
+          do:
+            {:ok, 2} =
+              Games.join(game_id, Accounts.computer_account_id(), Accounts.computer_name())
+
+        {:noreply, push_navigate(socket, to: ~p"/Game-#{game_id}")}
+
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid game settings.")}
+    end
+  end
+
+  # Form values are untrusted: accept only what the form's own options offer.
+  @turn_lengths [1, 2, 5, 60, 1440, 4320]
+  @maps %{"original" => :original, "elements" => :elements}
+
+  defp parse_settings(params) do
     is_training = params["is_training"] == "true"
 
-    game_id =
-      Games.create_game(%{
-        map_name: String.to_existing_atom(params["map_name"]),
-        max_players: if(is_training, do: 2, else: String.to_integer(params["max_players"])),
-        is_fogged: params["is_fogged"] == "true",
-        reverse_attack_order: params["reverse_attack_order"] == "true",
-        is_non_random: params["is_non_random"] == "true",
-        is_training: is_training,
-        turn_length_minutes: String.to_integer(params["turn_length_minutes"]),
-        minimum_armies: String.to_integer(params["minimum_armies"]),
-        is_private: params["is_private"] == "true"
-      })
-
-    {:ok, 1} = Games.join(game_id, account.id, account.name)
-
-    if is_training,
-      do: {:ok, 2} = Games.join(game_id, Accounts.computer_account_id(), Accounts.computer_name())
-
-    {:noreply, push_navigate(socket, to: ~p"/Game-#{game_id}")}
+    with {:ok, map_name} <- Map.fetch(@maps, params["map_name"]),
+         {:ok, turn_length} <- int_in(params["turn_length_minutes"], @turn_lengths),
+         {:ok, minimum_armies} <- int_in(params["minimum_armies"], 0..5),
+         {:ok, max_players} <-
+           if(is_training, do: {:ok, 2}, else: int_in(params["max_players"], 2..8)) do
+      {:ok,
+       %{
+         map_name: map_name,
+         max_players: max_players,
+         is_fogged: params["is_fogged"] == "true",
+         reverse_attack_order: params["reverse_attack_order"] == "true",
+         is_non_random: params["is_non_random"] == "true",
+         is_training: is_training,
+         turn_length_minutes: turn_length,
+         minimum_armies: minimum_armies,
+         is_private: params["is_private"] == "true"
+       }}
+    end
   end
+
+  defp int_in(value, allowed) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> if n in allowed, do: {:ok, n}, else: :error
+      _ -> :error
+    end
+  end
+
+  defp int_in(_value, _allowed), do: :error
 
   @impl true
   def render(assigns) do

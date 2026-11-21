@@ -41,7 +41,7 @@ defmodule GlobalCombat.Games.Live do
     {:ok, db_game} =
       GamesDb.create_game(%{
         status: :new,
-        private: false,
+        private: Map.get(attrs, :is_private, false),
         turn_length: turn_length,
         map_name: Map.get(attrs, :map_name, :original),
         is_fogged: Map.get(attrs, :is_fogged, false),
