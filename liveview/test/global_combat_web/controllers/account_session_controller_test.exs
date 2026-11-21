@@ -95,14 +95,20 @@ defmodule GlobalCombatWeb.AccountSessionControllerTest do
       # A different login from a fresh IP is unaffected, and a failure counter resets on success.
       other = account_fixture()
       ok = [account: %{login: other.name, password: valid_account_password()}]
-      assert get_session(post(%{conn | remote_ip: {198, 51, 100, 98}}, ~p"/account/log-on", ok), :account_id)
+
+      assert get_session(
+               post(%{conn | remote_ip: {198, 51, 100, 98}}, ~p"/account/log-on", ok),
+               :account_id
+             )
     end
 
     test "returns 429 after too many failures from one IP", %{conn: conn} do
       conn = %{conn | remote_ip: {203, 0, 113, 5}}
 
       for _ <- 1..10 do
-        post(conn, ~p"/account/log-on", account: %{login: "nobody-#{System.unique_integer()}", password: "x"})
+        post(conn, ~p"/account/log-on",
+          account: %{login: "nobody-#{System.unique_integer()}", password: "x"}
+        )
       end
 
       conn = post(conn, ~p"/account/log-on", account: %{login: "someone-else", password: "x"})

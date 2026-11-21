@@ -91,6 +91,7 @@ defmodule GlobalCombatWeb.GameCreateLiveTest do
   test "values outside the form's options are rejected without creating a game", %{conn: conn} do
     account = account_fixture()
     {:ok, view, _html} = conn |> log_in_account(account) |> live(~p"/Create-Game")
+
     valid = %{
       "map_name" => "original",
       "max_players" => "4",

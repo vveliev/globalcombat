@@ -275,7 +275,11 @@ defmodule GlobalCombat.Games.ServerTest do
       row_before = GamesDb.get_game!(game_id)
 
       assert {:error, :not_playing} =
-               Server.run_scheduled_turn(game_id, row_before.last_turn_time, row_before.last_turn_time)
+               Server.run_scheduled_turn(
+                 game_id,
+                 row_before.last_turn_time,
+                 row_before.last_turn_time
+               )
 
       assert GamesDb.get_game!(game_id) == row_before
     end

@@ -194,7 +194,7 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
     end
 
     test "GET /Chat is gone (state-changing, POST only)", %{conn: conn} do
-      assert_error_sent 404, fn -> get(conn, "/Chat") end
+      assert get(conn, "/Chat").status == 404
     end
 
     test "GET /LoadChatMessages redirects anonymous visitors home (requires login)", %{
@@ -212,7 +212,7 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
     end
 
     test "GET /SendMessage is gone (state-changing, POST only)", %{conn: conn} do
-      assert_error_sent 404, fn -> get(conn, "/SendMessage") end
+      assert get(conn, "/SendMessage").status == 404
     end
   end
 

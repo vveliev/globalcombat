@@ -62,7 +62,10 @@ defmodule GlobalCombatWeb.AccountResetPasswordController do
           invalid_token(conn)
 
         {:error, %Ecto.Changeset{}} ->
-          render(conn, :edit, token: token, error_message: "Password must be at least five letters.")
+          render(conn, :edit,
+            token: token,
+            error_message: "Password must be at least five letters."
+          )
       end
     end
   end

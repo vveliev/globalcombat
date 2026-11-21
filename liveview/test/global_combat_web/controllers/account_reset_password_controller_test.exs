@@ -32,7 +32,11 @@ defmodule GlobalCombatWeb.AccountResetPasswordControllerTest do
       assert redirected_to(get(conn, ~p"/account/reset-password/#{token}")) ==
                ~p"/account/reset-password"
 
-      conn3 = post(conn, ~p"/account/reset-password/#{token}", account: %{params | password: "x1x1x1x1", password_confirmation: "x1x1x1x1"})
+      conn3 =
+        post(conn, ~p"/account/reset-password/#{token}",
+          account: %{params | password: "x1x1x1x1", password_confirmation: "x1x1x1x1"}
+        )
+
       assert redirected_to(conn3) == ~p"/account/reset-password"
       assert {:error, :bad_password} = Accounts.authenticate_account(account.name, "x1x1x1x1")
     end

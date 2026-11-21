@@ -201,7 +201,9 @@ defmodule GlobalCombat.AccountsTest do
 
       account
       |> Repo.reload!()
-      |> Ecto.Changeset.change(reset_token_expires_at: DateTime.add(DateTime.utc_now(:second), -1))
+      |> Ecto.Changeset.change(
+        reset_token_expires_at: DateTime.add(DateTime.utc_now(:second), -1)
+      )
       |> Repo.update!()
 
       assert {:error, :invalid_token} = Accounts.reset_password_with_token(token, "brandnewpw")

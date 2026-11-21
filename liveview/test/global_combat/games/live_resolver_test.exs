@@ -1,8 +1,6 @@
 defmodule GlobalCombat.Games.LiveResolverTest do
   use GlobalCombat.DataCase, async: true
 
-  import GlobalCombat.GamesTestHelpers
-
   alias GlobalCombat.Accounts
   alias GlobalCombat.AccountsFixtures
   alias GlobalCombat.Engine.DotnetRandom

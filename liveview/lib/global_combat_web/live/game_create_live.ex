@@ -64,7 +64,7 @@ defmodule GlobalCombatWeb.GameCreateLive do
         {:noreply, push_navigate(socket, to: ~p"/Game-#{game_id}")}
 
       :error ->
-        {:noreply, put_flash(socket, :error, "Invalid game settings.")}
+        {:noreply, assign(socket, :error, "Invalid game settings.")}
     end
   end
 
@@ -110,6 +110,10 @@ defmodule GlobalCombatWeb.GameCreateLive do
     <.site_chrome current_account={@current_account} current_path={assigns[:current_path]}>
       <div class="mx-auto max-w-2xl p-[var(--space-4)]">
         <h1 class="text-lg font-semibold mb-[var(--space-4)]">Create a New Game</h1>
+
+        <p :if={assigns[:error]} role="alert" class="mb-[var(--space-4)] text-sm text-danger">
+          {@error}
+        </p>
 
         <form phx-submit="create" class="flex flex-col gap-[var(--space-4)]">
           <label class="flex items-center gap-[var(--space-2)]">

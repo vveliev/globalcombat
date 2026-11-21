@@ -163,13 +163,8 @@ defmodule GlobalCombatWeb.TourneyControllerTest do
     account = account_fixture()
     admin_conn = log_in_account(conn, admin_fixture())
 
-    assert_error_sent 404, fn ->
-      get(log_in_account(conn, account), "/Tournament-#{tourney.id}/Join")
-    end
-
-    assert_error_sent 404, fn ->
-      get(log_in_account(conn, account), "/Tournament-#{tourney.id}/Quit")
-    end
+    assert get(log_in_account(conn, account), "/Tournament-#{tourney.id}/Join").status == 404
+    assert get(log_in_account(conn, account), "/Tournament-#{tourney.id}/Quit").status == 404
 
     get(admin_conn, "/Tournament-#{tourney.id}?StartTourney=1")
     get(admin_conn, "/Tournament-#{tourney.id}?KillTourney=1")

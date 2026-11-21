@@ -153,7 +153,8 @@ defmodule GlobalCombat.Accounts do
           account
           |> Ecto.Changeset.change(
             reset_token_hash: hash_reset_token(token),
-            reset_token_expires_at: DateTime.add(DateTime.utc_now(:second), @reset_token_ttl_seconds)
+            reset_token_expires_at:
+              DateTime.add(DateTime.utc_now(:second), @reset_token_ttl_seconds)
           )
           |> Repo.update()
 

@@ -16,7 +16,9 @@ defmodule GlobalCombatWeb.AccountSessionController do
     if Enum.all?(keys, &RateLimiter.allow?(&1, @max_failures)) do
       authenticate(conn, login, password, keys, params)
     else
-      conn |> put_status(429) |> render(:new, error_message: error_message(:rate_limited), login: login)
+      conn
+      |> put_status(429)
+      |> render(:new, error_message: error_message(:rate_limited), login: login)
     end
   end
 
