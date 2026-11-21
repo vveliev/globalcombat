@@ -1,0 +1,43 @@
+<.auth_card
+  title="Choose a New Password"
+  kicker="Account recovery"
+  lede="Pick a new password for your account."
+  current_account={@current_account}
+  current_path={assigns[:current_path]}
+  flash={@flash}
+>
+  <.inline_message :if={@error_message} id="login-error" intent="danger">
+    {@error_message}
+  </.inline_message>
+
+  <.form
+    :let={f}
+    for={%{}}
+    as={:account}
+    action={~p"/account/reset-password/#{@token}"}
+    method="post"
+    class="flex flex-col gap-[var(--space-4)]"
+  >
+    <Input.input
+      field={f[:password]}
+      type="password"
+      label="New password"
+      autocomplete="new-password"
+      autofocus
+      required
+    />
+    <Input.input
+      field={f[:password_confirmation]}
+      type="password"
+      label="Confirm new password"
+      autocomplete="new-password"
+      required
+    />
+    <Button.button
+      type="submit"
+      class="w-full min-h-[var(--size-touch-target)] touch-manipulation"
+    >
+      Change password
+    </Button.button>
+  </.form>
+</.auth_card>

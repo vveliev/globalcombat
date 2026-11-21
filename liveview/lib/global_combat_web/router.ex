@@ -109,6 +109,8 @@ defmodule GlobalCombatWeb.Router do
     post "/log-on", AccountSessionController, :create
     get "/reset-password", AccountResetPasswordController, :new
     post "/reset-password", AccountResetPasswordController, :create
+    get "/reset-password/:token", AccountResetPasswordController, :edit
+    post "/reset-password/:token", AccountResetPasswordController, :update
   end
 
   scope "/account", GlobalCombatWeb do

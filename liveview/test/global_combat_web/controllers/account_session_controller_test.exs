@@ -80,6 +80,35 @@ defmodule GlobalCombatWeb.AccountSessionControllerTest do
       assert html_response(conn, 200) =~ "Unknown login name or email address."
     end
 
+    test "returns 429 after too many failures and a success clears the login counter", %{
+      conn: conn
+    } do
+      account = account_fixture()
+      bad = [account: %{login: account.name, password: "wrongpassword"}]
+
+      # Distinct client IPs so only the per-login counter is in play.
+      for i <- 1..10, do: post(%{conn | remote_ip: {198, 51, 100, i}}, ~p"/account/log-on", bad)
+
+      limited = post(%{conn | remote_ip: {198, 51, 100, 99}}, ~p"/account/log-on", bad)
+      assert html_response(limited, 429) =~ "Too many failed attempts"
+
+      # A different login from a fresh IP is unaffected, and a failure counter resets on success.
+      other = account_fixture()
+      ok = [account: %{login: other.name, password: valid_account_password()}]
+      assert get_session(post(%{conn | remote_ip: {198, 51, 100, 98}}, ~p"/account/log-on", ok), :account_id)
+    end
+
+    test "returns 429 after too many failures from one IP", %{conn: conn} do
+      conn = %{conn | remote_ip: {203, 0, 113, 5}}
+
+      for _ <- 1..10 do
+        post(conn, ~p"/account/log-on", account: %{login: "nobody-#{System.unique_integer()}", password: "x"})
+      end
+
+      conn = post(conn, ~p"/account/log-on", account: %{login: "someone-else", password: "x"})
+      assert html_response(conn, 429) =~ "Too many failed attempts"
+    end
+
     test "blocks a disabled account", %{conn: conn} do
       account = legacy_plaintext_account_fixture(password: "plaintextpw")
       disable_account!(account)

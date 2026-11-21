@@ -14,6 +14,7 @@ defmodule GlobalCombat.Application do
         {DNSCluster, query: Application.get_env(:global_combat, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: GlobalCombat.PubSub},
         GlobalCombat.Presence,
+        GlobalCombat.RateLimiter,
         # One process per live game - see GlobalCombat.Games.Server.
         {Registry, keys: :unique, name: GlobalCombat.Games.Registry},
         GlobalCombat.Games.Supervisor

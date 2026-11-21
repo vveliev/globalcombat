@@ -1,7 +1,7 @@
 <.auth_card
   title="Lost Password"
   kicker="Account recovery"
-  lede="Enter your login name or email address and we'll email you a new password."
+  lede="Enter your login name or email address and we'll email you a link to choose a new password."
   current_account={@current_account}
   current_path={assigns[:current_path]}
   flash={@flash}
@@ -34,7 +34,7 @@
       type="submit"
       class="w-full min-h-[var(--size-touch-target)] touch-manipulation"
     >
-      Email me a new password
+      Email me a reset link
     </Button.button>
   </.form>
 
