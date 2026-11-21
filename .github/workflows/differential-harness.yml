@@ -28,6 +28,7 @@ on:
     paths:
       - "liveview/**"
       - "GlobalCombat.Core/**"
+      - "GlobalCombat.Core.Tests/**"
       - "GlobalCombat.GrpcHost/**"
       - "GlobalCombat.sln"
       - ".github/workflows/differential-harness.yml"
@@ -35,6 +36,7 @@ on:
     paths:
       - "liveview/**"
       - "GlobalCombat.Core/**"
+      - "GlobalCombat.Core.Tests/**"
       - "GlobalCombat.GrpcHost/**"
       - "GlobalCombat.sln"
       - ".github/workflows/differential-harness.yml"

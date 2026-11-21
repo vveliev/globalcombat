@@ -39,7 +39,7 @@ defmodule GlobalCombatWeb.Components.Boutique.Layouts.GameLayout do
   Sizes to its container rather than forcing its own `min-h-screen`:
   `GameLive` nests this inside `SiteChrome.site_chrome`'s already-`min-h-screen`
   content slot, so a second forced viewport-height here would inflate the page
-  to roughly double the visible content. A standalone consumer (`DesignSmokeLive`)
+  to roughly double the visible content. A standalone consumer
   passes `class="min-h-screen"` explicitly to get the old full-viewport look back.
   `stage` mode (below) is the one exception: it pins the whole shell to
   `100dvh` on purpose, matching `SiteChrome`'s `immersive` attr stripping the

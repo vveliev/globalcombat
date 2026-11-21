@@ -5,8 +5,6 @@ VisualStudioVersion = 12.0.21005.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlobalCombat.Core", "GlobalCombat.Core\GlobalCombat.Core.csproj", "{B4180767-B19D-4611-8F74-6CE648570965}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web", "Web\Web.csproj", "{925113FE-AE39-4231-B3E0-C798B88CCCB3}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlobalCombat.Core.Tests", "GlobalCombat.Core.Tests\GlobalCombat.Core.Tests.csproj", "{0B35B653-B17E-4D9D-A2E7-D6CFD8BBC373}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlobalCombat.GrpcHost", "GlobalCombat.GrpcHost\GlobalCombat.GrpcHost.csproj", "{7ABA00BC-71C6-48D6-BF1E-6FB56E4BCDF7}"
@@ -42,23 +40,6 @@ Global
 		{B4180767-B19D-4611-8F74-6CE648570965}.Release|x86.ActiveCfg = Release|Any CPU
 		{B4180767-B19D-4611-8F74-6CE648570965}.Release|x64.ActiveCfg = Release|Any CPU
 		{B4180767-B19D-4611-8F74-6CE648570965}.Release|x64.Build.0 = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|.NET.ActiveCfg = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|x86.Build.0 = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Debug|x64.Build.0 = Debug|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|.NET.ActiveCfg = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|Any CPU.Build.0 = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|Mixed Platforms.Build.0 = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|x86.ActiveCfg = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|x64.ActiveCfg = Release|Any CPU
-		{925113FE-AE39-4231-B3E0-C798B88CCCB3}.Release|x64.Build.0 = Release|Any CPU
 		{0B35B653-B17E-4D9D-A2E7-D6CFD8BBC373}.Debug|.NET.ActiveCfg = Debug|Any CPU
 		{0B35B653-B17E-4D9D-A2E7-D6CFD8BBC373}.Debug|.NET.Build.0 = Debug|Any CPU
 		{0B35B653-B17E-4D9D-A2E7-D6CFD8BBC373}.Debug|Any CPU.ActiveCfg = Debug|Any CPU

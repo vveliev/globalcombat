@@ -36,18 +36,12 @@ services:
     restart: unless-stopped
     networks: [gc-internal]
 
-  grpc-host:
-    build:
-      context: .
-      dockerfile: GlobalCombat.GrpcHost/Dockerfile.prod
-    restart: unless-stopped
-    networks: [gc-internal]
-
   migrate:
     build:
       context: ./liveview
       dockerfile: Dockerfile.prod
     entrypoint: ["/app/bin/migrate"]
+    restart: "no"
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     depends_on:
@@ -65,14 +59,14 @@ services:
       PHX_HOST: ${PHX_HOST:?PHX_HOST is required}
       PHX_SERVER: "true"
       PORT: "4000"
-      GRPC_HOST: grpc-host
-      GRPC_PORT: "5251"
       MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
+      MAILER_FROM: ${MAILER_FROM:-}
     depends_on:
       postgres:
         condition: service_healthy
-      grpc-host:
-        condition: service_started
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks: [gc-internal, gc-proxy]
 

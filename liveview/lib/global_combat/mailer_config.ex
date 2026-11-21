@@ -31,6 +31,9 @@ defmodule GlobalCombat.MailerConfig do
   """
   @spec from_env(%{optional(String.t()) => String.t()}) :: decision()
   def from_env(env) when is_map(env) do
+    # Compose passes unset optional vars as "" — treat them as unset.
+    env = Map.reject(env, fn {_k, v} -> v == "" end)
+
     case Map.get(env, "MAILGUN_API_KEY") do
       nil ->
         %{

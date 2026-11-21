@@ -24,10 +24,6 @@ defmodule GlobalCombatWeb.Router do
 
     get "/", HomeController, :index
 
-    # Bootstrap smoke page for the vendored design-boutique layer. Remove when
-    # the real board LiveView lands.
-    live "/design", DesignSmokeLive
-
     # --- Legacy globalcombat.com URL scheme (live since 2001-01-22) ---
     # Mirrors the explicit MapControllerRoute calls in Web/Program.cs so 25
     # years of inbound links, bookmarks and search results keep resolving.

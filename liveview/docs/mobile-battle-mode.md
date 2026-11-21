@@ -215,7 +215,6 @@ Depends on: WP1. Effort: one to two days.
 - `GameLayout` `stage` attr and `:dock` slot (§4.1); `SiteChrome` `immersive` (§4.2).
 - `GameLive` slot placement per the table in §4.3; dock idle row and order panel; Quit into `:players`.
 - Stage CSS, translucent status strip, dock sheet (§4.7).
-- Design smoke page (`design_smoke_live.ex`) gains a `stage` example.
 - Update `docs/design-boutique/LAYOUTS.md` game_layout row.
 - Tests per §4.8 for layout, placement, ended-game fallback.
 
