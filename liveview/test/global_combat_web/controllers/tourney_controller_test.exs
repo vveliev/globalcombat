@@ -79,11 +79,11 @@ defmodule GlobalCombatWeb.TourneyControllerTest do
     account = account_fixture()
     conn = log_in_account(conn, account)
 
-    conn = get(conn, "/Tournament-#{tourney.id}/Join")
+    conn = post(conn, "/Tournament-#{tourney.id}/Join")
     assert html_response(conn, 200) =~ "You have joined this tournament."
     assert Tourneys.playing?(tourney, account.id)
 
-    conn = get(conn, "/Tournament-#{tourney.id}/Quit")
+    conn = post(conn, "/Tournament-#{tourney.id}/Quit")
     assert html_response(conn, 200) =~ "You quit this tournament."
     refute Tourneys.playing?(tourney, account.id)
   end
@@ -94,32 +94,87 @@ defmodule GlobalCombatWeb.TourneyControllerTest do
     [a, b, c, d] = for _ <- 1..4, do: account_fixture()
 
     for account <- [a, b, c] do
-      conn |> log_in_account(account) |> get("/Tournament-#{tourney.id}/Join")
+      conn |> log_in_account(account) |> post("/Tournament-#{tourney.id}/Join")
     end
 
-    conn = conn |> log_in_account(d) |> get("/Tournament-#{tourney.id}/Join")
+    conn = conn |> log_in_account(d) |> post("/Tournament-#{tourney.id}/Join")
     assert html_response(conn, 200) =~ "Tournament Started"
     assert Tourneys.get_tourney!(tourney.id).status == :running
   end
 
-  test "admin StartTourney query param starts the tourney early", %{conn: conn} do
-    tourney = tourney_fixture()
-    account_fixture() |> then(&Tourneys.join_tournament(tourney, &1.id))
+  defp fill(tourney, count) do
+    for _ <- 1..count, do: Tourneys.join_tournament(tourney, account_fixture().id)
+  end
 
-    conn =
-      conn |> log_in_account(admin_fixture()) |> get("/Tournament-#{tourney.id}?StartTourney=1")
+  test "admin POST Start starts a full tourney", %{conn: conn} do
+    tourney = tourney_fixture(%{"auto_start" => false})
+    fill(tourney, 4)
+
+    conn = conn |> log_in_account(admin_fixture()) |> post("/Tournament-#{tourney.id}/Start")
 
     assert html_response(conn, 200) =~ "Tournament Started"
     assert Tourneys.get_tourney!(tourney.id).status == :running
   end
 
-  test "admin KillTourney query param deletes the tourney", %{conn: conn} do
+  test "admin POST Start refuses a partly filled tourney", %{conn: conn} do
+    tourney = tourney_fixture(%{"auto_start" => false})
+    fill(tourney, 1)
+
+    conn = conn |> log_in_account(admin_fixture()) |> post("/Tournament-#{tourney.id}/Start")
+
+    assert html_response(conn, 200) =~ "every seat is filled"
+    assert Tourneys.get_tourney!(tourney.id).status == :new
+  end
+
+  test "a second Start shows an error instead of crashing", %{conn: conn} do
+    tourney = tourney_fixture(%{"auto_start" => false})
+    fill(tourney, 4)
+    conn = log_in_account(conn, admin_fixture())
+
+    post(conn, "/Tournament-#{tourney.id}/Start")
+    conn = post(conn, "/Tournament-#{tourney.id}/Start")
+
+    assert html_response(conn, 200) =~ "already started"
+  end
+
+  test "admin POST Kill deletes the tourney", %{conn: conn} do
     tourney = tourney_fixture()
 
-    conn =
-      conn |> log_in_account(admin_fixture()) |> get("/Tournament-#{tourney.id}?KillTourney=1")
+    conn = conn |> log_in_account(admin_fixture()) |> post("/Tournament-#{tourney.id}/Kill")
 
     assert redirected_to(conn) == "/"
     assert Tourneys.get_tourney(tourney.id) == nil
+  end
+
+  test "non-admin POST Start/Kill do nothing", %{conn: conn} do
+    tourney = tourney_fixture(%{"auto_start" => false})
+    fill(tourney, 4)
+    conn = log_in_account(conn, account_fixture())
+
+    post(conn, "/Tournament-#{tourney.id}/Start")
+    post(conn, "/Tournament-#{tourney.id}/Kill")
+
+    assert Tourneys.get_tourney!(tourney.id).status == :new
+  end
+
+  test "GET requests to the old state-changing URLs change nothing", %{conn: conn} do
+    tourney = tourney_fixture(%{"auto_start" => false})
+    fill(tourney, 3)
+    account = account_fixture()
+    admin_conn = log_in_account(conn, admin_fixture())
+
+    assert_error_sent 404, fn ->
+      get(log_in_account(conn, account), "/Tournament-#{tourney.id}/Join")
+    end
+
+    assert_error_sent 404, fn ->
+      get(log_in_account(conn, account), "/Tournament-#{tourney.id}/Quit")
+    end
+
+    get(admin_conn, "/Tournament-#{tourney.id}?StartTourney=1")
+    get(admin_conn, "/Tournament-#{tourney.id}?KillTourney=1")
+
+    assert Tourneys.get_tourney!(tourney.id).status == :new
+    assert Tourneys.current_players(tourney) == 3
   end
 end

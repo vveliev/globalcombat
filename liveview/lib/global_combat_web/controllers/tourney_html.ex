@@ -11,6 +11,21 @@ defmodule GlobalCombatWeb.TourneyHTML do
   def playing?(_players, nil), do: false
   def playing?(players, account), do: Enum.any?(players, &(&1.id == account.id))
 
+  @doc "A CSRF-protected POST button styled as a link, for the state-changing tourney actions."
+  attr :action, :string, required: true
+  slot :inner_block, required: true
+
+  def post_button(assigns) do
+    ~H"""
+    <form method="post" action={@action} class="inline">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <button type="submit" class="text-primary underline cursor-pointer">
+        {render_slot(@inner_block)}
+      </button>
+    </form>
+    """
+  end
+
   @doc "Port of `Tourney/_Round.cshtml` -- one bracket round's column of games."
   attr :round, :any, required: true
   attr :tourney, :any, required: true

@@ -193,9 +193,8 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert conn.status == 404
     end
 
-    test "GET /Chat redirects anonymous visitors home (requires login)", %{conn: conn} do
-      conn = get(conn, "/Chat")
-      assert redirected_to(conn) == "/"
+    test "GET /Chat is gone (state-changing, POST only)", %{conn: conn} do
+      assert_error_sent 404, fn -> get(conn, "/Chat") end
     end
 
     test "GET /LoadChatMessages redirects anonymous visitors home (requires login)", %{
@@ -212,11 +211,8 @@ defmodule GlobalCombatWeb.LegacyRoutesTest do
       assert redirected_to(conn) == "/"
     end
 
-    test "GET /SendMessage redirects anonymous visitors home (requires login)", %{
-      conn: conn
-    } do
-      conn = get(conn, "/SendMessage")
-      assert redirected_to(conn) == "/"
+    test "GET /SendMessage is gone (state-changing, POST only)", %{conn: conn} do
+      assert_error_sent 404, fn -> get(conn, "/SendMessage") end
     end
   end
 
