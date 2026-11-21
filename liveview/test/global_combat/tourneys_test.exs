@@ -1,7 +1,7 @@
 defmodule GlobalCombat.TourneysTest do
   use GlobalCombat.DataCase, async: true
 
-  alias GlobalCombat.{Games, Tourneys}
+  alias GlobalCombat.{Games, Repo, Tourneys}
   alias GlobalCombat.Tourneys.Tourney
 
   import GlobalCombat.AccountsFixtures
@@ -107,12 +107,26 @@ defmodule GlobalCombat.TourneysTest do
     end
 
     test "rejects joins once the tourney is full" do
-      tourney = tourney_fixture(%{"initial_games" => 2})
-      players = accounts(4)
-      {tourney, _} = join_all(tourney, players)
+      tourney = tourney_fixture(%{"initial_games" => 2, "auto_start" => false})
+      {tourney, _} = join_all(tourney, accounts(4))
 
-      extra = account_fixture()
-      assert {:error, :full} = Tourneys.join_tournament(tourney, extra.id)
+      assert {:error, :full} = Tourneys.join_tournament(tourney, account_fixture().id)
+      assert Tourneys.current_players(tourney) == 4
+    end
+
+    test "a started tourney says already_started, not full" do
+      tourney = tourney_fixture(%{"initial_games" => 2})
+      {tourney, :started} = join_all(tourney, accounts(4))
+
+      assert {:error, :already_started} = Tourneys.join_tournament(tourney, account_fixture().id)
+    end
+
+    test "a stale struct cannot overfill: the full check re-reads under the lock" do
+      tourney = tourney_fixture(%{"initial_games" => 2, "auto_start" => false})
+      stale = tourney
+      join_all(tourney, accounts(4))
+
+      assert {:error, :full} = Tourneys.join_tournament(stale, account_fixture().id)
     end
 
     test "auto-starts once the last seat fills, seeding round 1 games" do
@@ -150,6 +164,120 @@ defmodule GlobalCombat.TourneysTest do
 
       assert :noop = Tourneys.quit_tournament(tourney, a.id)
       assert Tourneys.playing?(tourney, a.id)
+    end
+  end
+
+  describe "start_tournament/1" do
+    test "refuses to start unless every seat is filled" do
+      tourney = tourney_fixture(%{"initial_games" => 4, "auto_start" => false})
+      join_all(tourney, accounts(3))
+
+      assert {:error, :not_full} = Tourneys.start_tournament(tourney)
+      assert Tourneys.get_tourney!(tourney.id).status == :new
+      assert Tourneys.tourney_games(tourney) == []
+    end
+
+    test "a second start is :already_started and creates no second bracket" do
+      tourney = tourney_fixture(%{"initial_games" => 2, "auto_start" => false})
+      join_all(tourney, accounts(4))
+
+      assert {:ok, _} = Tourneys.start_tournament(tourney)
+      assert {:error, :already_started} = Tourneys.start_tournament(tourney)
+      assert length(Tourneys.tourney_games(tourney)) == 3
+    end
+
+    for {name, next} <- [
+          {"Cup", "Cup #1"},
+          {"Cup #3", "Cup #4"},
+          {"Cup #final", "Cup #final #1"},
+          {"Cup #", "Cup # #1"},
+          {"Cup #1 #2", "Cup #1 #2 #1"}
+        ] do
+      test "recurring name #{inspect(name)} spawns #{inspect(next)}" do
+        tourney =
+          tourney_fixture(%{
+            "name" => unquote(name),
+            "initial_games" => 2,
+            "recurring" => true,
+            "auto_start" => false
+          })
+
+        join_all(tourney, accounts(4))
+
+        assert {:ok, _} = Tourneys.start_tournament(tourney)
+        assert Repo.get_by(Tourney, name: unquote(next), status: :new)
+      end
+    end
+  end
+
+  describe "kill_tournament/1" do
+    test "removes the tourney, signups, bracket games and their live servers" do
+      tourney = tourney_fixture(%{"initial_games" => 2})
+      {tourney, :started} = join_all(tourney, accounts(4))
+      game_ids = tourney |> Tourneys.tourney_games() |> Enum.map(& &1.game_id)
+
+      pids =
+        for id <- game_ids do
+          [{pid, _}] = Registry.lookup(GlobalCombat.Games.Registry, id)
+          pid
+        end
+
+      assert :ok = Tourneys.kill_tournament(tourney)
+
+      assert Tourneys.get_tourney(tourney.id) == nil
+      assert Tourneys.tourney_games(tourney) == []
+      assert Tourneys.current_players(tourney) == 0
+      assert Enum.all?(game_ids, &is_nil(Games.get_game(&1)))
+      refute Enum.any?(pids, &Process.alive?/1)
+    end
+  end
+
+  describe "bracket advancement races" do
+    test "two round-1 games finishing at once seat distinct round-2 slots" do
+      tourney = tourney_fixture(%{"initial_games" => 4})
+      {tourney, :started} = join_all(tourney, accounts(8))
+
+      results =
+        tourney
+        |> Tourneys.tourney_games()
+        |> Enum.filter(&(&1.round == 1))
+        |> Enum.map(fn tg ->
+          [loser, winner] = tg.game.game_players
+          {tg.game_id, [{loser.account_id, 2}, {winner.account_id, 1}]}
+        end)
+
+      results
+      |> Enum.map(fn {game_id, res} ->
+        Task.async(fn -> Tourneys.finish_game(game_id, res) end)
+      end)
+      |> Task.await_many()
+
+      round_two = tourney |> Tourneys.tourney_games() |> Enum.filter(&(&1.round == 2))
+      assert Enum.all?(round_two, &(length(&1.game.game_players) == 2))
+    end
+
+    test "a bracket with no open seat logs the lost result instead of raising" do
+      tourney = tourney_fixture(%{"initial_games" => 2})
+      {tourney, :started} = join_all(tourney, accounts(4))
+      games = Tourneys.tourney_games(tourney)
+      first = hd(games)
+      final = List.last(games)
+
+      # Pre-fill the final with strangers so the winner has nowhere to go.
+      for account <- accounts(2), do: Games.join(final.game, account.id)
+
+      [loser, winner] = first.game.game_players
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok =
+                   Tourneys.finish_game(first.game_id, [
+                     {loser.account_id, 2},
+                     {winner.account_id, 1}
+                   ])
+        end)
+
+      assert log =~ "tourney result lost"
     end
   end
 

@@ -17,6 +17,7 @@ defmodule GlobalCombat.Tourneys do
   """
 
   import Ecto.Query
+  require Logger
 
   alias GlobalCombat.Accounts
   alias GlobalCombat.Repo
@@ -116,37 +117,53 @@ defmodule GlobalCombat.Tourneys do
   @doc """
   Port of `TourneyController.Join`. Returns `{:ok, :joined}` / `{:ok, :started}` (joined and
   the join filled the tourney, auto-starting it) or `{:error, reason}` with `reason` one of
-  `:full`, `:already_joined`, `:already_started` -- mirroring the four `ViewBag.ErrorMessage`
+  `:already_started`, `:full`, `:already_joined` (checked in that order), or a start error
+  from `start_tournament/1` when the join triggered the auto-start -- mirroring the four `ViewBag.ErrorMessage`
   branches in the original action.
   """
-  def join_tournament(%Tourney{} = tourney, account_id) do
-    cond do
-      current_players(tourney) >= tourney.max_players ->
-        {:error, :full}
+  def join_tournament(%Tourney{id: id}, account_id) do
+    # The row lock serializes joiners, so the status/full/already-joined checks and the insert
+    # see a consistent roster (the only unique index is (tourney_id, account_id)).
+    result =
+      Repo.transaction(fn ->
+        tourney = lock_tourney(id)
 
-      playing?(tourney, account_id) ->
-        {:error, :already_joined}
+        cond do
+          Tourney.started?(tourney) ->
+            Repo.rollback(:already_started)
 
-      Tourney.started?(tourney) ->
-        {:error, :already_started}
+          current_players(tourney) >= tourney.max_players ->
+            Repo.rollback(:full)
 
-      true ->
-        {:ok, _} =
-          %TourneyPlayer{}
-          |> Ecto.Changeset.cast(%{tourney_id: tourney.id, account_id: account_id}, [
-            :tourney_id,
-            :account_id
-          ])
-          |> Repo.insert()
+          playing?(tourney, account_id) ->
+            Repo.rollback(:already_joined)
 
+          true ->
+            Repo.insert!(%TourneyPlayer{tourney_id: id, account_id: account_id})
+            tourney
+        end
+      end)
+
+    case result do
+      {:ok, tourney} ->
         if current_players(tourney) >= tourney.max_players and tourney.auto_start do
-          {:ok, _tourney} = start_tournament(tourney)
-          {:ok, :started}
+          case start_tournament(tourney) do
+            {:ok, _tourney} -> {:ok, :started}
+            # Someone else's start won the race; the join itself succeeded.
+            {:error, :already_started} -> {:ok, :joined}
+            {:error, _} = error -> error
+          end
         else
           {:ok, :joined}
         end
+
+      {:error, _} = error ->
+        error
     end
   end
+
+  defp lock_tourney(id),
+    do: Repo.one!(from t in Tourney, where: t.id == ^id, lock: "FOR UPDATE")
 
   @doc "Port of `TourneyController.Quit` -- only takes effect pre-start, silently no-ops otherwise (matching the original's `if` guard)."
   def quit_tournament(%Tourney{} = tourney, account_id) do
@@ -178,32 +195,96 @@ defmodule GlobalCombat.Tourneys do
   `Tourney.Start`'s original SQL, which never wrapped `Game.Join`/`GameServer.PlayerJoined` in an
   explicit transaction either.
   """
-  def start_tournament(%Tourney{} = tourney) do
-    if Tourney.started?(tourney) do
-      {:error, :already_started}
-    else
-      {:ok, tourney} =
-        Repo.transaction(fn ->
-          {:ok, tourney} =
-            tourney
-            |> Ecto.Changeset.change(status: :running, start_time: DateTime.utc_now(:second))
-            |> Repo.update()
+  def start_tournament(%Tourney{id: id}) do
+    # Locking the row makes a double Start (or a join racing an admin Start) a clean
+    # `:already_started` for the loser; the status flip is last, once the bracket exists.
+    started =
+      Repo.transaction(fn ->
+        tourney = lock_tourney(id)
 
-          rounds = bracket(tourney)
-          flat_rounds = all_rounds(rounds)
+        cond do
+          Tourney.started?(tourney) ->
+            Repo.rollback(:already_started)
 
-          Enum.each(flat_rounds, &create_round_games(tourney, &1, flat_rounds))
+          current_players(tourney) != tourney.max_players ->
+            Repo.rollback(:not_full)
 
-          tourney
-        end)
+          true ->
+            flat_rounds = tourney |> bracket() |> all_rounds()
+            Enum.each(flat_rounds, &create_round_games(tourney, &1, flat_rounds))
 
-      seed_round_one(tourney)
+            {1, _} =
+              Repo.update_all(from(t in Tourney, where: t.id == ^id and t.status == :new),
+                set: [status: :running, start_time: DateTime.utc_now(:second)]
+              )
 
+            get_tourney!(id)
+        end
+      end)
+
+    with {:ok, tourney} <- started,
+         :ok <- seed_round_one(tourney) do
       if tourney.recurring do
-        {:ok, _next} = recreate_recurring(tourney)
+        case recreate_recurring(tourney) do
+          {:ok, _next} -> :ok
+          error -> Logger.error("recurring tourney #{id} not recreated: #{inspect(error)}")
+        end
       end
 
       {:ok, tourney}
+    else
+      {:error, :seed_failed} ->
+        abort_start(id)
+        {:error, :start_failed}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Undo a start whose seating failed: drop the bracket's games and reopen sign-up.
+  defp abort_start(id) do
+    {:ok, game_ids} =
+      Repo.transaction(fn ->
+        game_ids = drop_bracket_games(id)
+
+        Repo.update_all(from(t in Tourney, where: t.id == ^id),
+          set: [status: :new, start_time: nil]
+        )
+
+        game_ids
+      end)
+
+    Enum.each(game_ids, &stop_game_server/1)
+  end
+
+  @doc """
+  Deletes a tourney with its bracket games, signups and the underlying `games` rows in one
+  transaction, then stops the live `Games.Server` process of each bracket game.
+  """
+  def kill_tournament(%Tourney{id: id}) do
+    {:ok, game_ids} =
+      Repo.transaction(fn ->
+        game_ids = drop_bracket_games(id)
+        Repo.delete_all(from tp in TourneyPlayer, where: tp.tourney_id == ^id)
+        Repo.delete_all(from t in Tourney, where: t.id == ^id)
+        game_ids
+      end)
+
+    Enum.each(game_ids, &stop_game_server/1)
+  end
+
+  defp drop_bracket_games(id) do
+    game_ids = Repo.all(from tg in TourneyGame, where: tg.tourney_id == ^id, select: tg.game_id)
+    Repo.delete_all(from tg in TourneyGame, where: tg.tourney_id == ^id)
+    Enum.each(game_ids, &Games.delete_game/1)
+    game_ids
+  end
+
+  defp stop_game_server(game_id) do
+    case Registry.lookup(GlobalCombat.Games.Registry, game_id) do
+      [{pid, _}] -> DynamicSupervisor.terminate_child(GlobalCombat.Games.Supervisor, pid)
+      [] -> :ok
     end
   end
 
@@ -221,31 +302,38 @@ defmodule GlobalCombat.Tourneys do
     for game_num <- round.start_game..(round.start_game + round.game_count - 1) do
       game_id = GamesLive.create_game(game_attrs)
 
-      {:ok, _tourney_game} =
-        %TourneyGame{}
-        |> Ecto.Changeset.cast(
-          %{
-            tourney_id: tourney.id,
-            game_id: game_id,
-            game_num: game_num,
-            round: round.number,
-            game_size: round.game_size,
-            winners: tourney.winners,
-            winner_round: winner_round,
-            loser_round: loser_round
-          },
-          [
-            :tourney_id,
-            :game_id,
-            :game_num,
-            :round,
-            :game_size,
-            :winners,
-            :winner_round,
-            :loser_round
-          ]
-        )
-        |> Repo.insert()
+      %TourneyGame{}
+      |> Ecto.Changeset.cast(
+        %{
+          tourney_id: tourney.id,
+          game_id: game_id,
+          game_num: game_num,
+          round: round.number,
+          game_size: round.game_size,
+          winners: tourney.winners,
+          winner_round: winner_round,
+          loser_round: loser_round
+        },
+        [
+          :tourney_id,
+          :game_id,
+          :game_num,
+          :round,
+          :game_size,
+          :winners,
+          :winner_round,
+          :loser_round
+        ]
+      )
+      |> Repo.insert()
+      |> case do
+        {:ok, _tourney_game} ->
+          :ok
+
+        {:error, changeset} ->
+          Logger.error("tourney #{tourney.id} bracket game insert failed: #{inspect(changeset)}")
+          Repo.rollback(:start_failed)
+      end
     end
   end
 
@@ -297,28 +385,48 @@ defmodule GlobalCombat.Tourneys do
       |> Repo.all()
 
     round_one_games
-    |> Enum.reduce(shuffled, fn tourney_game, remaining_players ->
+    |> Enum.reduce_while(shuffled, fn tourney_game, remaining_players ->
       {seats, rest} = Enum.split(remaining_players, tourney_game.game_size)
 
-      Enum.each(seats, fn account ->
-        {:ok, _} = Games.join(tourney_game.game, account.id)
-        {:ok, _} = GamesLive.join(tourney_game.game.id, account.id, account.name)
-      end)
-
-      if length(seats) >= tourney_game.game_size,
-        do: :ok = GamesLive.force_start(tourney_game.game.id)
-
-      rest
+      with :ok <- seat_all(tourney_game, Enum.map(seats, &{&1.id, &1.name})),
+           :ok <- start_if_full(tourney_game, length(seats)) do
+        {:cont, rest}
+      else
+        error ->
+          Logger.error("tourney #{tourney.id} seeding failed: #{inspect(error)}")
+          {:halt, :error}
+      end
     end)
+    |> case do
+      :error -> {:error, :seed_failed}
+      _ -> :ok
+    end
+  end
+
+  defp seat_all(tourney_game, seats) do
+    Enum.reduce_while(seats, :ok, fn {account_id, name}, :ok ->
+      with {:ok, _} <- Games.join(tourney_game.game, account_id),
+           {:ok, _} <- GamesLive.join(tourney_game.game.id, account_id, name) do
+        {:cont, :ok}
+      else
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp start_if_full(tourney_game, seated) do
+    if seated >= tourney_game.game_size,
+      do: GamesLive.force_start(tourney_game.game.id),
+      else: :ok
   end
 
   defp recreate_recurring(tourney) do
     name =
-      if String.contains?(tourney.name, "#") do
-        [base, counter] = String.split(tourney.name, "#", parts: 2)
-        "#{base}##{String.to_integer(counter) + 1}"
+      with [base, counter] <- String.split(tourney.name, "#", parts: 2),
+           {n, ""} <- Integer.parse(counter) do
+        "#{base}##{n + 1}"
       else
-        tourney.name <> " #1"
+        _ -> tourney.name <> " #1"
       end
 
     create_tourney(%{
@@ -363,7 +471,17 @@ defmodule GlobalCombat.Tourneys do
     end
   end
 
+  # First-round games finish from separate Game server processes at nearly the same time;
+  # serializing per tourney keeps two of them from picking the same open seat. A node-local
+  # `:global` lock (this app runs on one node) rather than a DB transaction: seating calls into
+  # other Game server processes, which can't share an open transaction's connection.
   defp advance_into(tourney_id, target_round, account_id) do
+    :global.trans({{:tourney, tourney_id}, self()}, fn ->
+      do_advance_into(tourney_id, target_round, account_id)
+    end)
+  end
+
+  defp do_advance_into(tourney_id, target_round, account_id) do
     candidates =
       from(tg in TourneyGame,
         where: tg.tourney_id == ^tourney_id and tg.round == ^target_round,
@@ -382,16 +500,15 @@ defmodule GlobalCombat.Tourneys do
         {:error, :bracket_corrupted}
 
       %TourneyGame{} = tourney_game ->
-        {:ok, _} = Games.join(tourney_game.game, account_id)
-
         account = Accounts.get_account_including_disabled(account_id)
-        {:ok, _} = GamesLive.join(tourney_game.game.id, account_id, account.name)
 
-        if Games.player_count(tourney_game.game) >= tourney_game.game_size do
-          :ok = GamesLive.force_start(tourney_game.game.id)
+        with {:account, %{}} <- {:account, account},
+             :ok <- seat_all(tourney_game, [{account_id, account.name}]),
+             :ok <- start_if_full(tourney_game, Games.player_count(tourney_game.game)) do
+          {:ok, tourney_game}
+        else
+          error -> {:error, error}
         end
-
-        {:ok, tourney_game}
     end
   end
 
@@ -428,7 +545,11 @@ defmodule GlobalCombat.Tourneys do
   """
   def finish_game(game_id, results) do
     Enum.each(results, fn {account_id, place} ->
-      record_player_result(game_id, account_id, place)
+      with {:error, reason} <- record_player_result(game_id, account_id, place) do
+        Logger.error(
+          "tourney result lost: game #{game_id} account #{account_id} place #{place}: #{inspect(reason)}"
+        )
+      end
     end)
 
     tourney_finished_check(game_id)

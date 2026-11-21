@@ -27,7 +27,7 @@
   <div :if={
     @current_account && not Tourney.started?(@tourney) && not playing?(@players, @current_account)
   }>
-    <.link href={"/Tournament-#{@tourney.id}/Join"}>Join This Tournament</.link>
+    <.post_button action={"/Tournament-#{@tourney.id}/Join"}>Join This Tournament</.post_button>
   </div>
 
   <h2 :if={@tourney.double_elimination} class="text-xl font-semibold mt-6 mb-2">Main Bracket</h2>
@@ -70,18 +70,24 @@
   </div>
 
   <div :if={@current_account && not Tourney.started?(@tourney)} class="mt-4">
-    <.link :if={not playing?(@players, @current_account)} href={"/Tournament-#{@tourney.id}/Join"}>
+    <.post_button
+      :if={not playing?(@players, @current_account)}
+      action={"/Tournament-#{@tourney.id}/Join"}
+    >
       Join This Tournament
-    </.link>
-    <.link :if={playing?(@players, @current_account)} href={"/Tournament-#{@tourney.id}/Quit"}>
+    </.post_button>
+    <.post_button
+      :if={playing?(@players, @current_account)}
+      action={"/Tournament-#{@tourney.id}/Quit"}
+    >
       Quit This Tournament
-    </.link>
+    </.post_button>
     <div :if={@current_account.admin}>
-      <.link href={"/Tournament-#{@tourney.id}?StartTourney=1"}>START TOURNEY</.link>
+      <.post_button action={"/Tournament-#{@tourney.id}/Start"}>START TOURNEY</.post_button>
     </div>
   </div>
 
   <div :if={@current_account && @current_account.admin} class="mt-4">
-    <.link href={"/Tournament-#{@tourney.id}?KillTourney=1"}>KILL TOURNEY</.link>
+    <.post_button action={"/Tournament-#{@tourney.id}/Kill"}>KILL TOURNEY</.post_button>
   </div>
 </div>

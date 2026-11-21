@@ -24,7 +24,7 @@ defmodule GlobalCombatWeb.HomeController do
   alias GlobalCombat.{Accounts, Games, Messaging, Presence, Stats, Tourneys}
   alias GlobalCombatWeb.{GameManual, UserAuth}
 
-  plug GlobalCombatWeb.Plugs.LegacyIntegerId when action in [:player_info]
+  plug GlobalCombatWeb.Plugs.LegacyIntegerId when action in [:player_info, :disable_player]
 
   plug :require_login
        when action in [:messages, :chat, :load_chat_messages, :close_chat_window, :send_message]
@@ -99,17 +99,24 @@ defmodule GlobalCombatWeb.HomeController do
     end
   end
 
-  defp render_player_info(conn, account, id, params) do
+  @doc "Admin-only POST: the legacy `?KillAccount=1` action on PlayerInfo."
+  def disable_player(conn, params) do
+    viewer = conn.assigns.current_account
+    id = conn.assigns.legacy_id
+
+    with %{admin: true} <- viewer,
+         %{} = account <- Accounts.get_account_including_disabled(id) do
+      {:ok, disabled} = Accounts.disable_account(account, viewer.id)
+      render_player_info(conn, disabled, id, params, "Account Disabled")
+    else
+      nil -> GlobalCombatWeb.ErrorHTML.not_found(conn)
+      _ -> redirect(conn, to: "/")
+    end
+  end
+
+  defp render_player_info(conn, account, id, params, error_message \\ nil) do
     viewer = conn.assigns.current_account
     viewer_is_admin = viewer != nil and viewer.admin
-
-    {account, error_message} =
-      if viewer_is_admin and param_set?(params, "KillAccount") do
-        {:ok, disabled} = Accounts.disable_account(account, viewer.id)
-        {disabled, "Account Disabled"}
-      else
-        {account, nil}
-      end
 
     all_games? = param_set?(params, "AllGames")
     games = if id > 1, do: Games.list_player_games(id, all_games: all_games?), else: []

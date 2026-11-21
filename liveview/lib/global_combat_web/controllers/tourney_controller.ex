@@ -10,40 +10,45 @@ defmodule GlobalCombatWeb.TourneyController do
   alias GlobalCombat.Tourneys
   alias GlobalCombat.Tourneys.Tourney
 
-  plug GlobalCombatWeb.Plugs.LegacyIntegerId when action in [:index, :join, :quit]
+  plug GlobalCombatWeb.Plugs.LegacyIntegerId when action in [:index, :join, :quit, :start, :kill]
 
-  @doc "Port of `TourneyController.Index`, including the admin-only StartTourney/KillTourney query-param actions."
-  def index(conn, params) do
+  @doc "Port of `TourneyController.Index` (read-only; Start/Kill are POST actions below)."
+  def index(conn, _params) do
     case Tourneys.get_tourney(conn.assigns.legacy_id) do
-      nil ->
-        GlobalCombatWeb.ErrorHTML.not_found(conn)
-
-      tourney ->
-        admin? = admin?(conn)
-
-        cond do
-          admin? and not Tourney.started?(tourney) and Map.has_key?(params, "StartTourney") ->
-            {:ok, tourney} = Tourneys.start_tournament(tourney)
-            render_index(conn, tourney, "Tournament Started")
-
-          admin? and Map.has_key?(params, "KillTourney") ->
-            kill_tourney(tourney)
-            redirect(conn, to: "/")
-
-          true ->
-            render_index(conn, tourney, nil)
-        end
+      nil -> GlobalCombatWeb.ErrorHTML.not_found(conn)
+      tourney -> render_index(conn, tourney, nil)
     end
   end
 
-  defp kill_tourney(tourney) do
-    alias GlobalCombat.Repo
-    alias GlobalCombat.Tourneys.{TourneyGame, TourneyPlayer}
-    import Ecto.Query
+  @doc "Admin-only POST: the legacy `?StartTourney=1` action."
+  def start(conn, _params) do
+    with true <- admin?(conn),
+         tourney when not is_nil(tourney) <- Tourneys.get_tourney(conn.assigns.legacy_id) do
+      message =
+        case Tourneys.start_tournament(tourney) do
+          {:ok, _} -> "Tournament Started"
+          {:error, :already_started} -> "This tournament has already started."
+          {:error, :not_full} -> "The tournament can only start once every seat is filled."
+          {:error, _} -> "Unable to start the tournament."
+        end
 
-    Repo.delete_all(from tg in TourneyGame, where: tg.tourney_id == ^tourney.id)
-    Repo.delete_all(from tp in TourneyPlayer, where: tp.tourney_id == ^tourney.id)
-    Repo.delete(tourney)
+      render_index(conn, Tourneys.get_tourney!(tourney.id), message)
+    else
+      nil -> GlobalCombatWeb.ErrorHTML.not_found(conn)
+      _ -> redirect(conn, to: "/")
+    end
+  end
+
+  @doc "Admin-only POST: the legacy `?KillTourney=1` action."
+  def kill(conn, _params) do
+    with true <- admin?(conn),
+         tourney when not is_nil(tourney) <- Tourneys.get_tourney(conn.assigns.legacy_id) do
+      Tourneys.kill_tournament(tourney)
+      redirect(conn, to: "/")
+    else
+      nil -> GlobalCombatWeb.ErrorHTML.not_found(conn)
+      _ -> redirect(conn, to: "/")
+    end
   end
 
   @doc "Port of `TourneyController.Create()` (GET) -- renders the creation form; admin-only, same as the original."
@@ -86,6 +91,7 @@ defmodule GlobalCombatWeb.TourneyController do
           {:error, :full} -> "This tournament is full."
           {:error, :already_joined} -> "You've already joined this tournament."
           {:error, :already_started} -> "This tournament has already started."
+          {:error, _} -> "Unable to start the tournament."
         end
 
       render_index(conn, Tourneys.get_tourney!(tourney.id), message)

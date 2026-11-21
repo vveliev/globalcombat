@@ -54,13 +54,11 @@ defmodule GlobalCombatWeb.Router do
     get "/OptOut", HomeController, :opt_out
     post "/OptOut", HomeController, :opt_out
     get "/PlayerInfo", HomeController, :player_info
-    get "/Chat", HomeController, :chat
     post "/Chat", HomeController, :chat
     get "/LoadChatMessages", HomeController, :load_chat_messages
     post "/LoadChatMessages", HomeController, :load_chat_messages
     get "/CloseChatWindow", HomeController, :close_chat_window
     post "/CloseChatWindow", HomeController, :close_chat_window
-    get "/SendMessage", HomeController, :send_message
     post "/SendMessage", HomeController, :send_message
 
     # The two concrete instantiations of the ASP.NET default route
@@ -85,8 +83,12 @@ defmodule GlobalCombatWeb.Router do
     get "/Game-:id/:action", GameController, :show
     get "/Player-Info-:id", HomeController, :player_info
     get "/Tournament-:id", TourneyController, :index
-    get "/Tournament-:id/Join", TourneyController, :join
-    get "/Tournament-:id/Quit", TourneyController, :quit
+    # State-changing, so POST (CSRF-protected) rather than the legacy GET links.
+    post "/Tournament-:id/Join", TourneyController, :join
+    post "/Tournament-:id/Quit", TourneyController, :quit
+    post "/Tournament-:id/Start", TourneyController, :start
+    post "/Tournament-:id/Kill", TourneyController, :kill
+    post "/Player-Info-:id/Disable", HomeController, :disable_player
 
     # The game board: SignalR + server-rendered HTML replaced by a LiveView
     # driven over GlobalCombat.Games.PubSub. `on_mount` resolves `:current_account`
@@ -150,12 +152,6 @@ defmodule GlobalCombatWeb.Router do
     post "/LogOn", AccountSessionController, :create
     get "/LostPassword", AccountResetPasswordController, :new
     post "/LostPassword", AccountResetPasswordController, :create
-  end
-
-  scope "/Account", GlobalCombatWeb do
-    pipe_through :browser
-
-    get "/LogOff", AccountSessionController, :delete
   end
 
   scope "/Account", GlobalCombatWeb do
