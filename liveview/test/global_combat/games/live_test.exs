@@ -18,6 +18,20 @@ defmodule GlobalCombat.Games.LiveTest do
     %{game_id: game_id}
   end
 
+  describe "create_game/1 privacy" do
+    test "a private lobby is absent from list_new_games/0" do
+      alice = account_fixture()
+      private_id = Games.create_game(%{max_players: 3, is_private: true})
+      public_id = Games.create_game(%{max_players: 3})
+      {:ok, 1} = Games.join(private_id, alice.id, alice.name)
+      {:ok, 1} = Games.join(public_id, alice.id, alice.name)
+
+      ids = Enum.map(GamesDb.list_new_games(), & &1.id)
+      assert public_id in ids
+      refute private_id in ids
+    end
+  end
+
   describe "invite/3" do
     test "a seated player can invite an existing account by name, and it shows up as a pending invite",
          %{game_id: game_id} do

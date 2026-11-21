@@ -73,6 +73,24 @@ defmodule GlobalCombat.Messaging do
     |> Enum.reverse()
   end
 
+  @doc "A game's forum chat (rows addressed to `-game_id`), newest first, shaped like `Games.Server`'s in-memory messages."
+  def list_game_messages(game_id, limit) do
+    from(m in Message,
+      left_join: a in Account,
+      on: a.id == m.from_id,
+      where: m.to_id == ^(-game_id),
+      order_by: [desc: m.id],
+      limit: ^limit,
+      select: %{
+        source_id: m.from_id,
+        source_name: coalesce(a.name, "?"),
+        text: m.text,
+        sent: m.sent_at
+      }
+    )
+    |> Repo.all()
+  end
+
   @doc "Ports `GameServer.SendMessage(db, destinationId, sourceId, sourceName, text)`."
   def send_message(destination_id, source_id, source_name, text) do
     {:ok, message} =

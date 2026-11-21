@@ -4,6 +4,7 @@ defmodule GlobalCombat.Games.LiveResolverTest do
   import GlobalCombat.GamesTestHelpers
 
   alias GlobalCombat.Accounts
+  alias GlobalCombat.AccountsFixtures
   alias GlobalCombat.Engine.DotnetRandom
   alias GlobalCombat.Engine.Game, as: Engine
   alias GlobalCombat.Engine.Game.{Area, Player}
@@ -83,23 +84,25 @@ defmodule GlobalCombat.Games.LiveResolverTest do
       refute Engine.player!(engine, 1).done
     end
 
-    # The second and third turns resolve orders the Computer queued during the previous offline
-    # run, which only ever lived in the persisted snapshot.
-    test "in a training game with no live Server, the Computer's snapshot-only orders resolve" do
-      game_id =
-        GamesLive.create_game(%{map_name: :elements, is_fogged: true, is_training: true})
+    test "a due final turn with no live process still pays out the winner (wins and rating)" do
+      alice = AccountsFixtures.account_fixture()
+      bob = AccountsFixtures.account_fixture()
 
-      {:ok, 1} = GamesLive.join(game_id, 101, "Alice")
-      {:ok, 2} = GamesLive.join(game_id, Accounts.computer_account_id(), Accounts.computer_name())
-      :ok = GamesLive.start_game(game_id, 101)
-      kill_server!(game_id)
+      game =
+        active_game_fixture(
+          down_to_last_player: true,
+          training: false,
+          alice_id: alice.id,
+          bob_id: bob.id
+        )
 
-      for _turn <- 1..3 do
-        assert :ok = LiveResolver.resolve_turn(GamesDb.get_game!(game_id))
-        assert seat_moves(game_id, 2) != []
-      end
+      refute Server.alive?(game.id)
+      assert :ok = LiveResolver.resolve_turn(game)
 
-      refute Server.alive?(game_id)
+      assert GamesDb.get_game!(game.id).status == :finished
+      winner = Repo.get!(Accounts.Account, alice.id)
+      assert winner.wins == alice.wins + 1
+      assert winner.rating > alice.rating
     end
 
     test "errors instead of raising when there's no persisted state to rehydrate from" do
@@ -120,7 +123,12 @@ defmodule GlobalCombat.Games.LiveResolverTest do
     down_to_last_player? = Keyword.get(opts, :down_to_last_player, false)
 
     computer_opponent? = Keyword.get(opts, :computer_opponent, false)
-    bob_account_id = if computer_opponent?, do: Accounts.computer_account_id(), else: 102
+    alice_account_id = Keyword.get(opts, :alice_id, 101)
+
+    bob_account_id =
+      if computer_opponent?,
+        do: Accounts.computer_account_id(),
+        else: Keyword.get(opts, :bob_id, 102)
 
     # The Computer's `RandomAi` picks targets from real map neighbours, so that variant needs a
     # whole board: Bob keeps area 2, Alice holds every other area.
@@ -142,13 +150,13 @@ defmodule GlobalCombat.Games.LiveResolverTest do
       is_non_random: true,
       reverse_attack_order: false,
       minimum_armies: 3,
-      is_training: true,
+      is_training: Keyword.get(opts, :training, true),
       ended: false,
       areas: areas,
       players: %{
         1 => %Player{
           number: 1,
-          account_id: 101,
+          account_id: alice_account_id,
           name: "Alice",
           areas: length(alice_areas),
           armies: 5 * length(alice_areas)
