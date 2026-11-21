@@ -14,6 +14,7 @@ defmodule GlobalCombat.Games.ServerTest do
   alias GlobalCombat.Games.Server
   alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
   alias GlobalCombat.GrpcHost
+  alias GlobalCombat.Messaging
   alias GlobalCombat.Tourneys
 
   describe "engine.ended wires into Tourneys.finish_game/2" do
@@ -274,7 +275,11 @@ defmodule GlobalCombat.Games.ServerTest do
       row_before = GamesDb.get_game!(game_id)
 
       assert {:error, :not_playing} =
-               Server.run_scheduled_turn(game_id, row_before.last_turn_time)
+               Server.run_scheduled_turn(
+                 game_id,
+                 row_before.last_turn_time,
+                 row_before.last_turn_time
+               )
 
       assert GamesDb.get_game!(game_id) == row_before
     end
@@ -417,7 +422,8 @@ defmodule GlobalCombat.Games.ServerTest do
         game_id: game_id,
         rehydrate_from: serialized,
         turn_length_minutes: 30,
-        last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second)
+        last_turn_time: DateTime.utc_now() |> DateTime.truncate(:second),
+        callers: [self() | Process.get(:"$callers", [])]
       )
 
       assert {:playing, view} = Server.player_view(game_id, 101)
@@ -442,11 +448,83 @@ defmodule GlobalCombat.Games.ServerTest do
         callers: [self() | Process.get(:"$callers", [])]
       )
 
-      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time, game.last_turn_time)
 
       persisted = GamesDb.get_game!(game.id)
       decoded = GrpcHost.Game.decode(persisted.serialized)
       assert Map.fetch!(decoded, :Turn) == 6
+    end
+  end
+
+  describe "scheduled-turn guards, abandonment and persisted chat" do
+    defp rehydrated_server!(turn_length_minutes) do
+      game =
+        %Game{
+          status: :active,
+          private: false,
+          turn_length: turn_length_minutes,
+          serialized: serialized_engine(turn: 5)
+        }
+        |> Repo.insert!()
+
+      {:ok, game} = GamesDb.mark_active(game)
+
+      opts = [
+        game_id: game.id,
+        rehydrate_from: game.serialized,
+        turn_length_minutes: turn_length_minutes,
+        last_turn_time: game.last_turn_time,
+        callers: [self() | Process.get(:"$callers", [])]
+      ]
+
+      start_server!(opts)
+      {game, opts}
+    end
+
+    test "a scheduled call whose claim predates a turn the Server already ran is ignored" do
+      {game, _opts} = rehydrated_server!(30)
+      before = game.last_turn_time
+
+      assert {:error, :stale_claim} =
+               Server.run_scheduled_turn(
+                 game.id,
+                 DateTime.add(before, 60, :second),
+                 DateTime.add(before, -60, :second)
+               )
+
+      assert GamesDb.get_game!(game.id).turn == 1
+      assert {:playing, view} = Server.player_view(game.id, 101)
+      assert view.turn == 5
+    end
+
+    test "a game nobody plays for 14 days of scheduled turns is force-ended" do
+      # 7-day turns: 14 days is two idle scheduled turns.
+      {game, _opts} = rehydrated_server!(10_080)
+      t = game.last_turn_time
+
+      assert :ok = Server.run_scheduled_turn(game.id, t, t)
+      refute GamesDb.get_game!(game.id).status == :finished
+
+      assert :ok = Server.run_scheduled_turn(game.id, t, t)
+      assert GamesDb.get_game!(game.id).status == :finished
+      assert {:playing, view} = Server.player_view(game.id, 101)
+      assert view.ended
+    end
+
+    test "game chat is truncated, stored as a negative-recipient row, and survives a restart" do
+      {game, opts} = rehydrated_server!(30)
+      Server.send_chat(game.id, 101, "Alice", String.duplicate("x", 3000))
+      {:playing, view} = Server.player_view(game.id, 101)
+      assert [%{text: text}] = view.messages
+      assert String.length(text) == 2000
+
+      assert [%{source_id: 101, source_name: "?"}] = Messaging.list_game_messages(game.id, 150)
+      assert Messaging.list_messages_for_account(101) == []
+
+      kill_server!(game.id)
+      start_server!(opts)
+      assert {:playing, view} = Server.player_view(game.id, 101)
+      assert [%{text: ^text}] = view.messages
     end
   end
 
@@ -529,7 +607,7 @@ defmodule GlobalCombat.Games.ServerTest do
       # Player 2 already owns no areas going into this turn, so `resolve_reinforcements_and_
       # eliminations/1` eliminates them and — since only one player then remains alive — ends
       # the game in the same turn (mirrors `Game.EliminatePlayer`'s `Place <= 2` -> `End()`).
-      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time, game.last_turn_time)
 
       persisted = GamesDb.get_game!(game.id)
       decoded = GrpcHost.Game.decode(persisted.serialized)
@@ -572,7 +650,7 @@ defmodule GlobalCombat.Games.ServerTest do
         callers: [self() | Process.get(:"$callers", [])]
       )
 
-      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time, game.last_turn_time)
 
       winner = Repo.get!(Accounts.Account, winner_account.id)
       loser = Repo.get!(Accounts.Account, loser_account.id)
@@ -609,7 +687,7 @@ defmodule GlobalCombat.Games.ServerTest do
 
       # Resolving this turn eliminates player 2 and, with only one player then left alive,
       # ends the game in the same turn — same fixture the game-completion tests above use.
-      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time)
+      assert :ok = Server.run_scheduled_turn(game.id, game.last_turn_time, game.last_turn_time)
       assert %{status: :finished} = GamesDb.get_game!(game.id)
 
       kill_server!(game.id)

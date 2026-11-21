@@ -139,20 +139,74 @@ defmodule GlobalCombat.AccountsTest do
     end
   end
 
-  describe "reset_password/1" do
-    test "generates a new password, hashes it, and never writes it in cleartext" do
-      account = account_fixture()
-
-      assert {:ok, updated, new_password} = Accounts.reset_password(account.name)
-      assert byte_size(new_password) == 8
-      assert String.starts_with?(updated.password, "pbkdf2-sha256$")
-      refute updated.password == new_password
-
-      assert {:ok, _} = Accounts.authenticate_account(account.name, new_password)
+  describe "login names with @" do
+    test "registration rejects them" do
+      attrs = valid_account_attributes(%{"name" => "victim@mail.com"})
+      assert {:error, changeset} = Accounts.register_account(attrs)
+      assert "cannot contain @ or spaces" in errors_on(changeset).name
     end
 
-    test "returns an error for an unknown login" do
-      assert {:error, :not_found} = Accounts.reset_password("nobody-here")
+    test "lookup does not raise when a legacy name equals another account's email" do
+      victim = account_fixture()
+
+      squatter =
+        Repo.insert!(%Accounts.Account{
+          name: victim.email,
+          email: unique_account_email(),
+          password: "x"
+        })
+
+      assert Accounts.get_account_by_login(victim.email).id == squatter.id
+      assert Accounts.get_account_by_login(victim.name).id == victim.id
+    end
+  end
+
+  describe "password reset by token" do
+    test "requesting a reset does not change the password" do
+      account = account_fixture()
+
+      assert {:ok, _, token} = Accounts.request_password_reset(account.name)
+      assert byte_size(token) >= 43
+      assert {:ok, _} = Accounts.authenticate_account(account.name, valid_account_password())
+
+      stored = Repo.reload!(account)
+      refute stored.reset_token_hash == token
+      assert stored.reset_token_hash == Base.encode16(:crypto.hash(:sha256, token), case: :lower)
+    end
+
+    test "unknown login yields :error" do
+      assert :error = Accounts.request_password_reset("nobody-here")
+    end
+
+    test "the token sets a new password exactly once" do
+      account = account_fixture()
+      {:ok, _, token} = Accounts.request_password_reset(account.email)
+
+      assert {:ok, _} = Accounts.reset_password_with_token(token, "brandnewpw")
+      assert {:ok, _} = Accounts.authenticate_account(account.name, "brandnewpw")
+      assert {:error, :invalid_token} = Accounts.reset_password_with_token(token, "another-pw")
+    end
+
+    test "a weak password is rejected and the token survives" do
+      account = account_fixture()
+      {:ok, _, token} = Accounts.request_password_reset(account.name)
+
+      assert {:error, %Ecto.Changeset{}} = Accounts.reset_password_with_token(token, "ab")
+      assert Accounts.get_account_by_reset_token(token)
+    end
+
+    test "an expired token is rejected" do
+      account = account_fixture()
+      {:ok, _, token} = Accounts.request_password_reset(account.name)
+
+      account
+      |> Repo.reload!()
+      |> Ecto.Changeset.change(
+        reset_token_expires_at: DateTime.add(DateTime.utc_now(:second), -1)
+      )
+      |> Repo.update!()
+
+      assert {:error, :invalid_token} = Accounts.reset_password_with_token(token, "brandnewpw")
     end
   end
 

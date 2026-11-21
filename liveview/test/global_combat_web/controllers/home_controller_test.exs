@@ -108,22 +108,30 @@ defmodule GlobalCombatWeb.HomeControllerTest do
       assert body =~ "Sergeant"
     end
 
-    test "an admin viewer can permanently disable the account via ?KillAccount=1", %{conn: conn} do
+    test "an admin viewer can permanently disable the account via POST", %{conn: conn} do
       admin = admin_fixture()
       target = account_fixture()
 
-      conn =
-        conn |> log_in_account(admin) |> get(~p"/Player-Info-#{target.id}?KillAccount=1")
+      conn = conn |> log_in_account(admin) |> post(~p"/Player-Info-#{target.id}/Disable")
 
       assert html_response(conn, 200) =~ "Account Disabled"
       assert Accounts.get_account(target.id) == nil
+    end
+
+    test "GET ?KillAccount=1 does not disable the account", %{conn: conn} do
+      admin = admin_fixture()
+      target = account_fixture()
+
+      conn |> log_in_account(admin) |> get(~p"/Player-Info-#{target.id}?KillAccount=1")
+
+      assert Accounts.get_account(target.id) != nil
     end
 
     test "a non-admin viewer cannot disable the account", %{conn: conn} do
       viewer = account_fixture()
       target = account_fixture()
 
-      conn |> log_in_account(viewer) |> get(~p"/Player-Info-#{target.id}?KillAccount=1")
+      conn |> log_in_account(viewer) |> post(~p"/Player-Info-#{target.id}/Disable")
 
       assert Accounts.get_account(target.id) != nil
     end

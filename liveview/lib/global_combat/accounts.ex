@@ -14,8 +14,6 @@ defmodule GlobalCombat.Accounts do
   alias GlobalCombat.Repo
   alias GlobalCombat.Accounts.{Account, AccountLogin, Password}
 
-  @legacy_password_generator_chars ~c"abcdefghijklmnopqrstuvwxyz0123456789"
-
   # The legacy convention every game relies on: account 1 is the "Computer" — the Training Mode
   # opponent's seat (always done, never waited on) and the author of system chat lines. The
   # reserve_computer_account migration claims this id on a fresh database.
@@ -40,7 +38,13 @@ defmodule GlobalCombat.Accounts do
 
   @doc "Ports the `select * from account where name = '{0}' or email = '{0}'` lookup used throughout AccountController."
   def get_account_by_login(login) when is_binary(login) do
-    Repo.one(from a in Account, where: a.name == ^login or a.email == ^login)
+    # Legacy rows may have an `@` name equal to someone else's email; a name match wins.
+    Repo.one(
+      from a in Account,
+        where: a.name == ^login or a.email == ^login,
+        order_by: [desc: a.name == ^login],
+        limit: 1
+    )
   end
 
   @doc """
@@ -133,29 +137,80 @@ defmodule GlobalCombat.Accounts do
     end)
   end
 
+  @reset_token_ttl_seconds 3600
+
   @doc """
-  Ports `AccountController.ResetPassword` (reached from LostPassword). Generates a new
-  8-character password the same way `UserPage<int>.GeneratePassword(8)` did, hashes it before
-  it ever touches the database (ADR-0002 — the legacy path wrote it in cleartext), and returns
-  the generated plaintext so the caller can email it, matching the legacy UX.
+  Starts a password reset: stores the SHA-256 of a fresh random token with a one-hour expiry
+  and returns the raw token for the caller to email. Nothing about the account's password
+  changes. `:error` for an unknown or disabled account (callers must not reveal which).
   """
-  def reset_password(login) when is_binary(login) do
+  def request_password_reset(login) when is_binary(login) do
     case get_account_by_login(login) do
-      nil ->
-        {:error, :not_found}
+      %Account{disabled_by: nil} = account ->
+        token = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
-      %Account{} = account ->
-        new_password = generate_password(8)
+        {:ok, account} =
+          account
+          |> Ecto.Changeset.change(
+            reset_token_hash: hash_reset_token(token),
+            reset_token_expires_at:
+              DateTime.add(DateTime.utc_now(:second), @reset_token_ttl_seconds)
+          )
+          |> Repo.update()
 
-        account
-        |> Account.password_changeset(new_password)
-        |> Repo.update()
-        |> case do
-          {:ok, account} -> {:ok, account, new_password}
-          {:error, changeset} -> {:error, changeset}
-        end
+        {:ok, account, token}
+
+      _ ->
+        :error
     end
   end
+
+  @doc "The account a live (unexpired, unused) reset token belongs to, or `nil`."
+  def get_account_by_reset_token(token) when is_binary(token) do
+    # Looked up by the token's hash: a 256-bit random preimage can't be probed through
+    # equality-lookup timing, so no separate constant-time compare is needed.
+    hash = hash_reset_token(token)
+    now = DateTime.utc_now()
+
+    Repo.one(
+      from a in Account,
+        where:
+          a.reset_token_hash == ^hash and a.reset_token_expires_at > ^now and
+            is_nil(a.disabled_by)
+    )
+  end
+
+  @doc "Sets a new password for a live reset token and burns the token. Single-use."
+  def reset_password_with_token(token, new_password) when is_binary(token) do
+    hash = hash_reset_token(token)
+    now = DateTime.utc_now()
+
+    Repo.transaction(fn ->
+      # Row lock so two concurrent submissions can't both spend the same token.
+      account =
+        Repo.one(
+          from a in Account,
+            where:
+              a.reset_token_hash == ^hash and a.reset_token_expires_at > ^now and
+                is_nil(a.disabled_by),
+            lock: "FOR UPDATE"
+        )
+
+      with %Account{} <- account,
+           {:ok, account} <-
+             account
+             |> Account.password_changeset(new_password)
+             |> Ecto.Changeset.change(reset_token_hash: nil, reset_token_expires_at: nil)
+             |> Repo.update() do
+        account
+      else
+        nil -> Repo.rollback(:invalid_token)
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  defp hash_reset_token(token), do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
 
   @doc """
   Ports `AccountController.ModifyPassword` (Settings). Verifies `old_password` against
@@ -175,10 +230,6 @@ defmodule GlobalCombat.Accounts do
     else
       {:error, :bad_old_password}
     end
-  end
-
-  defp generate_password(length) do
-    for _ <- 1..length, into: "", do: <<Enum.random(@legacy_password_generator_chars)>>
   end
 
   @doc """

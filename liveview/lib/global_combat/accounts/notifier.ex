@@ -20,16 +20,18 @@ defmodule GlobalCombat.Accounts.Notifier do
     end
   end
 
-  @doc "Ports the reset-password email body from `AccountController.ResetPassword`."
-  def deliver_reset_password(%{email: email, name: name}, new_password) do
+  @doc "Emails a one-time reset link (replaces the legacy emailed-password body)."
+  def deliver_reset_password(%{email: email, name: name}, url) do
     deliver(
       email,
       "Global Combat Password Reset",
       """
       Login Name: #{name}
-      Password: #{new_password}
 
-      If you have a hard time remembering it, change it from Account Settings after logging in.
+      Choose a new password here (the link works once and expires in one hour):
+      #{url}
+
+      If you did not ask for this, ignore this email; your password has not changed.
       """
     )
   end

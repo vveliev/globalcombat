@@ -60,6 +60,7 @@ defmodule GlobalCombat.Tourneys.Tourney do
     ])
     |> cast_initial_games(attrs)
     |> validate_required([:name, :game_size, :winners, :max_players])
+    |> validate_number(:game_size, greater_than: 1, less_than_or_equal_to: 16)
     |> validate_number(:winners, greater_than: 0)
     |> validate_shape()
     |> put_change(:status, :new)
@@ -71,19 +72,23 @@ defmodule GlobalCombat.Tourneys.Tourney do
       nil ->
         changeset
 
-      initial_games when is_binary(initial_games) ->
+      initial_games when is_integer(initial_games) ->
         put_change(
           changeset,
           :max_players,
-          to_int(initial_games) * get_field(changeset, :game_size)
+          initial_games * (get_field(changeset, :game_size) || 0)
         )
 
       initial_games ->
-        put_change(changeset, :max_players, initial_games * get_field(changeset, :game_size))
+        case is_binary(initial_games) && Integer.parse(initial_games) do
+          {n, ""} ->
+            put_change(changeset, :max_players, n * (get_field(changeset, :game_size) || 0))
+
+          _ ->
+            add_error(changeset, :initial_games, "must be a number")
+        end
     end
   end
-
-  defp to_int(value) when is_binary(value), do: String.to_integer(value)
 
   @power_of_two [2, 4, 8, 16, 32, 64, 128, 256]
 

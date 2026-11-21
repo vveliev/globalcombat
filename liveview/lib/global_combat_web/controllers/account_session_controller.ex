@@ -1,7 +1,9 @@
 defmodule GlobalCombatWeb.AccountSessionController do
   use GlobalCombatWeb, :controller
 
-  alias GlobalCombat.Accounts
+  alias GlobalCombat.{Accounts, RateLimiter}
+
+  @max_failures 10
 
   def new(conn, _params) do
     render(conn, :new, error_message: nil, login: nil)
@@ -9,8 +11,22 @@ defmodule GlobalCombatWeb.AccountSessionController do
 
   # Ports `AccountController.LogOn(LogOnModel, returnUrl)` / `AccountController.Login`.
   def create(conn, %{"account" => %{"login" => login, "password" => password}} = params) do
+    keys = [{:login_ip, remote_ip(conn)}, {:login, String.downcase(login)}]
+
+    if Enum.all?(keys, &RateLimiter.allow?(&1, @max_failures)) do
+      authenticate(conn, login, password, keys, params)
+    else
+      conn
+      |> put_status(429)
+      |> render(:new, error_message: error_message(:rate_limited), login: login)
+    end
+  end
+
+  defp authenticate(conn, login, password, [_, login_key] = keys, params) do
     case Accounts.authenticate_account(login, password) do
       {:ok, account} ->
+        RateLimiter.clear(login_key)
+
         {:ok, account} =
           Accounts.record_login(account,
             ip_address: remote_ip(conn),
@@ -22,6 +38,7 @@ defmodule GlobalCombatWeb.AccountSessionController do
         |> GlobalCombatWeb.UserAuth.log_in_account(account, params)
 
       {:error, reason} ->
+        Enum.each(keys, &RateLimiter.hit/1)
         # Mirrors `AccountController.LogOn` retaining the submitted login name in
         # ModelState after a failed attempt — only the password is cleared.
         render(conn, :new, error_message: error_message(reason), login: login)
@@ -38,6 +55,7 @@ defmodule GlobalCombatWeb.AccountSessionController do
   defp error_message(:not_found), do: "Unknown login name or email address."
   defp error_message(:disabled), do: "That account has been permanently disabled."
   defp error_message(:bad_password), do: "Bad Password"
+  defp error_message(:rate_limited), do: "Too many failed attempts. Try again in a few minutes."
 
   defp remote_ip(conn) do
     conn.remote_ip |> :inet.ntoa() |> to_string()

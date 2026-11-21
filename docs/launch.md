@@ -112,7 +112,6 @@ secrets against it. The values needed:
 | `DATABASE_URL` | Phoenix (`runtime.exs`) | secrets manager, generated at DB provisioning (§3) |
 | `SECRET_KEY_BASE` | Phoenix (`runtime.exs`) | secrets manager, generated once via `mix phx.gen.secret` |
 | `PHX_HOST` | Phoenix (`runtime.exs`) | Whichever domain is live per §1 — not a secret, but must track DNS |
-| `GRPC_HOST` / `GRPC_PORT` | Phoenix → GrpcHost (`client.ex`) | Fleet-internal service name/port, not a secret |
 | `MAILGUN_API_KEY` / mailer config | Phoenix (account notifications — `accounts/notifier.ex`) | secrets manager; **mailer adapter itself is still unconfigured** — `runtime.exs` only has a commented example. Needs a decision on which transactional-email provider before password-reset emails work in prod. |
 
 **Owner: vveliev** for provisioning the secrets-manager items and wiring them into the fleet's
@@ -160,8 +159,7 @@ cleanly, with no player-facing system left half-up.
 
 **Decision:**
 
-- **Mechanism:** stop the production compose stack (or fleet-equivalent) for both `web` and
-  `grpc-host`, and repoint DNS for whichever domain is live (§1) away from the host — back to
+- **Mechanism:** stop the production compose stack (or fleet-equivalent) for `web`, and repoint DNS for whichever domain is live (§1) away from the host — back to
   "nothing here" (a static holding page, or simply letting the domain go unresolved) rather than
   silently serving a half-configured app.
 - **Data:** since this is a brand-new database with no prior state to protect, a rollback does

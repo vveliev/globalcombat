@@ -1,77 +1,24 @@
 defmodule GlobalCombat.Games.LiveResolver do
   @moduledoc """
-  Production `GlobalCombat.Games.TurnScheduler.Resolver` — the bridge the scheduler's
-  own moduledoc says doesn't exist yet. `GlobalCombat.Games.TurnScheduler` has already claimed
-  `game`'s turn slot (advanced `prev_turn_time`/`last_turn_time`) by the time
-  `resolve_turn/1` runs; this module's only job is making the actual `GlobalCombat.Engine.Game`
-  turn happen and land back in `games.serialized`:
-
-    * If a `GlobalCombat.Games.Server` process is already running this game (the common case —
-      the node hasn't restarted since), hand off to it via `Server.run_scheduled_turn/2` so the
-      live process (and every LiveView subscribed to it) sees the same turn the scheduler forced,
-      instead of two independent copies of this game's state silently diverging.
-    * Otherwise (the node restarted between the last turn and this claim, or this game outlived
-      its process for any other reason), rehydrate the last snapshot straight from
-      `games.serialized` and run the turn without spinning up a whole `Server` just to persist
-      its result and throw it away — `GlobalCombat.Games.Supervisor` will pick this game back up
-      into a live process on its own next boot-time sweep regardless.
+  Production `GlobalCombat.Games.TurnScheduler.Resolver`. `GlobalCombat.Games.TurnScheduler` has
+  already claimed `game`'s turn slot (advanced `prev_turn_time`/`last_turn_time`) by the time
+  `resolve_turn/1` runs; this module hands the turn to the game's one
+  `GlobalCombat.Games.Server` process (starting it from `games.serialized` if it isn't alive), so
+  every turn — payouts, tourney bookkeeping, broadcasts — goes through the same code and a
+  restarted process can never overwrite a turn resolved somewhere else.
   """
 
   @behaviour GlobalCombat.Games.TurnScheduler.Resolver
 
-  alias GlobalCombat.Engine.DotnetRandom
-  alias GlobalCombat.Engine.Game, as: Engine
-  alias GlobalCombat.Engine.Wire
   alias GlobalCombat.Games, as: GamesDb
   alias GlobalCombat.Games.Server
-  alias GlobalCombat.Games.TurnLog
-  alias GlobalCombat.GrpcHost
+  alias GlobalCombat.Games.Supervisor, as: GamesSupervisor
 
   @impl true
   def resolve_turn(%GamesDb.Game{} = game) do
-    # Server.alive?/1 (a raw Registry check), not Games.Live.game_exists?/1 — the latter now
-    # also does on-demand rehydration, which here would defeat the point of
-    # resolve_offline/1 below: every scheduler tick would spin up (and never tear down) a
-    # Server for every currently-orphaned :active game instead of the deliberately cheap
-    # one-off "decode, run turn, persist, done" this module was written to do for that case.
-    if Server.alive?(game.id) do
-      Server.run_scheduled_turn(game.id, game.last_turn_time)
-    else
-      resolve_offline(game)
+    case GamesSupervisor.ensure_started(game.id) do
+      :ok -> Server.run_scheduled_turn(game.id, game.last_turn_time, game.prev_turn_time)
+      {:error, _} -> {:error, {:no_persisted_state, game.id}}
     end
-  end
-
-  defp resolve_offline(%{serialized: nil, id: id}) do
-    {:error, {:no_persisted_state, id}}
-  end
-
-  defp resolve_offline(%{serialized: serialized} = game) do
-    wire = GrpcHost.Game.decode(serialized)
-    rng = DotnetRandom.new(:erlang.unique_integer())
-    %{engine: old_engine} = Wire.from_wire_snapshot(wire, rng)
-
-    {resolved_engine, events} = Engine.resolve_turn(old_engine)
-    turn_log = TurnLog.snapshot(old_engine, resolved_engine, events)
-    # Same as `Server`'s own `run_turn`: the Computer seat plays the turn that just started.
-    engine = Server.run_ai_turns(resolved_engine)
-
-    resolved_wire =
-      Wire.to_wire_game(engine,
-        game_id: game.id,
-        turn_length_minutes: game.turn_length,
-        max_players: Map.fetch!(wire, :MaxPlayers),
-        is_fogged: Map.fetch!(wire, :IsFogged)
-      )
-
-    GamesDb.persist_turn(
-      game.id,
-      GrpcHost.Game.encode(resolved_wire),
-      TurnLog.encode(turn_log),
-      engine.turn
-    )
-
-    if engine.ended, do: GamesDb.finish_game(game.id)
-
-    :ok
   end
 end

@@ -36,6 +36,7 @@ defmodule GlobalCombat.Games.Server do
   alias GlobalCombat.Games.PlayerView
   alias GlobalCombat.Games.PubSub, as: GamePubSub
   alias GlobalCombat.Games.TurnLog
+  alias GlobalCombat.Messaging
   alias GlobalCombat.GrpcHost
   alias GlobalCombat.Tourneys
 
@@ -55,6 +56,7 @@ defmodule GlobalCombat.Games.Server do
     :turn_started_at,
     :is_private,
     :db_last_turn_time,
+    idle_turns: 0,
     status: :lobby,
     players: [],
     invites: [],
@@ -227,13 +229,15 @@ defmodule GlobalCombat.Games.Server do
   Runs the turn `GlobalCombat.Games.TurnScheduler` already claimed for this game —
   `claimed_last_turn_time` is the `last_turn_time` `GlobalCombat.Games.Scheduling.claim_turn/2`
   just wrote, so this process's own clock bookkeeping stays in sync with the DB without
-  re-advancing it a second time (see `GlobalCombat.Games.advance_turn/4`'s moduledoc). Returns
-  `{:error, :not_playing}` if this game isn't mid-play — the scheduler shouldn't have found it
+  re-advancing it a second time (see `GlobalCombat.Games.advance_turn/4`'s moduledoc).
+  `prev_turn_time` is the `last_turn_time` the claim replaced: if this process already ran a turn
+  since then (the last player clicked Done as the claim landed), the call is a stale duplicate and
+  returns `{:error, :stale_claim}`. Returns `{:error, :not_playing}` if this game isn't mid-play — the scheduler shouldn't have found it
   due otherwise, but a stale claim racing a since-ended game is a caller bug to report, not
   something to crash the scheduler sweep over.
   """
-  def run_scheduled_turn(game_id, claimed_last_turn_time) do
-    GenServer.call(via(game_id), {:run_scheduled_turn, claimed_last_turn_time})
+  def run_scheduled_turn(game_id, claimed_last_turn_time, prev_turn_time) do
+    GenServer.call(via(game_id), {:run_scheduled_turn, claimed_last_turn_time, prev_turn_time})
   end
 
   # --- server callbacks ---------------------------------------------------
@@ -301,13 +305,14 @@ defmodule GlobalCombat.Games.Server do
     |> Map.merge(%{
       game_id: Keyword.fetch!(opts, :game_id),
       turn_length_minutes: Keyword.fetch!(opts, :turn_length_minutes),
+      messages: Messaging.list_game_messages(Keyword.fetch!(opts, :game_id), @max_messages),
       status: :lobby
     })
     |> then(&struct!(__MODULE__, &1))
   end
 
   defp rehydrated_playing_state(opts, wire) do
-    rng = DotnetRandom.new(:erlang.unique_integer())
+    rng = DotnetRandom.new(:rand.uniform(2_147_483_646))
 
     %{engine: engine, is_fogged: is_fogged, max_players: max_players} =
       Wire.from_wire_snapshot(wire, rng)
@@ -326,6 +331,7 @@ defmodule GlobalCombat.Games.Server do
       db_last_turn_time: Keyword.fetch!(opts, :last_turn_time),
       status: :playing,
       engine: engine,
+      messages: Messaging.list_game_messages(Keyword.fetch!(opts, :game_id), @max_messages),
       players: rehydrated_players(engine),
       last_turn_log: TurnLog.decode(Keyword.get(opts, :last_turn_events))
     }
@@ -389,7 +395,7 @@ defmodule GlobalCombat.Games.Server do
       # same `join/3` right after `create_game/1`, mirroring `GameController.Create`'s
       # `model.Join(...)` in the .NET original, which calls `Game.Join` directly and never runs
       # the `IsPrivate` check that only lives in the controller's separate `Join` action.
-      state.players != [] and state.is_private and
+      state.players != [] and state.is_private and not Accounts.computer_account?(account_id) and
           not Enum.any?(state.invites, &(&1.account_id == account_id)) ->
         {:reply, {:error, :not_invited}, state}
 
@@ -508,15 +514,31 @@ defmodule GlobalCombat.Games.Server do
   end
 
   def handle_call(
-        {:run_scheduled_turn, claimed_last_turn_time},
+        {:run_scheduled_turn, claimed_last_turn_time, prev_turn_time},
         _from,
         %{status: :playing, engine: %Engine{ended: false}} = state
       ) do
-    state = run_turn(%{state | db_last_turn_time: claimed_last_turn_time}, advance_clock: false)
-    {:reply, :ok, state}
+    # Fresh (the claim hasn't been seen: still at `prev`) or just rehydrated from the claimed row
+    # (already at `claimed`); anything else means this process ran a turn since the claim.
+    claim_times = [prev_turn_time, claimed_last_turn_time]
+
+    if Enum.any?(claim_times, &same_time?(state.db_last_turn_time, &1)) do
+      state = %{state | db_last_turn_time: claimed_last_turn_time}
+      idle_turns = if human_acted?(state.engine), do: 0, else: state.idle_turns + 1
+      state = %{state | idle_turns: idle_turns}
+
+      state =
+        if idle_turns >= abandon_after_turns(state),
+          do: force_end(state),
+          else: run_turn(state, advance_clock: false)
+
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, :stale_claim}, state}
+    end
   end
 
-  def handle_call({:run_scheduled_turn, _claimed_last_turn_time}, _from, state) do
+  def handle_call({:run_scheduled_turn, _claimed, _prev}, _from, state) do
     {:reply, {:error, :not_playing}, state}
   end
 
@@ -634,6 +656,8 @@ defmodule GlobalCombat.Games.Server do
   # Port of `Game.SendForumMessage`: appends a line to the game's chat and pushes it to every
   # subscriber.
   defp post_message(state, source_id, source_name, text) do
+    text = String.slice(text, 0, 2000)
+
     message = %{
       source_id: source_id,
       source_name: source_name,
@@ -641,6 +665,8 @@ defmodule GlobalCombat.Games.Server do
       sent: DateTime.utc_now()
     }
 
+    # Legacy rule: game chat is a `message` row addressed to `-game_id` (never emailed/pushed).
+    Messaging.send_message(-state.game_id, source_id, source_name, text)
     GamePubSub.broadcast_add_message(state.game_id, message)
     %{state | messages: Enum.take([message | state.messages], @max_messages)}
   end
@@ -862,7 +888,7 @@ defmodule GlobalCombat.Games.Server do
 
     %Engine{
       map_name: state.map_name,
-      rng: DotnetRandom.new(:erlang.unique_integer()),
+      rng: DotnetRandom.new(:rand.uniform(2_147_483_646)),
       turn: 1,
       is_non_random: state.is_non_random,
       reverse_attack_order: state.reverse_attack_order,
@@ -974,7 +1000,7 @@ defmodule GlobalCombat.Games.Server do
     state =
       if advance_clock? do
         GamesDb.advance_turn(state.game_id, engine.turn, state.db_last_turn_time, now)
-        %{state | db_last_turn_time: now}
+        %{state | db_last_turn_time: now, idle_turns: 0}
       else
         state
       end
@@ -994,6 +1020,53 @@ defmodule GlobalCombat.Games.Server do
       )
     end
 
+    GamePubSub.broadcast_reload(state.game_id)
+    state
+  end
+
+  defp same_time?(_a, nil), do: false
+  defp same_time?(a, b), do: DateTime.compare(a, b) == :eq
+
+  # Abandoned-game rule (legacy `ForceEndCheck`, 14 days): shortcut: counted in memory from
+  # scheduler-run turns only, so a node restart resets it; upgrade to a persisted column if
+  # deploys within 14 days of an abandoned game matter.
+  defp abandon_after_turns(state) do
+    len = state.turn_length_minutes
+    div(14 * 24 * 60 + len - 1, len)
+  end
+
+  # A human seat is done or has queued orders (the Computer is always done, so it never counts).
+  defp human_acted?(engine) do
+    humans =
+      engine
+      |> Engine.players_in_order()
+      |> Enum.reject(&(Engine.eliminated?(&1) or computer_seat?(&1)))
+
+    Enum.any?(humans, fn p ->
+      p.done or
+        Enum.any?(Engine.areas_in_order(engine), fn a ->
+          a.owner_number == p.number and (a.assigned_armies > 0 or a.command != :none)
+        end)
+    end)
+  end
+
+  # Port of the legacy `ForceEnd`: eliminate everyone still alive, weakest (areas, armies) first,
+  # until the game ends; then the usual end-of-game bookkeeping.
+  defp force_end(state) do
+    old_engine = state.engine
+
+    engine =
+      old_engine
+      |> Engine.players_in_order()
+      |> Enum.reject(&Engine.eliminated?/1)
+      |> Enum.sort_by(&{&1.areas, &1.armies})
+      |> Enum.reduce_while(old_engine, fn p, e ->
+        if e.ended, do: {:halt, e}, else: {:cont, Engine.eliminate_player(e, p.number)}
+      end)
+
+    state = %{state | engine: engine}
+    persist_snapshot(state)
+    settle_results(state, old_engine)
     GamePubSub.broadcast_reload(state.game_id)
     state
   end
